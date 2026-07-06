@@ -1,0 +1,17 @@
+target/
+!.mvn/wrapper/maven-wrapper.jar
+*.class
+*.jar
+*.war
+*.log
+*.gz
+*.zip
+.idea/
+*.iml
+.settings/
+.project
+.classpath
+.vscode/
+node_modules/
+uploads/*
+!uploads/.gitkeep
