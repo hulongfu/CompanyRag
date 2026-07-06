@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>管理后台 - CompanyRag</title>
+    <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css">
+    <style>
+        body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f7fa; }
+        .app-header { height: 56px; background: #303133; color: white; display: flex; align-items: center; padding: 0 24px; justify-content: space-between; }
+        .container { max-width: 1200px; margin: 24px auto; padding: 0 16px; }
+        .card { background: white; border-radius: 12px; padding: 20px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+        .card h3 { font-size: 16px; margin-bottom: 16px; }
+        .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+        .stat-item { background: white; border-radius: 12px; padding: 20px; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+        .stat-item .num { font-size: 28px; font-weight: 700; color: #1a73e8; }
+        .stat-item .label { font-size: 13px; color: #909399; margin-top: 4px; }
+    </style>
+</head>
+<body>
+<div id="app">
+    <header class="app-header">
+        <h1>⚙️ CompanyRag 管理后台</h1>
+        <el-button size="small" plain @click="goHome" style="color:white;border-color:rgba(255,255,255,0.3);">← 返回首页</el-button>
+    </header>
+    <div class="container">
+        <div class="stats-grid">
+            <div class="stat-item"><div class="num">{{ stats.documents }}</div><div class="label">文档总数</div></div>
+            <div class="stat-item"><div class="num">{{ stats.chunks }}</div><div class="label">切分块数</div></div>
+            <div class="stat-item"><div class="num">{{ stats.queries }}</div><div class="label">查询次数</div></div>
+            <div class="stat-item"><div class="num">{{ stats.tenants }}</div><div class="label">租户数</div></div>
+        </div>
+        <div class="card">
+            <h3>🔧 系统配置</h3>
+            <el-form label-width="120px">
+                <el-form-item label="向量维度"><el-input v-model="config.vectorDim" disabled size="small" /></el-form-item>
+                <el-form-item label="默认切分策略"><el-select v-model="config.splitStrategy" size="small"><el-option label="语义切分" value="SEMANTIC_CHUNK" /><el-option label="滑动窗口" value="SLIDING_WINDOW" /><el-option label="固定大小" value="FIXED_SIZE" /></el-select></el-form-item>
+                <el-form-item label="Top-K"><el-input-number v-model="config.topK" :min="1" :max="50" size="small" /></el-form-item>
+                <el-form-item label="Rerank Top-K"><el-input-number v-model="config.rerankTopK" :min="1" :max="20" size="small" /></el-form-item>
+                <el-form-item><el-button type="primary" size="small" @click="saveConfig">保存配置</el-button></el-form-item>
+            </el-form>
+        </div>
+    </div>
+</div>
+<script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+<script src="https://unpkg.com/element-plus/dist/index.full.min.js"></script>
+<script>
+const { createApp, ref } = Vue;
+createApp({
+    setup() {
+        const stats = ref({ documents: 12, chunks: 256, queries: 1080, tenants: 3 });
+        const config = ref({ vectorDim: 1024, splitStrategy: 'SEMANTIC_CHUNK', topK: 10, rerankTopK: 5 });
+        function saveConfig() { ElementPlus.ElMessage.success('配置已保存'); }
+        function goHome() { window.location.href = '/'; }
+        return { stats, config, saveConfig, goHome };
+    }
+}).use(ElementPlus).mount('#app');
+</script>
+</body>
+</html>

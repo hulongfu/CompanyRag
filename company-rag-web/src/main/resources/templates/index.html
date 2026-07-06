@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CompanyRag - 企业知识库</title>
+    <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; height: 100vh; background: #f5f7fa; }
+        #app { height: 100vh; display: flex; flex-direction: column; }
+        .app-header { height: 56px; background: linear-gradient(135deg, #1a73e8, #0d47a1); color: white; display: flex; align-items: center; padding: 0 24px; justify-content: space-between; flex-shrink: 0; box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
+        .app-header h1 { font-size: 20px; font-weight: 600; display: flex; align-items: center; gap: 10px; }
+        .app-header .header-actions { display: flex; align-items: center; gap: 12px; }
+        .app-main { display: flex; flex: 1; overflow: hidden; }
+        .sidebar { width: 280px; background: white; border-right: 1px solid #e4e7ed; display: flex; flex-direction: column; flex-shrink: 0; }
+        .sidebar-header { padding: 16px; border-bottom: 1px solid #e4e7ed; display: flex; justify-content: space-between; align-items: center; }
+        .sidebar-header h3 { font-size: 15px; color: #303133; }
+        .doc-list { flex: 1; overflow-y: auto; padding: 8px; }
+        .doc-item { padding: 10px 12px; border-radius: 8px; cursor: pointer; transition: all 0.2s; margin-bottom: 4px; display: flex; align-items: center; gap: 8px; }
+        .doc-item:hover { background: #f0f5ff; }
+        .doc-item.active { background: #e6f0ff; border-left: 3px solid #1a73e8; }
+        .doc-item .doc-icon { font-size: 20px; }
+        .doc-item .doc-info { flex: 1; min-width: 0; }
+        .doc-item .doc-name { font-size: 13px; color: #303133; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .doc-item .doc-meta { font-size: 11px; color: #909399; }
+        .chat-area { flex: 1; display: flex; flex-direction: column; background: #f5f7fa; }
+        .chat-messages { flex: 1; overflow-y: auto; padding: 20px 24px; }
+        .message { display: flex; margin-bottom: 20px; gap: 12px; }
+        .message.user { flex-direction: row-reverse; }
+        .message .avatar { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; }
+        .message.user .avatar { background: #1a73e8; color: white; }
+        .message.assistant .avatar { background: #52c41a; color: white; }
+        .message .bubble { max-width: 70%; padding: 12px 16px; border-radius: 12px; font-size: 14px; line-height: 1.6; word-break: break-word; }
+        .message.user .bubble { background: #1a73e8; color: white; border-bottom-right-radius: 4px; }
+        .message.assistant .bubble { background: white; color: #303133; border-bottom-left-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+        .message .bubble .sources { margin-top: 8px; padding-top: 8px; border-top: 1px solid #e4e7ed; font-size: 12px; color: #909399; }
+        .message .bubble .sources span { display: inline-block; margin-right: 8px; color: #1a73e8; cursor: pointer; }
+        .chat-input-area { padding: 16px 24px; background: white; border-top: 1px solid #e4e7ed; }
+        .chat-input-row { display: flex; gap: 12px; align-items: center; }
+        .chat-input-row .el-input { flex: 1; }
+        .welcome-tip { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: #909399; }
+        .welcome-tip .icon { font-size: 64px; margin-bottom: 16px; }
+        .welcome-tip h2 { font-size: 20px; color: #303133; margin-bottom: 8px; }
+        .welcome-tip p { font-size: 14px; }
+        .upload-dialog { padding: 20px; }
+        .strategy-select { margin: 16px 0; }
+        .metrics-panel { position: fixed; bottom: 80px; right: 24px; background: white; border-radius: 8px; padding: 12px 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); font-size: 12px; color: #606266; display: none; z-index: 100; }
+        .metrics-panel.show { display: block; }
+        .typing-indicator { display: flex; gap: 4px; padding: 4px 0; }
+        .typing-indicator span { width: 6px; height: 6px; background: #909399; border-radius: 50%; animation: typing 1.4s infinite; }
+        .typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
+        .typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes typing { 0%, 60%, 100% { opacity: 0.3; transform: scale(0.8); } 30% { opacity: 1; transform: scale(1); } }
+        .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: #c0c4cc; }
+        .empty-state .el-icon { font-size: 48px; margin-bottom: 12px; }
+    </style>
+</head>
+<body>
+<div id="app">
+    <header class="app-header">
+        <h1>
+            <span style="font-size:24px;">📚</span>
+            CompanyRag 企业知识库
+        </h1>
+        <div class="header-actions">
+            <el-tag size="small" type="success" v-if="tenantId">租户: {{ tenantId }}</el-tag>
+            <el-button size="small" plain round @click="showUpload = true" style="color:white;border-color:rgba(255,255,255,0.5);">上传文档</el-button>
+            <el-button size="small" plain round @click="showMetrics = !showMetrics" style="color:white;border-color:rgba(255,255,255,0.5);">指标</el-button>
+        </div>
+    </header>
+    <div class="app-main">
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <h3>📄 知识库文档</h3>
+                <el-button size="small" circle @click="loadDocuments">🔄</el-button>
+            </div>
+            <div class="doc-list">
+                <div v-if="documents.length === 0" class="empty-state" style="height:200px;">
+                    <p style="font-size:13px;">暂无文档，请上传</p>
+                </div>
+                <div v-for="doc in documents" :key="doc.id" class="doc-item"
+                     :class="{ active: selectedDocId === doc.id }"
+                     @click="selectedDocId = doc.id">
+                    <span class="doc-icon">📄</span>
+                    <div class="doc-info">
+                        <div class="doc-name">{{ doc.fileName }}</div>
+                        <div class="doc-meta">{{ formatSize(doc.fileSize) }} · {{ doc.chunkCount || 0 }} 块</div>
+                    </div>
+                    <el-tag size="small" :type="doc.status === 2 ? 'success' : 'warning'" style="height:20px;line-height:18px;font-size:10px;">
+                        {{ doc.status === 2 ? '已完成' : '处理中' }}
+                    </el-tag>
+                </div>
+            </div>
+        </aside>
+        <main class="chat-area">
+            <div class="chat-messages" ref="chatContainer">
+                <div v-if="messages.length === 0" class="welcome-tip">
+                    <div class="icon">🤖</div>
+                    <h2>欢迎使用企业知识库</h2>
+                    <p>上传文档后，我可以帮你检索和回答问题</p>
+                </div>
+                <div v-for="(msg, idx) in messages" :key="idx" :class="['message', msg.role]">
+                    <div class="avatar">{{ msg.role === 'user' ? '👤' : '🤖' }}</div>
+                    <div class="bubble">
+                        <div v-html="renderMarkdown(msg.content)"></div>
+                        <div v-if="msg.sources && msg.sources.length" class="sources">
+                            📎 来源: <span v-for="s in msg.sources">{{ s }}</span>
+                        </div>
+                    </div>
+                </div>
+                <div v-if="isLoading" class="message assistant">
+                    <div class="avatar">🤖</div>
+                    <div class="bubble">
+                        <div class="typing-indicator"><span></span><span></span><span></span></div>
+                    </div>
+                </div>
+            </div>
+            <div class="chat-input-area">
+                <div class="chat-input-ro
+    <!-- 上传对话框 -->
+    <el-dialog v-model="showUpload" title="上传文档" width="420px">
+        <el-upload drag :action="uploadUrl" :headers="uploadHeaders" :on-success="onUploadSuccess"
+                   :before-upload="beforeUpload" multiple>
+            <el-icon style="font-size:48px;margin-bottom:12px;">📁</el-icon>
+            <div style="font-size:14px;color:#606266;">拖拽文件到此处，或<em style="color:#1a73e8;">点击上传</em></div>
+            <template #tip>
+                <div style="font-size:12px;color:#909399;margin-top:8px;">支持 PDF / DOCX / TXT / MD，单文件最大 50MB</div>
+            </template>
+        </el-upload>
+        <div class="strategy-select">
+            <label style="font-size:13px;color:#606266;margin-right:12px;">切分策略:</label>
+            <el-select v-model="splitStrategy" size="small">
+                <el-option label="语义切分(推荐)" value="SEMANTIC_CHUNK" />
+                <el-option label="滑动窗口" value="SLIDING_WINDOW" />
+                <el-option label="固定大小" value="FIXED_SIZE" />
+            </el-select>
+        </div>
+    </el-dialog>
+
+    <!-- 指标面板 -->
+    <div :class="['metrics-panel', { show: showMetrics }]">
+        <div style="font-weight:600;margin-bottom:8px;font-size:13px;">📊 实时指标</div>
+        <div>请求数: {{ metrics.totalRequests }}</div>
+        <div>缓存命中: {{ metrics.cacheHits }}</div>
+        <div>平均延迟: {{ metrics.avgLatency }}ms</div>
+        <div>Token消耗: {{ metrics.totalTokens }}</div>
+    </div>
+</div>
+
+<script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+<script src="https://unpkg.com/element-plus/dist/index.full.min.js"></script>
+<script src="https://unpkg.com/@element-plus/icons-vue"></script>
+<script>
+const { createApp, ref, nextTick, onMounted } = Vue;
+
+createApp({
+    setup() {
+        const messages = ref([]);
+        const userInput = ref('');
+        const isLoading = ref(false);
+        const documents = ref([]);
+        const selectedDocId = ref(null);
+        const showUpload = ref(false);
+        const showMetrics = ref(false);
+        const splitStrategy = ref('SEMANTIC_CHUNK');
+        const tenantId = ref('1');
+        const chatContainer = ref(null);
+        const metrics = ref({ totalRequests: 0, cacheHits: 0, avgLatency: 0, totalTokens: 0 });
+
+        const uploadUrl = '/api/document/upload';
+        const uploadHeaders = { 'X-Tenant-Id': '1' };
+
+        function formatSize(bytes) {
+            if (!bytes) return '0B';
+            const units = ['B', 'KB', 'MB', 'GB'];
+            let i = 0;
+            let size = bytes;
+            while (size >= 1024 && i < units.length - 1) { size /= 1024; i++; }
+            return size.toFixed(1) + units[i];
+        }
+
+        function renderMarkdown(text) {
+            if (!text) return '';
+            return text.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre style="background:#f5f5f5;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>$2</code></pre>')
+                       .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                       .replace(/\n/g, '<br>');
+        }
+
+        async function loadDocuments() {
+            try {
+                const res = await fetch('/api/document/list?tenantId=' + tenantId.value);
+                const json = await res.json();
+                if (json.code === 200) documents.value = json.data || [];
+            } catch(e) { console.error('加载文档失败', e); }
+        }
+
+        async function sendMessage() {
+            const text = userInput.value.trim();
+            if (!text || isLoading.value) return;
+
+            messages.value.push({ role: 'user', content: text });
+            userInput.value = '';
+            isLoading.value = true;
+            scrollToBottom();
+
+            try {
+                const res = await fetch('/api/rag/search', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Tenant-Id': tenantId.value },
+                    body: JSON.stringify({
+                        query: text,
+                        tenantId: parseInt(tenantId.value),
+                        topK: 10,
+                        rerankTopK: 5,
+                        enableRerank: true
+                    })
+                });
+                const json = await res.json();
+                if (json.code === 200 && json.data) {
+                    const data = json.data;
+                    messages.value.push({
+                        role: 'assistant',
+                        content: data.answer || '抱歉，没有找到相关答案。',
+                        sources: data.sessions || []
+                    });
+                    if (data.metrics) {
+                        metrics.value.totalRequests++;
+                        metrics.value.avgLatency = data.metrics.totalMs || 0;
+                    }
+                } else {
+                    messages.value.push({ role: 'assistant', content: '查询失败: ' + (json.msg || '未知错误') });
+                }
+            } catch(e) {
+                messages.value.push({ role: 'assistant', content: '网络错误，请检查后端服务是否启动' });
+            }
+            isLoading.value = false;
+            scrollToBottom();
+        }
+
+        function scrollToBottom() {
+            nextTick(() => {
+                if (chatContainer.value) {
+                    chatContainer.value.scrollTop = chatContainer.value.scrollHeight;
+                }
+            });
+        }
+
+        function beforeUpload(file) {
+            const ext = file.name.split('.').pop().toLowerCase();
+            const allowed = ['pdf', 'docx', 'txt', 'md', 'html'];
+            if (!allowed.includes(ext)) {
+                ElementPlus.ElMessage.error('不支持的文件格式: ' + ext);
+                return false;
+            }
+            if (file.size > 50 * 1024 * 1024) {
+                ElementPlus.ElMessage.error('文件大小不能超过50MB');
+                return false;
+            }
+            return true;
+        }
+
+        function onUploadSuccess(res) {
+            if (res.code === 200) {
+                ElementPlus.ElMessage.success('上传成功');
+                showUpload.value = false;
+                loadDocuments();
+            } else {
+                ElementPlus.ElMessage.error('上传失败: ' + (res.msg || ''));
+            }
+        }
+
+        onMounted(() => {
+            loadDocuments();
+        });
+
+        return {
+            messages, userInput, isLoading, documents, selectedDocId,
+            showUpload, showMetrics, splitStrategy, tenantId, chatContainer,
+            metrics, uploadUrl, uploadHeaders, formatSize, renderMarkdown,
+            sendMessage, loadDocuments, beforeUpload, onUploadSuccess
+        };
+    }
+}).use(ElementPlus).mount('#app');
+</script>
+</body>
+</html>

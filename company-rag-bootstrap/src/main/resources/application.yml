@@ -1,0 +1,79 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: company-rag
+  datasource:
+    url: jdbc:postgresql://localhost:5433/company_rag?currentSchema=public
+    username: postgres
+    password: difyai123456
+    driver-class-name: org.postgresql.Driver
+  ai:
+    dashscope:
+      api-key: ${DASHSCOPE_API_KEY:sk-3f5422ce94a14f888c3e35496597d019}
+      chat:
+        options:
+          model: qwen-max
+          temperature: 0.7
+      embedding:
+        options:
+          model: qwen3-vl-embedding
+  vectorstore:
+    pgvector:
+      index-type: HNSW
+      distance-type: COSINE_DISTANCE
+      dimension: 1024
+      remove-existing-vector-store-table: false
+  thymeleaf:
+    prefix: classpath:/templates/
+    suffix: .html
+    cache: false
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 100MB
+
+# MyBatis-Plus
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+  global-config:
+    db-config:
+      id-type: auto
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+# Resilience4j
+resilience4j:
+  circuitbreaker:
+    configs:
+      default:
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+  ratelimiter:
+    configs:
+      default:
+        limit-for-period: 10
+        limit-refresh-period: 1s
+        timeout-duration: 500ms
+
+# Actuator / Prometheus
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
+# 日志
+logging:
+  level:
+    com.company.rag: DEBUG
+    org.springframework.ai: INFO
