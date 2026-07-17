@@ -16,7 +16,7 @@ public class RagResult {
 
     @Data
     public static class ChunkResult {
-        private Long chunkId;
+        private String chunkId;
         private Long documentId;
         private String documentName;
         private String content;

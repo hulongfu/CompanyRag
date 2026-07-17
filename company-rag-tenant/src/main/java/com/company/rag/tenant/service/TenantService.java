@@ -20,4 +20,14 @@ public interface TenantService {
     void createTenantSchema(Tenant tenant);
 
     List<User> getUsersByTenant(Long tenantId);
+
+    /**
+     * 创建租户并初始化 Schema 和默认管理员用户
+     */
+    Tenant createTenantWithSchema(Tenant tenant);
+
+    /**
+     * 获取所有租户列表
+     */
+    java.util.List<Tenant> getAllTenants();
 }
