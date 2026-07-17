@@ -9,7 +9,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.prompt.Prompt;
-import org.springframework.ai.dashscope.DashscopeChatModel;
+import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -32,7 +32,7 @@ import java.util.Map;
 public class RagAgentService {
 
     private final AgentToolRegistry toolRegistry;
-    private final DashscopeChatModel chatModel;
+    private final OpenAiChatModel chatModel;
 
     private static final String AGENT_SYSTEM_PROMPT = """
             你是一个智能企业助手，拥有以下工具可以使用：
@@ -63,7 +63,7 @@ public class RagAgentService {
                         new SystemMessage(systemPrompt),
                         new UserMessage(userMessage)
                 ))
-        ).getResult().getOutput().getContent();
+        ).getResult().getOutput().getText();
 
         // 检查是否需要调用工具
         if (initialResponse.contains("[USE_TOOL:")) {
@@ -89,7 +89,7 @@ public class RagAgentService {
                                 new SystemMessage(systemPrompt),
                                 new UserMessage(enhancedQuery)
                         ))
-                ).getResult().getOutput().getContent();
+                ).getResult().getOutput().getText();
 
             } catch (Exception e) {
                 log.error("Agent工具执行失败: {}", e.getMessage());

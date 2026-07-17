@@ -1,13 +1,27 @@
 spring:
   datasource:
-    url: jdbc:postgresql://localhost:5432/company_rag?currentSchema=public
+    url: jdbc:postgresql://localhost:5433/company_rag
   ai:
-    dashscope:
-      api-key: ${DASHSCOPE_API_KEY:sk-your-dev-key}
+    # 统一使用 OpenAI 兼容接口，chat 用通义千问，embedding 用硅基流动
+    openai:
+      # Chat 模型配置（通义千问 - OpenAI 兼容模式）
+      api-key: ${DASHSCOPE_API_KEY:sk-e1837008725e4748aebf485575230cc6}
+      base-url: https://dashscope.aliyuncs.com/compatible-mode
+      chat:
+        options:
+          model: deepseek-v4-flash
+          temperature: 0.7
+      # Embedding 模型配置（硅基流动 - OpenAI 兼容模式，覆盖上方的 api-key 和 base-url）
+      embedding:
+        api-key: ${SILICONFLOW_API_KEY:sk-wyfqhqjvmstfaimtdswsidetftoqhlspzfsyznoysnevcigp}
+        base-url: https://api.siliconflow.cn
+        options:
+          model: BAAI/bge-large-zh-v1.5
   data:
     redis:
-      host: localhost
-      port: 6379
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:difyai123456}
 
 logging:
   level:

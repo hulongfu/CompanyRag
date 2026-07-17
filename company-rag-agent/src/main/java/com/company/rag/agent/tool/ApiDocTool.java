@@ -1,6 +1,7 @@
 package com.company.rag.agent.tool;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
 
@@ -10,8 +11,8 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
- * MCP工具 - API文档生成
- * 动态扫描Spring MVC端点并生成API文档
+ * MCP 工具 - API 文档生成
+ * 动态扫描 Spring MVC 端点并生成 API 文档
  */
 @Slf4j
 @Component
@@ -19,8 +20,10 @@ public class ApiDocTool implements AgentTool {
 
     private final RequestMappingHandlerMapping handlerMapping;
 
-    public ApiDocTool(RequestMappingHandlerMapping handlerMapping) {
-        this.handlerMapping = handlerMapping;
+    @Autowired
+    public ApiDocTool(RequestMappingHandlerMapping requestMappingHandlerMapping) {
+        // 明确使用 requestMappingHandlerMapping，避免与 controllerEndpointHandlerMapping 混淆
+        this.handlerMapping = requestMappingHandlerMapping;
     }
 
     @Override

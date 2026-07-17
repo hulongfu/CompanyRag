@@ -13,7 +13,7 @@ import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.dashscope.DashscopeChatModel;
+import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.ai.vectorstore.SearchRequest;
@@ -29,8 +29,7 @@ import java.util.stream.Collectors;
 public class RagSearchServiceImpl implements RagSearchService {
 
     private final VectorStore vectorStore;
-    private final EmbeddingModel embeddingModel;
-    private final DashscopeChatModel chatModel;
+    private final OpenAiChatModel chatModel;
     private final CrossEncoderReranker reranker;
     private final RagCacheManager cacheManager;
     private final RagMetricsRecorder metricsRecorder;
@@ -121,23 +120,50 @@ public class RagSearchServiceImpl implements RagSearchService {
     }
 
     @Override
+    @CircuitBreaker(name = "rag", fallbackMethod = "streamFallback")
+    @RateLimiter(name = "rag-rate-limiter", fallbackMethod = "streamFallback")
     public Flux<String> streamAnswer(RagQuery query) {
-        try {
-            // 先检索（受熔断限流保护）
-            List<RagResult.ChunkResult> chunks = retrieve(query);
-            if (query.getEnableRerank() && !chunks.isEmpty()) {
-                chunks = reranker.rerank(query.getQuery(), chunks, query.getRerankTopK());
-            }
-            String context = chunks.stream()
-                    .map(c -> "[来源:" + c.getDocumentName() + "] " + c.getContent())
-                    .collect(Collectors.joining("\n\n"));
-            String prompt = promptTemplate.buildChatPrompt(query.getQuery(), context);
-            // 流式调用
-            return chatModel.stream(prompt);
-        } catch (Exception e) {
-            log.warn("流式回答检索阶段失败: {}", e.getMessage());
-            return Flux.just("服务暂时繁忙，请稍后重试。");
+        long start = System.currentTimeMillis();
+        // 先检索（受熔断限流保护）
+        List<RagResult.ChunkResult> chunks = retrieve(query);
+        if (query.getEnableRerank() && !chunks.isEmpty()) {
+            chunks = reranker.rerank(query.getQuery(), chunks, query.getRerankTopK());
         }
+        String context = chunks.stream()
+                .map(c -> "[来源:" + c.getDocumentName() + "] " + c.getContent())
+                .collect(Collectors.joining("\n\n"));
+        String prompt = promptTemplate.buildChatPrompt(query.getQuery(), context);
+
+        // 流式调用LLM（受熔断限流保护）
+        long llmStart = System.currentTimeMillis();
+        Flux<String> llmStream = chatModel.stream(prompt)
+                .doOnComplete(() -> {
+                    long llmMs = System.currentTimeMillis() - llmStart;
+                    log.debug("流式回答LLM调用完成 | 耗时={}ms", llmMs);
+                    // 记录指标
+                    RagResult.Metrics metrics = new RagResult.Metrics();
+                    metrics.setTotalMs(System.currentTimeMillis() - start);
+                    metrics.setLlmMs(llmMs);
+                    RagResult result = new RagResult();
+                    result.setMetrics(metrics);
+                    metricsRecorder.record(result);
+                })
+                .doOnError(e -> log.warn("流式回答LLM调用异常: {}", e.getMessage()));
+
+        // 使用timeout包装，防止LLM调用hang住（30秒超时）
+        return llmStream.timeout(java.time.Duration.ofSeconds(30))
+                .onErrorResume(e -> {
+                    log.warn("流式回答LLM调用超时或异常: {}", e.getMessage());
+                    return Flux.just("服务暂时繁忙，请稍后重试。");
+                });
+    }
+
+    /**
+     * 流式回答降级方法
+     */
+    public Flux<String> streamFallback(RagQuery query, Throwable t) {
+        log.warn("流式回答降级 | 原因: {}", t.getMessage());
+        return Flux.just("服务暂时繁忙，请稍后重试。");
     }
 
     @Override
@@ -156,20 +182,22 @@ public class RagSearchServiceImpl implements RagSearchService {
      */
     private List<RagResult.ChunkResult> hybridRetrieve(RagQuery query) {
         // 向量检索
-        SearchRequest request = SearchRequest.query(query.getQuery())
-                .withTopK(query.getTopK())
-                .withSimilarityThreshold(0.5);
+        SearchRequest request = SearchRequest.builder()
+                .query(query.getQuery())
+                .topK(query.getTopK())
+                .similarityThreshold(0.5)
+                .build();
         var vectorResults = vectorStore.similaritySearch(request);
 
-        // 将向量结果转换为ChunkResult
-        // 注意：实际项目中需从VectorStore返回的Document中提取metadata
+        // 将向量结果转换为 ChunkResult
+        // 注意：实际项目中需从 VectorStore 返回的 Document 中提取 metadata
         List<RagResult.ChunkResult> allChunks = new ArrayList<>();
         for (var doc : vectorResults) {
             RagResult.ChunkResult cr = new RagResult.ChunkResult();
-            cr.setChunkId(doc.getId() != null ? Long.parseLong(doc.getId()) : 0L);
-            cr.setContent(doc.getContent());
+            cr.setChunkId(doc.getId() != null ? doc.getId() : "");
+            cr.setContent(doc.getText());
             cr.setVectorScore(doc.getMetadata() != null ?
-                    (Double) doc.getMetadata().getOrDefault("distance", 0.0) : 0.0);
+                    ((Number) doc.getMetadata().getOrDefault("distance", 0.0)).doubleValue() : 0.0);
             cr.setDocumentName(doc.getMetadata() != null ?
                     (String) doc.getMetadata().getOrDefault("documentName", "未知") : "未知");
             cr.setFinalScore(cr.getVectorScore());

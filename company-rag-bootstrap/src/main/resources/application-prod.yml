@@ -1,9 +1,23 @@
 spring:
   datasource:
-    url: jdbc:postgresql://postgres:5432/company_rag?currentSchema=public
+    # url含 ?currentSchema=public，激活这些profile会覆盖动态Schema切换，建议后续清理
+    url: jdbc:postgresql://postgres:5433/company_rag?currentSchema=public
   ai:
-    dashscope:
-      api-key: ${DASHSCOPE_API_KEY}
+    # 统一使用 OpenAI 兼容接口，chat 用通义千问，embedding 用硅基流动
+    openai:
+      # Chat 模型配置（通义千问 - OpenAI 兼容模式）
+      api-key: ${DASHSCOPE_API_KEY:you_dashscope_api_key}
+      base-url: https://dashscope.aliyuncs.com/compatible-mode
+      chat:
+        options:
+          model: qwen-max
+          temperature: 0.7
+      # Embedding 模型配置（硅基流动 - OpenAI 兼容模式，覆盖上方的 api-key 和 base-url）
+      embedding:
+        api-key: ${SILICONFLOW_API_KEY:you_siliconflow_api_key}
+        base-url: https://api.siliconflow.cn
+        options:
+          model: BAAI/bge-large-zh-v1.5
   data:
     redis:
       host: redis

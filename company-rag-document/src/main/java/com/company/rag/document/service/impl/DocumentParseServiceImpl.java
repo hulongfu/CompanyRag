@@ -21,17 +21,18 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * 文档处理服务完整实现
  * 
  * 完整流程：
  * 1. 文档上传 → 保存文档元数据到数据库
- * 2. 文本提取 → Apache Tika解析
+ * 2. 文本提取 → Apache Tika 解析
  * 3. 智能切分 → 语义切分策略
- * 4. 向量化 → Embedding模型
+ * 4. 向量化 → Embedding 模型
  * 5. 向量存储 → PGVector
- * 6. 切分块元数据保存 → doc_chunk表
+ * 6. 切分块元数据保存 → doc_chunk 表
  */
 @Slf4j
 @Service
@@ -59,34 +60,34 @@ public class DocumentParseServiceImpl implements DocumentParseService {
         }
 
         try {
-            // 0. 先保存文档记录，获取自增ID
+            log.info("0. 先保存文档记录，获取自增 ID");
             documentMapper.insert(doc);
-            
-            // 1. 提取文本
+
+            log.info("1. 提取文本");
             byte[] content = file.getBytes();
             String text = extractText(content, originalName);
 
-            // 2. 智能切分
+            log.info("2. 智能切分");
             List<DocumentChunk> chunks = splitDocument(text, doc, SplitStrategy.SEMANTIC_CHUNK);
             doc.setChunkCount(chunks.size());
             doc.setStatus(1); // 已切分
 
-            // 3. 保存切分块到数据库
+            log.info("3. 保存切分块到数据库");
             for (DocumentChunk chunk : chunks) {
                 chunkMapper.insert(chunk);
             }
 
-            // 4. 向量化并存储到PGVector
+            log.info("4. 向量化并存储到 PGVector");
             vectorizeAndStore(chunks, doc.getId(), doc.getFileName(), tenantId);
             doc.setStatus(2); // 已向量化
 
-            // 5. 更新文档状态
+            log.info("5. 更新文档状态");
             documentMapper.updateById(doc);
 
             log.info("文档处理完成 | documentId={} | chunks={}", doc.getId(), chunks.size());
 
         } catch (Exception e) {
-            log.error("文档处理失败: {}", e.getMessage(), e);
+            log.error("文档处理失败：{}", e.getMessage(), e);
             doc.setStatus(-1); // 失败
             doc.setErrorMsg(e.getMessage());
             // 尝试更新失败状态
@@ -99,12 +100,21 @@ public class DocumentParseServiceImpl implements DocumentParseService {
     @Override
     public String extractText(byte[] fileContent, String fileName) {
         try {
-            // Tika自动检测文件类型并提取文本
+            // Tika 自动检测文件类型并提取文本
             return tika.parseToString(new java.io.ByteArrayInputStream(fileContent));
         } catch (TikaException | IOException e) {
-            log.error("文档解析失败: {}", fileName, e);
-            throw new RuntimeException("文档解析失败: " + e.getMessage());
+            log.error("文档解析失败：{}", fileName, e);
+            throw new RuntimeException("文档解析失败：" + e.getMessage());
         }
+    }
+
+    @Override
+    public List<Document> listDocuments(Long tenantId) {
+        return documentMapper.selectList(
+            new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<Document>()
+                .eq("tenant_id", tenantId)
+                .orderByDesc("create_time")
+        );
     }
 
     /**
@@ -118,7 +128,7 @@ public class DocumentParseServiceImpl implements DocumentParseService {
                 .orElse(splitters.get(0)); // 默认使用第一个策略
 
         // 执行切分
-        int chunkSize = 512; // 默认chunk大小
+        int chunkSize = 512; // 默认 chunk 大小
         int overlap = 64; // 默认重叠大小
         List<DocumentChunk> chunks = splitter.split(text, chunkSize, overlap);
 
@@ -132,7 +142,11 @@ public class DocumentParseServiceImpl implements DocumentParseService {
     }
 
     /**
-     * 向量化并存储到PGVector
+     * 向量化并存储到 PGVector
+     * 
+     * 注意：Spring AI 的 PgVectorStore 要求 Document ID 必须是 UUID 格式
+     * chunk.getId() 是数据库自增 ID，仅用于数据库内部关联查询
+     * 向量化时使用 UUID.randomUUID() 生成独立的向量存储 ID
      */
     private void vectorizeAndStore(List<DocumentChunk> chunks, Long documentId, String documentName, Long tenantId) {
         List<org.springframework.ai.document.Document> aiDocuments = new ArrayList<>();
@@ -146,9 +160,11 @@ public class DocumentParseServiceImpl implements DocumentParseService {
             metadata.put("chunkIndex", chunk.getChunkIndex());
             metadata.put("chunkId", chunk.getId());
 
-            // 创建Spring AI Document
+            // 创建 Spring AI Document
+            // 注意：必须使用 UUID 格式，因为 Spring AI 的 PgVectorStore 要求 ID 符合 UUID 规范
+            // chunk.getId() 是数据库自增 ID，仅用于数据库内部关联，不直接用于向量存储 ID
             org.springframework.ai.document.Document aiDoc = new org.springframework.ai.document.Document(
-                chunk.getId().toString(),
+                UUID.randomUUID().toString(),  // 生成 UUID 作为向量存储 ID
                 chunk.getContent(),
                 metadata
             );

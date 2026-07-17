@@ -15,17 +15,20 @@ public class SlidingWindowSplitter extends FixedSizeSplitter {
 
     @Override
     public List<DocumentChunk> split(String text, int chunkSize, int chunkOverlap) {
-        List<DocumentChunk> chunks = new ArrayList<>();
-        int step = chunkSize - chunkOverlap;
-        if (step <= 0) step = chunkSize / 2; // 防止死循环
+        // 应用安全限制
+        int effectiveChunkSize = Math.min(chunkSize, MAX_SAFE_CHARS);
+        
+        int step = effectiveChunkSize - chunkOverlap;
+        if (step <= 0) step = effectiveChunkSize / 2; // 防止死循环
 
+        List<DocumentChunk> chunks = new ArrayList<>();
         int start = 0;
         int index = 0;
         while (start < text.length()) {
-            int end = Math.min(start + chunkSize, text.length());
-            // 如果不是最后一块，尝试在边界处断句
+            int end = Math.min(start + effectiveChunkSize, text.length());
+            // 如果不是最后一块，尝试在句子边界处断开（向前查找，确保不超过限制）
             if (end < text.length()) {
-                end = findSentenceBoundary(text, end);
+                end = findSafeSentenceBoundary(text, start, end);
             }
             DocumentChunk chunk = new DocumentChunk();
             chunk.setChunkIndex(index++);
@@ -50,15 +53,20 @@ public class SlidingWindowSplitter extends FixedSizeSplitter {
     }
 
     /**
-     * 在句子边界处断开（句号、问号、感叹号、换行等）
+     * 在安全范围内查找句子边界（向前查找，确保不超过 endPos）
      */
-    private int findSentenceBoundary(String text, int fromPos) {
-        String candidates = ".。!！?？\n\r";
-        for (int i = fromPos; i < Math.min(fromPos + 50, text.length()); i++) {
-            if (candidates.indexOf(text.charAt(i)) >= 0) {
-                return i + 1;
+    private int findSafeSentenceBoundary(String text, int startPos, int endPos) {
+        String candidates = ".!?\n\r";
+        // 从 endPos 向前查找，最多查找 50 个字符
+        int searchStart = Math.max(startPos, endPos - 50);
+        
+        for (int i = endPos; i > searchStart; i--) {
+            if (candidates.indexOf(text.charAt(i - 1)) >= 0) {
+                return i; // 找到句子边界
             }
         }
-        return fromPos;
+        
+        // 找不到句子边界，强制在 endPos 处断开
+        return endPos;
     }
 }

@@ -4,21 +4,24 @@ server:
 spring:
   application:
     name: company-rag
+  mvc:
+    static-path-pattern: /static/**
+  web:
+    resources:
+      static-locations: classpath:/static/,classpath:/public/,classpath:/resources/,classpath:/META-INF/resources/
+  profiles:
+    active: dev
+  # 禁用 Spring Cloud Function 自动配置(解决与 Spring Boot 3.4.4 的兼容性问题)
+  cloud:
+    function:
+      enabled: false
   datasource:
-    url: jdbc:postgresql://localhost:5433/company_rag?currentSchema=public
+    url: jdbc:postgresql://localhost:5433/company_rag
     username: postgres
     password: difyai123456
     driver-class-name: org.postgresql.Driver
-  ai:
-    dashscope:
-      api-key: ${DASHSCOPE_API_KEY:sk-3f5422ce94a14f888c3e35496597d019}
-      chat:
-        options:
-          model: qwen-max
-          temperature: 0.7
-      embedding:
-        options:
-          model: qwen3-vl-embedding
+    # 注意：不能设置 connection-init-sql，因为会在每次获取连接时重置 search_path
+    # 租户 schema 切换由 TenantContextHelper 在请求拦截器中动态设置
   vectorstore:
     pgvector:
       index-type: HNSW
@@ -33,6 +36,13 @@ spring:
     multipart:
       max-file-size: 50MB
       max-request-size: 100MB
+  # Redis 配置
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      password: difyai123456
+      database: 0
 
 # MyBatis-Plus
 mybatis-plus:
