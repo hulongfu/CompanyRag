@@ -5,7 +5,7 @@ spring:
     # 统一使用 OpenAI 兼容接口，chat 用通义千问，embedding 用硅基流动
     openai:
       # Chat 模型配置（通义千问 - OpenAI 兼容模式）
-      api-key: ${DASHSCOPE_API_KEY:sk-e1837008725e4748aebf485575230cc6}
+      api-key: ${DASHSCOPE_API_KEY:default_dashscope_api_key}
       base-url: https://dashscope.aliyuncs.com/compatible-mode
       chat:
         options:
@@ -13,7 +13,7 @@ spring:
           temperature: 0.7
       # Embedding 模型配置（硅基流动 - OpenAI 兼容模式，覆盖上方的 api-key 和 base-url）
       embedding:
-        api-key: ${SILICONFLOW_API_KEY:sk-wyfqhqjvmstfaimtdswsidetftoqhlspzfsyznoysnevcigp}
+        api-key: ${SILICONFLOW_API_KEY:default_siliconflow_api_key}
         base-url: https://api.siliconflow.cn
         options:
           model: BAAI/bge-large-zh-v1.5

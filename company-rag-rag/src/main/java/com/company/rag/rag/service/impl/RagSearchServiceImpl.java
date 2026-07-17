@@ -200,9 +200,23 @@ public class RagSearchServiceImpl implements RagSearchService {
                     ((Number) doc.getMetadata().getOrDefault("distance", 0.0)).doubleValue() : 0.0);
             cr.setDocumentName(doc.getMetadata() != null ?
                     (String) doc.getMetadata().getOrDefault("documentName", "未知") : "未知");
+            // 设置 chunkIndex（从 metadata 中获取）
+            Object chunkIndexObj = doc.getMetadata() != null ? doc.getMetadata().get("chunkIndex") : null;
+            if (chunkIndexObj != null) {
+                cr.setChunkIndex(((Number) chunkIndexObj).intValue());
+            }
             cr.setFinalScore(cr.getVectorScore());
             allChunks.add(cr);
         }
+        
+        // 诊断日志：打印每个 chunk 的简要信息
+        log.info("转换为 ChunkResult 完成 | 数量={} | 前 3 个 chunk 内容预览：{}", allChunks.size(),
+                allChunks.stream().limit(3).map(c -> 
+                    String.format("[文档:%s, chunkIndex:%s, 内容:%s...]", 
+                        c.getDocumentName(), 
+                        c.getChunkIndex(), 
+                        c.getContent() != null && c.getContent().length() > 30 ? c.getContent().substring(0, 30) : "N/A")
+                ).collect(Collectors.joining(" | ")));
 
         // 关键词检索增强（简单实现：用BM25风格评分）
         // 实际项目中可集成Elasticsearch或PostgreSQL全文检索
