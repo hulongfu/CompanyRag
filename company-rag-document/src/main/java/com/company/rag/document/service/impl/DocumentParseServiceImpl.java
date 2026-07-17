@@ -101,7 +101,40 @@ public class DocumentParseServiceImpl implements DocumentParseService {
     public String extractText(byte[] fileContent, String fileName) {
         try {
             // Tika 自动检测文件类型并提取文本
-            return tika.parseToString(new java.io.ByteArrayInputStream(fileContent));
+            String text = tika.parseToString(new java.io.ByteArrayInputStream(fileContent));
+            
+            // 诊断日志：记录提取的文本长度
+            log.info("文本提取完成 | 文件名={} | 原始文件大小={} bytes | 提取文本长度={} characters", 
+                    fileName, fileContent.length, text.length());
+            
+            // 对于 TXT 文件，检查是否可能截断
+            if (fileName != null && fileName.toLowerCase().endsWith(".txt")) {
+                // 计算提取率（文本长度/文件大小），TXT 文件通常提取率应该在 80% 以上
+                // 因为 TXT 是纯文本，提取后长度应该接近原始大小（考虑编码转换）
+                double extractRate = fileContent.length > 0 ? (double) text.length() / fileContent.length : 0;
+                
+                // 如果提取率过低，可能是编码问题导致截断
+                if (extractRate < 0.8) {
+                    log.warn("检测到 TXT 文件可能未完全提取 | 文件大小={} bytes | 文本长度={} characters | 提取率={:.2%} | 尝试使用 UTF-8 直接读取", 
+                            fileContent.length, text.length(), extractRate);
+                    
+                    // 尝试使用 UTF-8 直接读取
+                    try {
+                        String utf8Text = new String(fileContent, java.nio.charset.StandardCharsets.UTF_8);
+                        if (utf8Text.length() > text.length()) {
+                            log.info("UTF-8 直接读取成功 | 长度={} characters | 提取率={:.2%}，使用 UTF-8 结果", 
+                                    utf8Text.length(), (double) utf8Text.length() / fileContent.length);
+                            return utf8Text;
+                        } else {
+                            log.info("UTF-8 直接读取未改善结果 | UTF-8 长度={} characters", utf8Text.length());
+                        }
+                    } catch (Exception e) {
+                        log.warn("UTF-8 直接读取失败，使用 Tika 结果", e);
+                    }
+                }
+            }
+            
+            return text;
         } catch (TikaException | IOException e) {
             log.error("文档解析失败：{}", fileName, e);
             throw new RuntimeException("文档解析失败：" + e.getMessage());
