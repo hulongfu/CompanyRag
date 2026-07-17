@@ -24,6 +24,12 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
+        <!-- dotenv-java: 加载 .env 文件到系统环境变量 -->
+        <dependency>
+            <groupId>io.github.cdimascio</groupId>
+            <artifactId>dotenv-java</artifactId>
+            <version>3.0.0</version>
+        </dependency>
         <!-- Spring Cloud Function - 提供 ContextFunctionCatalogAutoConfiguration -->
         <dependency>
             <groupId>org.springframework.cloud</groupId>

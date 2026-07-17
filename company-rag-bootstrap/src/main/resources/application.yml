@@ -1,5 +1,5 @@
 server:
-  port: 8080
+  port: ${SERVER_PORT:8080}
 
 spring:
   application:
@@ -10,15 +10,15 @@ spring:
     resources:
       static-locations: classpath:/static/,classpath:/public/,classpath:/resources/,classpath:/META-INF/resources/
   profiles:
-    active: dev
-  # 禁用 Spring Cloud Function 自动配置(解决与 Spring Boot 3.4.4 的兼容性问题)
+    active: ${SPRING_PROFILES_ACTIVE:dev}
+  # 禁用 Spring Cloud Function 自动配置 (解决与 Spring Boot 3.4.4 的兼容性问题)
   cloud:
     function:
       enabled: false
   datasource:
-    url: jdbc:postgresql://localhost:5433/company_rag
-    username: postgres
-    password: difyai123456
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5433}/${POSTGRES_DB:company_rag}
+    username: ${POSTGRES_USER:postgres}
+    password: ${POSTGRES_PASSWORD:}
     driver-class-name: org.postgresql.Driver
     # 注意：不能设置 connection-init-sql，因为会在每次获取连接时重置 search_path
     # 租户 schema 切换由 TenantContextHelper 在请求拦截器中动态设置
@@ -39,9 +39,9 @@ spring:
   # Redis 配置
   data:
     redis:
-      host: localhost
-      port: 6379
-      password: difyai123456
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
       database: 0
 
 # MyBatis-Plus

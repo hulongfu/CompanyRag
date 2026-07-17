@@ -2,6 +2,7 @@ package com.company.rag.bootstrap;
 
 import com.company.rag.tenant.model.Tenant;
 import com.company.rag.tenant.service.TenantService;
+import io.github.cdimascio.dotenv.Dotenv;
 import lombok.extern.slf4j.Slf4j;
 import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.boot.ApplicationRunner;
@@ -29,6 +30,13 @@ import java.util.List;
 public class CompanyRagApplication {
 
     public static void main(String[] args) {
+        // 加载 .env 文件到系统环境变量，使 Spring Boot 可以通过 ${VAR} 语法读取
+        Dotenv dotenv = Dotenv.load();
+        dotenv.entries().forEach(entry -> 
+            System.setProperty(entry.getKey(), entry.getValue())
+        );
+        log.info(".env 文件加载完成，共加载 {} 个环境变量", dotenv.entries().size());
+        
         SpringApplication.run(CompanyRagApplication.class, args);
     }
 
