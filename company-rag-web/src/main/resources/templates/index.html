@@ -24,6 +24,18 @@
         .doc-item .doc-info { flex: 1; min-width: 0; }
         .doc-item .doc-name { font-size: 13px; color: #303133; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .doc-item .doc-meta { font-size: 11px; color: #909399; }
+        /* 会话列表样式 */
+        .session-list { max-height: 200px; overflow-y: auto; padding: 4px 8px; border-bottom: 1px solid #e4e7ed; }
+        .session-item { padding: 8px 10px; border-radius: 6px; cursor: pointer; transition: all 0.2s; margin-bottom: 2px; display: flex; align-items: center; gap: 6px; }
+        .session-item:hover { background: #f0f5ff; }
+        .session-item.active { background: #e6f0ff; border-left: 3px solid #1a73e8; }
+        .session-item .session-icon { font-size: 14px; flex-shrink: 0; }
+        .session-item .session-info { flex: 1; min-width: 0; }
+        .session-item .session-title { font-size: 13px; color: #303133; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .session-item .session-meta { font-size: 11px; color: #909399; }
+        .session-item .session-delete { font-size: 12px; color: #c0c4cc; cursor: pointer; padding: 2px 4px; border-radius: 3px; display: none; }
+        .session-item:hover .session-delete { display: inline-block; }
+        .session-item .session-delete:hover { color: #f56c6c; background: #fef0f0; }
         .chat-area { flex: 1; display: flex; flex-direction: column; background: #f5f7fa; }
         .chat-messages { flex: 1; overflow-y: auto; padding: 20px 24px; }
         .message { display: flex; margin-bottom: 20px; gap: 12px; }
@@ -155,7 +167,7 @@
             </el-card>
         </div>
         
-        <!-- 原有的聊天和文档区域 -->
+        <!-- 聊天和文档区域 -->
         <aside v-else class="sidebar">
             <!-- 会话列表 -->
             <div class="sidebar-header">
@@ -169,12 +181,12 @@
                     <span class="session-icon">💬</span>
                     <div class="session-info">
                         <div class="session-title">{{ session.title || '新会话' }}</div>
-                        <div class="session-meta">{{ formatTime(session.updatedAt || session.createdAt) }}</div>
+                        <div class="session-meta">{{ formatTime(session.updateTime || session.createTime) }}</div>
                     </div>
                     <span class="session-delete" @click.stop="deleteSession(session.id)" title="删除会话">✕</span>
                 </div>
             </div>
-            <el-button class="new-session-btn" size="small" plain @click="createNewSession" style="width:calc(100% - 24px);">+ 新建会话</el-button>
+            <el-button class="new-session-btn" size="small" plain @click="createNewSession" style="width:calc(100% - 24px);margin:4px 12px 8px;">+ 新建会话</el-button>
             <div class="sidebar-header" style="border-top:1px solid #e4e7ed;">
                 <h3>📄 知识库文档</h3>
                 <el-button size="small" circle @click="loadDocuments">🔄</el-button>
@@ -279,6 +291,11 @@ createApp({
         const chatContainer = ref(null);
         const metrics = ref({ totalRequests: 0, cacheHits: 0, avgLatency: 0, totalTokens: 0 });
         
+        // 会话管理相关
+        const sessions = ref([]);
+        const currentSessionId = ref(null);
+        const sessionMessagesMap = ref({}); // 按 sessionId 缓存消息
+
         // 租户管理相关
         const currentTab = ref('chat'); // 'chat' or 'tenant'
         const tenants = ref([]);
@@ -318,6 +335,93 @@ createApp({
             } catch(e) { console.error('加载文档失败', e); }
         }
 
+        // ========== 会话管理函数 ==========
+
+        async function loadSessions() {
+            try {
+                const res = await fetch('/api/session/list', {
+                    headers: { 'X-Tenant-Id': tenantId.value }
+                });
+                const json = await res.json();
+                if (json.code === 200) {
+                    sessions.value = json.data || [];
+                    // 如果有会话，默认选中第一个
+                    if (sessions.value.length > 0 && !currentSessionId.value) {
+                        currentSessionId.value = sessions.value[0].id;
+                    }
+                }
+            } catch(e) { console.error('加载会话列表失败', e); }
+        }
+
+        async function createNewSession() {
+            try {
+                const res = await fetch('/api/session', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Tenant-Id': tenantId.value },
+                    body: JSON.stringify({ title: '新会话' })
+                });
+                const json = await res.json();
+                if (json.code === 200) {
+                    const session = json.data;
+                    sessions.value.unshift(session);
+                    currentSessionId.value = session.id;
+                    sessionMessagesMap.value[session.id] = [];
+                    messages.value = [];
+                }
+            } catch(e) { console.error('创建会话失败', e); }
+        }
+
+        async function switchSession(sessionId) {
+            if (currentSessionId.value === sessionId) return;
+            // 保存当前会话消息
+            if (currentSessionId.value) {
+                sessionMessagesMap.value[currentSessionId.value] = [...messages.value];
+            }
+            currentSessionId.value = sessionId;
+            // 恢复目标会话消息
+            if (sessionMessagesMap.value[sessionId]) {
+                messages.value = [...sessionMessagesMap.value[sessionId]];
+            } else {
+                messages.value = [];
+            }
+        }
+
+        async function deleteSession(sessionId) {
+            try {
+                const res = await fetch('/api/session/' + sessionId, {
+                    method: 'DELETE',
+                    headers: { 'X-Tenant-Id': tenantId.value }
+                });
+                const json = await res.json();
+                if (json.code === 200) {
+                    sessions.value = sessions.value.filter(s => s.id !== sessionId);
+                    delete sessionMessagesMap.value[sessionId];
+                    if (currentSessionId.value === sessionId) {
+                        currentSessionId.value = sessions.value.length > 0 ? sessions.value[0].id : null;
+                        messages.value = currentSessionId.value ? (sessionMessagesMap.value[currentSessionId.value] || []) : [];
+                    }
+                    ElementPlus.ElMessage.success('会话已删除');
+                } else {
+                    ElementPlus.ElMessage.error('删除失败：' + (json.msg || ''));
+                }
+            } catch(e) {
+                console.error('删除会话失败', e);
+                ElementPlus.ElMessage.error('删除会话失败');
+            }
+        }
+
+        function formatTime(timeStr) {
+            if (!timeStr) return '';
+            const d = new Date(timeStr);
+            if (isNaN(d.getTime())) return '';
+            const now = new Date();
+            const diff = now - d;
+            if (diff < 60000) return '刚刚';
+            if (diff < 3600000) return Math.floor(diff / 60000) + '分钟前';
+            if (diff < 86400000) return Math.floor(diff / 3600000) + '小时前';
+            return d.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
+        }
+
         async function sendMessage() {
             const text = userInput.value.trim();
             if (!text || isLoading.value) return;
@@ -328,16 +432,21 @@ createApp({
             scrollToBottom();
 
             try {
+                const reqBody = {
+                    query: text,
+                    tenantId: parseInt(tenantId.value),
+                    topK: 10,
+                    rerankTopK: 5,
+                    enableRerank: true
+                };
+                // 如果当前有活跃会话，携带 sessionId
+                if (currentSessionId.value) {
+                    reqBody.sessionId = currentSessionId.value;
+                }
                 const res = await fetch('/api/rag/search', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'X-Tenant-Id': tenantId.value },
-                    body: JSON.stringify({
-                        query: text,
-                        tenantId: parseInt(tenantId.value),
-                        topK: 10,
-                        rerankTopK: 5,
-                        enableRerank: true
-                    })
+                    body: JSON.stringify(reqBody)
                 });
                 const json = await res.json();
                 if (json.code === 200 && json.data) {
@@ -414,7 +523,6 @@ createApp({
         }
         
         async function createTenant() {
-            // 表单验证
             if (!tenantForm.value.tenantCode || !tenantForm.value.tenantName) {
                 ElementPlus.ElMessage.warning('请填写租户编码和租户名称');
                 return;
@@ -478,7 +586,8 @@ createApp({
 
         onMounted(() => {
             loadDocuments();
-            loadTenants(); // 加载租户列表
+            loadSessions();
+            loadTenants();
         });
 
         return {
@@ -486,6 +595,8 @@ createApp({
             showUpload, showMetrics, splitStrategy, tenantId, chatContainer,
             metrics, uploadUrl, uploadHeaders, formatSize, renderMarkdown,
             sendMessage, loadDocuments, beforeUpload, onUploadSuccess,
+            // 会话管理
+            sessions, currentSessionId, createNewSession, switchSession, deleteSession, formatTime,
             // 租户管理
             currentTab, tenants, loadingTenants, creating, tenantForm,
             loadTenants, createTenant, resetForm, viewTenantDetail, selectTenant
