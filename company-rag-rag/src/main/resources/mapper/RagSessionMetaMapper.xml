@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.company.rag.rag.mapper.RagSessionMetaMapper">
+
+    <resultMap id="SessionMetaResultMap" type="com.company.rag.rag.entity.RagSessionMeta">
+        <id column="id" property="id"/>
+        <result column="session_id" property="sessionId"/>
+        <result column="tenant_id" property="tenantId"/>
+        <result column="user_id" property="userId"/>
+        <result column="title" property="title"/>
+        <result column="last_query" property="lastQuery"/>
+        <result column="message_count" property="messageCount"/>
+        <result column="is_deleted" property="isDeleted"/>
+        <result column="tags" property="tags" typeHandler="org.apache.ibatis.type.JdbcType.OTHER"/>
+        <result column="metadata" property="metadata" typeHandler="org.apache.ibatis.type.JdbcType.OTHER"/>
+        <result column="create_time" property="createTime"/>
+        <result column="update_time" property="updateTime"/>
+    </resultMap>
+
+    <select id="selectSessionList" resultMap="SessionMetaResultMap">
+        SELECT * FROM rag_session_meta
+        WHERE tenant_id = #{tenantId}
+        AND user_id = #{userId}
+        AND is_deleted = FALSE
+        <if test="keyword != null and keyword != ''">
+            AND (title LIKE '%' || #{keyword} || '%' OR last_query LIKE '%' || #{keyword} || '%')
+        </if>
+        <if test="tags != null and tags.size() > 0">
+            AND tags ?| #{tags}
+        </if>
+        ORDER BY create_time DESC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="countSessionList" resultType="java.lang.Long">
+        SELECT COUNT(*) FROM rag_session_meta
+        WHERE tenant_id = #{tenantId}
+        AND user_id = #{userId}
+        AND is_deleted = FALSE
+        <if test="keyword != null and keyword != ''">
+            AND (title LIKE '%' || #{keyword} || '%' OR last_query LIKE '%' || #{keyword} || '%')
+        </if>
+        <if test="tags != null and tags.size() > 0">
+            AND tags ?| #{tags}
+        </if>
+    </select>
+
+</mapper>
