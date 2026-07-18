@@ -12,6 +12,7 @@ public class RagResult {
     private String answer;              // LLM生成的回答
     private List<ChunkResult> chunks;   // 引用的文档块
     private List<String> sessions;      // 引用来源
+    private String sessionId;           // 会话ID
     private Metrics metrics;            // 性能指标
 
     @Data

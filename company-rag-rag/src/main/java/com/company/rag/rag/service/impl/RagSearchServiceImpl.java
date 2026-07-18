@@ -9,6 +9,8 @@ import com.company.rag.rag.observability.RagMetricsRecorder;
 import com.company.rag.rag.prompt.PromptTemplate;
 import com.company.rag.rag.rerank.CrossEncoderReranker;
 import com.company.rag.rag.service.RagSearchService;
+import com.company.rag.rag.service.RagSessionService;
+import com.company.rag.rag.entity.RagSessionMeta;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
 import lombok.RequiredArgsConstructor;
