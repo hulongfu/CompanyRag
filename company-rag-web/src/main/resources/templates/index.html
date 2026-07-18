@@ -73,10 +73,10 @@
         </h1>
         <div class="header-actions">
             <el-tag size="small" type="success" v-if="tenantId">租户：{{ tenantId }}</el-tag>
-            <el-button size="small" round @click="currentTab = 'chat'" :type="currentTab === 'chat' ? 'success' : 'info'" style="color:white;border-color:rgba(255,255,255,0.6);background:rgba(255,255,255,0.15);">💬 对话</el-button>
-            <el-button size="small" round @click="currentTab = 'tenant'" :type="currentTab === 'tenant' ? 'success' : 'info'" style="color:white;border-color:rgba(255,255,255,0.6);background:rgba(255,255,255,0.15);">🏢 租户</el-button>
-            <el-button size="small" round @click="showUpload = true" type="info" style="color:white;border-color:rgba(255,255,255,0.6);background:rgba(255,255,255,0.15);">上传文档</el-button>
-            <el-button size="small" round @click="showMetrics = !showMetrics" type="info" style="color:white;border-color:rgba(255,255,255,0.6);background:rgba(255,255,255,0.15);">指标</el-button>
+            <el-button size="small" plain round @click="currentTab = 'chat'" :type="currentTab === 'chat' ? 'success' : ''" style="color:white;border-color:rgba(255,255,255,0.5);">💬 对话</el-button>
+            <el-button size="small" plain round @click="currentTab = 'tenant'" :type="currentTab === 'tenant' ? 'success' : ''" style="color:white;border-color:rgba(255,255,255,0.5);">🏢 租户</el-button>
+            <el-button size="small" plain round @click="showUpload = true" style="color:white;border-color:rgba(255,255,255,0.5);">上传文档</el-button>
+            <el-button size="small" plain round @click="showMetrics = !showMetrics" style="color:white;border-color:rgba(255,255,255,0.5);">指标</el-button>
         </div>
     </header>
     <div class="app-main">
@@ -157,7 +157,25 @@
         
         <!-- 原有的聊天和文档区域 -->
         <aside v-else class="sidebar">
+            <!-- 会话列表 -->
             <div class="sidebar-header">
+                <h3>💬 历史会话</h3>
+                <el-button size="small" circle @click="createNewSession">➕</el-button>
+            </div>
+            <div class="session-list" v-if="sessions.length > 0">
+                <div v-for="session in sessions" :key="session.id" class="session-item"
+                     :class="{ active: currentSessionId === session.id }"
+                     @click="switchSession(session.id)">
+                    <span class="session-icon">💬</span>
+                    <div class="session-info">
+                        <div class="session-title">{{ session.title || '新会话' }}</div>
+                        <div class="session-meta">{{ formatTime(session.updatedAt || session.createdAt) }}</div>
+                    </div>
+                    <span class="session-delete" @click.stop="deleteSession(session.id)" title="删除会话">✕</span>
+                </div>
+            </div>
+            <el-button class="new-session-btn" size="small" plain @click="createNewSession" style="width:calc(100% - 24px);">+ 新建会话</el-button>
+            <div class="sidebar-header" style="border-top:1px solid #e4e7ed;">
                 <h3>📄 知识库文档</h3>
                 <el-button size="small" circle @click="loadDocuments">🔄</el-button>
             </div>
