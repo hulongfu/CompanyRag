@@ -10,7 +10,6 @@ import com.company.rag.rag.prompt.PromptTemplate;
 import com.company.rag.rag.rerank.CrossEncoderReranker;
 import com.company.rag.rag.service.RagSearchService;
 import com.company.rag.rag.service.RagSessionService;
-import com.company.rag.rag.entity.RagSessionMeta;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
 import lombok.RequiredArgsConstructor;
@@ -36,6 +35,7 @@ public class RagSearchServiceImpl implements RagSearchService {
     private final RagCacheManager cacheManager;
     private final RagMetricsRecorder metricsRecorder;
     private final PromptTemplate promptTemplate;
+    private final RagSessionService ragSessionService;
 
     @Override
     @CircuitBreaker(name = "rag", fallbackMethod = "searchFallback")
@@ -87,9 +87,22 @@ public class RagSearchServiceImpl implements RagSearchService {
         metrics.setTotalMs(System.currentTimeMillis() - start);
         result.setMetrics(metrics);
 
-        // 6. 缓存结果
+        // 6. 保存对话记录（如果有 sessionId）
+        if (query.getSessionId() != null) {
+            try {
+                Long userId = 0L; // 默认用户
+                ragSessionService.saveConversation(
+                        query.getTenantId(), query.getSessionId(), userId,
+                        query.getQuery(), answer, context,
+                        0, 0, (int) (System.currentTimeMillis() - start));
+            } catch (Exception e) {
+                log.warn("保存对话记录失败", e);
+            }
+        }
+
+        // 7. 缓存结果
         cacheManager.putSearchResult(cacheKey, result);
-        // 7. 记录指标
+        // 8. 记录指标
         metricsRecorder.record(result);
         metricsRecorder.recordCacheMiss();
         return result;
