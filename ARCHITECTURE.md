@@ -28,8 +28,8 @@ graph TB
         REDIS[Redis<br/>缓存 + 限流 + 会话]
     end
 
-    subgraph "AI层"
-        DASHSCOPE[通义千问 DashScope<br/>qwen-max + text-embedding-v3]
+    subgraph "AI层 (OpenAI 兼容，供应商可插拔)"
+        DASHSCOPE[LLM + Embedding 模型<br/>默认 通义千问 / 硅基流动<br/>二者供应商可不同]
     end
 
     B --> N
@@ -60,7 +60,7 @@ sequenceDiagram
     participant RAG as RAG服务
     participant VS as 向量库(PGVector)
     participant RERANK as Reranker
-    participant LLM as 通义千问
+    participant LLM as LLM (默认 通义千问)
 
     U->>F: 输入问题
     F->>API: POST /api/rag/search
@@ -75,7 +75,7 @@ sequenceDiagram
         RAG->>RERANK: Cross-Encoder Rerank
         RERANK-->>RAG: 重排序结果(topK=5)
         RAG->>RAG: 构建Prompt(上下文+历史)
-        RAG->>LLM: 调用qwen-max
+        RAG->>LLM: 调用 Chat 模型(默认 qwen-max)
         LLM-->>RAG: 生成回答
         RAG->>RAG: 缓存结果 + 记录指标
         RAG-->>API: RagResult
@@ -130,7 +130,7 @@ graph TB
     end
 
     subgraph "外部"
-        DASHSCOPE[通义千问 API]
+        DASHSCOPE[模型 API (OpenAI 兼容, 默认 通义千问/硅基流动)]
         USER[用户浏览器:8080]
 
         USER --> APP

@@ -344,7 +344,8 @@ createApp({
                 });
                 const json = await res.json();
                 if (json.code === 200) {
-                    sessions.value = json.data || [];
+                    // 后端返回的是 Page 对象，包含 records 字段
+                    sessions.value = (json.data && json.data.records) || [];
                     // 如果有会话，默认选中第一个
                     if (sessions.value.length > 0 && !currentSessionId.value) {
                         currentSessionId.value = sessions.value[0].id;

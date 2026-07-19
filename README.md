@@ -1,6 +1,6 @@
 # CompanyRag - 企业知识库RAG系统
 
-> 企业级知识库检索增强生成(RAG)系统，基于 Spring AI + PGVector + 通义千问
+> 企业级知识库检索增强生成(RAG)系统，基于 Spring AI（OpenAI 兼容，模型供应商可插拔）+ PGVector
 
 ## 系统架构
 
@@ -40,8 +40,8 @@
                │
                ▼
 ┌──────────────────────────────────────────────────────────────────────┐
-│                    通义千问 (DashScope)                              │
-│        text-embedding-v3 (向量化) + qwen-max (对话/Agent)          │
+│              LLM / Embedding（OpenAI 兼容，供应商可插拔）              │
+│   Chat 默认通义千问 qwen-max ｜ Embedding 默认硅基流动（可独立配置）   │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -55,7 +55,7 @@
 ### 🔄 RAG全链路
 1. **文档解析**：Apache Tika 自动识别 PDF/DOCX/TXT/MD/HTML
 2. **语义切分**：三种切分策略可选
-3. **向量化**：通义千问 text-embedding-v3 → PGVector(HNSW索引)
+3. **向量化**：OpenAI 兼容 Embedding 模型（默认硅基流动）→ PGVector(HNSW索引)
 4. **混合检索**：向量检索 + 关键词检索加权融合
 5. **重排序**：Cross-Encoder Rerank 提升Top-K准确率
 6. **流式回答**：SSE 流式输出
@@ -84,6 +84,12 @@
 - **超时控制**：LLM调用超时30秒
 - **两级缓存**：Redis + 热点检测
 
+### 💬 会话历史
+- 多轮对话会话管理（`rag_session_meta` 会话元信息 + `rag_session` 对话明细，父子结构）
+- 会话列表查询（分页 + 关键词/标签搜索）、详情查看、创建 / 删除 / 更新
+- 混合保存策略：首次实时落库，后续异步批量更新；多租户 RLS 行级安全
+- 实现路径：Superpowers 工作流（设计稿 + 实现计划 + 代码），REST API 见 `/api/session`
+
 ## 技术栈
 
 | 组件 | 技术选型 |
@@ -92,7 +98,7 @@
 | 数据库 | PostgreSQL 16 + PGVector |
 | 缓存 | Redis (Redisson) |
 | ORM | MyBatis-Plus 3.5 |
-| AI模型 | 通义千问 qwen-max + text-embedding-v3 |
+| AI模型 | Chat: 通义千问 qwen-max（默认，OpenAI 兼容）／Embedding: 硅基流动（默认，可独立替换） |
 | 文档解析 | Apache Tika |
 | 熔断限流 | Resilience4j |
 | 可观测性 | Micrometer + Prometheus + Grafana |
@@ -105,7 +111,7 @@
 - JDK 17+
 - Maven 3.6+
 - Docker & Docker Compose
-- 通义千问 API Key ([DashScope](https://dashscope.aliyun.com))
+- 模型 API Key（OpenAI 兼容：Chat 默认通义千问 DashScope，Embedding 默认硅基流动 SiliconFlow，二者可独立替换为任意兼容服务）
 
 ### 1. 启动基础设施
 
@@ -116,12 +122,16 @@ docker compose up -d postgres redis
 
 ### 2. 配置环境变量
 
+复制 `.env.example` 为 `.env` 并填入密钥。模型层为 OpenAI 兼容，Chat 与 Embedding 的供应商可独立配置：
+
 ```bash
 # Windows (cmd)
 set DASHSCOPE_API_KEY=sk-your-api-key
+set SILICONFLOW_API_KEY=sk-your-siliconflow-key
 
 # Linux/Mac
 export DASHSCOPE_API_KEY=sk-your-api-key
+export SILICONFLOW_API_KEY=sk-your-siliconflow-key
 ```
 
 ### 3. 编译运行
@@ -148,6 +158,7 @@ java -jar company-rag-bootstrap/target/company-rag-bootstrap-1.0.0-SNAPSHOT.jar
 
 ```bash
 export DASHSCOPE_API_KEY=sk-your-api-key
+export SILICONFLOW_API_KEY=sk-your-siliconflow-key
 docker compose up -d
 ```
 
@@ -241,6 +252,36 @@ company-rag/
 ├── Dockerfile                 # 多阶段构建
 └── prometheus.yml             # 监控配置
 ```
+
+## 数据库说明
+
+### 数据库初始化
+
+```bash
+# 方式一：Docker Compose 自动初始化
+docker compose up -d postgres
+
+# 方式二：手动导入
+psql -h localhost -U postgres -d company_rag -f sql/init.sql
+```
+
+### 表结构概览
+
+| 表名 | 说明 | 是否公共表 |
+|------|------|-----------|
+| sys_tenant | 租户信息 | 是 |
+| sys_user | 用户信息 | 是(tenant_id隔离) |
+| rag_document | 文档元数据 | 是(tenant_id隔离) |
+| doc_chunk | 文档切分块 | 是(tenant_id隔离) |
+| vector_store | 向量存储(PGVector) | 是(metadata->>'tenant_id'过滤) |
+| rag_session_meta | 会话元信息 | 是(tenant_id隔离) |
+| rag_session | 对话历史明细 | 是(tenant_id隔离) |
+
+### PGVector 说明
+
+- 向量维度: 1024（OpenAI 兼容 Embedding 模型，默认硅基流动 text-embedding）
+- 索引类型: HNSW (余弦距离)
+- 距离算法: COSINE_DISTANCE
 
 ## License
 
