@@ -340,6 +340,33 @@ createApp({
 
         // ========== 会话管理函数 ==========
 
+        async function loadSessionMessages(sessionId) {
+            if (sessionMessagesMap.value[sessionId]) {
+                messages.value = [...sessionMessagesMap.value[sessionId]];
+                return;
+            }
+            try {
+                const res = await fetch('/api/session/' + sessionId, {
+                    headers: { 'X-Tenant-Id': tenantId.value }
+                });
+                const json = await res.json();
+                if (json.code === 200 && json.data) {
+                    const history = [];
+                    for (const item of json.data) {
+                        history.push({ role: 'user', content: item.query });
+                        history.push({ role: 'assistant', content: item.answer, sources: [] });
+                    }
+                    messages.value = history;
+                    sessionMessagesMap.value[sessionId] = [...history];
+                } else {
+                    messages.value = [];
+                }
+            } catch(e) {
+                console.error('加载会话消息失败', e);
+                messages.value = [];
+            }
+        }
+
         async function loadSessions() {
             try {
                 const res = await fetch('/api/session/list', {
@@ -349,9 +376,10 @@ createApp({
                 if (json.code === 200) {
                     // 后端返回的是 Page 对象，包含 records 字段
                     sessions.value = (json.data && json.data.records) || [];
-                    // 如果有会话，默认选中第一个
+                    // 如果有会话，默认选中第一个并加载其消息
                     if (sessions.value.length > 0 && !currentSessionId.value) {
                         currentSessionId.value = sessions.value[0].sessionId;
+                        await loadSessionMessages(currentSessionId.value);
                     }
                 }
             } catch(e) { console.error('加载会话列表失败', e); }
@@ -376,39 +404,13 @@ createApp({
         }
 
         async function switchSession(session) {
-            if (currentSessionId.value === session.sessionId) return;
             // 保存当前会话消息
             if (currentSessionId.value) {
                 sessionMessagesMap.value[currentSessionId.value] = [...messages.value];
             }
             currentSessionId.value = session.sessionId;
-            // 如果前端缓存中没有该会话的消息，则从后端加载
-            if (sessionMessagesMap.value[session.sessionId]) {
-                messages.value = [...sessionMessagesMap.value[session.sessionId]];
-            } else {
-                // 从后端加载历史消息
-                try {
-                    const res = await fetch('/api/session/' + session.sessionId, {
-                        headers: { 'X-Tenant-Id': tenantId.value }
-                    });
-                    const json = await res.json();
-                    if (json.code === 200 && json.data) {
-                        // 后端返回 RagSession 列表，每条包含 query 和 answer
-                        const history = [];
-                        for (const item of json.data) {
-                            history.push({ role: 'user', content: item.query });
-                            history.push({ role: 'assistant', content: item.answer, sources: item.sources || [] });
-                        }
-                        messages.value = history;
-                        sessionMessagesMap.value[session.sessionId] = [...history];
-                    } else {
-                        messages.value = [];
-                    }
-                } catch(e) {
-                    console.error('加载会话消息失败', e);
-                    messages.value = [];
-                }
-            }
+            // 加载目标会话消息（优先使用缓存，缓存未命中则从后端加载）
+            await loadSessionMessages(session.sessionId);
         }
 
         async function deleteSession(session) {
