@@ -90,7 +90,7 @@ public class RagSearchServiceImpl implements RagSearchService {
         // 6. 保存对话记录（如果有 sessionId）
         if (query.getSessionId() != null) {
             try {
-                Long userId = 0L; // 默认用户
+                Long userId = query.getUserId() != null ? query.getUserId() : 1L;
                 ragSessionService.saveConversation(
                         query.getTenantId(), query.getSessionId(), userId,
                         query.getQuery(), answer, context,

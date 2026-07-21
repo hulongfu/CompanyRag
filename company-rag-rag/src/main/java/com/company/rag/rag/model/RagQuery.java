@@ -17,6 +17,7 @@ public class RagQuery {
     private Double vectorWeight = 0.5;  // 向量检索权重（混合检索用）
     private Double keywordWeight = 0.5; // 关键词检索权重
     private Boolean enableRerank = true;
+    private Long userId;                // 用户ID
     private Boolean stream = false;     // 是否流式
     private String sessionId;           // 会话ID（用于对话历史）
 }
