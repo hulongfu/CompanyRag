@@ -11,8 +11,8 @@
         <result column="last_query" property="lastQuery"/>
         <result column="message_count" property="messageCount"/>
         <result column="is_deleted" property="isDeleted"/>
-        <result column="tags" property="tags"/>
-        <result column="metadata" property="metadata"/>
+        <result column="tags" property="tags" typeHandler="com.company.rag.rag.handler.PgJsonbTypeHandler"/>
+        <result column="metadata" property="metadata" typeHandler="com.company.rag.rag.handler.PgJsonbTypeHandler"/>
         <result column="create_time" property="createTime"/>
         <result column="update_time" property="updateTime"/>
     </resultMap>
@@ -26,7 +26,7 @@
             AND (title LIKE '%' || #{keyword} || '%' OR last_query LIKE '%' || #{keyword} || '%')
         </if>
         <if test="tags != null and tags.size() > 0">
-            AND tags ?| #{tags}
+            AND tags ?| CAST(#{tags} AS text[])::text[]
         </if>
         ORDER BY create_time DESC
         LIMIT #{limit} OFFSET #{offset}
@@ -41,7 +41,7 @@
             AND (title LIKE '%' || #{keyword} || '%' OR last_query LIKE '%' || #{keyword} || '%')
         </if>
         <if test="tags != null and tags.size() > 0">
-            AND tags ?| #{tags}
+            AND tags ?| CAST(#{tags} AS text[])::text[]
         </if>
     </select>
 
