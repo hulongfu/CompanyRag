@@ -585,7 +585,11 @@ createApp({
             uploadHeaders['X-Tenant-Id'] = row.id.toString();
             ElementPlus.ElMessage.success('已选择租户：' + row.tenantName);
             currentTab.value = 'chat';
+            // 切换租户时清理当前会话和消息，加载新租户的数据
+            currentSessionId.value = null;
+            messages.value = [];
             loadDocuments();
+            loadSessions();
         }
 
         onMounted(() => {

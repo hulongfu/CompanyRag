@@ -20,18 +20,24 @@ public class RagController {
     private final RagSearchService ragSearchService;
 
     @PostMapping("/search")
-    public R<RagResult> search(@RequestBody RagQuery query) {
+    public R<RagResult> search(@RequestBody RagQuery query,
+                                @RequestHeader(value = "X-User-Id", defaultValue = "1") Long userId) {
+        query.setUserId(userId);
         return R.ok(ragSearchService.search(query));
     }
 
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public Flux<String> stream(@RequestBody RagQuery query) {
+    public Flux<String> stream(@RequestBody RagQuery query,
+                                @RequestHeader(value = "X-User-Id", defaultValue = "1") Long userId) {
+        query.setUserId(userId);
         query.setStream(true);
         return ragSearchService.streamAnswer(query);
     }
 
     @PostMapping("/retrieve")
-    public R<?> retrieve(@RequestBody RagQuery query) {
+    public R<?> retrieve(@RequestBody RagQuery query,
+                          @RequestHeader(value = "X-User-Id", defaultValue = "1") Long userId) {
+        query.setUserId(userId);
         return R.ok(ragSearchService.retrieve(query));
     }
 }
