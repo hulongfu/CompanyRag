@@ -175,15 +175,15 @@
                 <el-button size="small" circle @click="createNewSession">➕</el-button>
             </div>
             <div class="session-list" v-if="sessions.length > 0">
-                <div v-for="session in sessions" :key="session.id" class="session-item"
-                     :class="{ active: currentSessionId === session.id }"
-                     @click="switchSession(session.id)">
+                <div v-for="session in sessions" :key="session.sessionId" class="session-item"
+                     :class="{ active: currentSessionId === session.sessionId }"
+                     @click="switchSession(session)">
                     <span class="session-icon">💬</span>
                     <div class="session-info">
                         <div class="session-title">{{ session.title || '新会话' }}</div>
                         <div class="session-meta">{{ formatTime(session.updateTime || session.createTime) }}</div>
                     </div>
-                    <span class="session-delete" @click.stop="deleteSession(session.id)" title="删除会话">✕</span>
+                    <span class="session-delete" @click.stop="deleteSession(session)" title="删除会话">✕</span>
                 </div>
             </div>
             <el-button class="new-session-btn" size="small" plain @click="createNewSession" style="width:calc(100% - 24px);margin:4px 12px 8px;">+ 新建会话</el-button>
@@ -348,7 +348,7 @@ createApp({
                     sessions.value = (json.data && json.data.records) || [];
                     // 如果有会话，默认选中第一个
                     if (sessions.value.length > 0 && !currentSessionId.value) {
-                        currentSessionId.value = sessions.value[0].id;
+                        currentSessionId.value = sessions.value[0].sessionId;
                     }
                 }
             } catch(e) { console.error('加载会话列表失败', e); }
@@ -365,40 +365,40 @@ createApp({
                 if (json.code === 200) {
                     const session = json.data;
                     sessions.value.unshift(session);
-                    currentSessionId.value = session.id;
-                    sessionMessagesMap.value[session.id] = [];
+                    currentSessionId.value = session.sessionId;
+                    sessionMessagesMap.value[session.sessionId] = [];
                     messages.value = [];
                 }
             } catch(e) { console.error('创建会话失败', e); }
         }
 
-        async function switchSession(sessionId) {
-            if (currentSessionId.value === sessionId) return;
+        async function switchSession(session) {
+            if (currentSessionId.value === session.sessionId) return;
             // 保存当前会话消息
             if (currentSessionId.value) {
                 sessionMessagesMap.value[currentSessionId.value] = [...messages.value];
             }
-            currentSessionId.value = sessionId;
+            currentSessionId.value = session.sessionId;
             // 恢复目标会话消息
-            if (sessionMessagesMap.value[sessionId]) {
-                messages.value = [...sessionMessagesMap.value[sessionId]];
+            if (sessionMessagesMap.value[session.sessionId]) {
+                messages.value = [...sessionMessagesMap.value[session.sessionId]];
             } else {
                 messages.value = [];
             }
         }
 
-        async function deleteSession(sessionId) {
+        async function deleteSession(session) {
             try {
-                const res = await fetch('/api/session/' + sessionId, {
+                const res = await fetch('/api/session/' + session.sessionId, {
                     method: 'DELETE',
                     headers: { 'X-Tenant-Id': tenantId.value }
                 });
                 const json = await res.json();
                 if (json.code === 200) {
-                    sessions.value = sessions.value.filter(s => s.id !== sessionId);
-                    delete sessionMessagesMap.value[sessionId];
-                    if (currentSessionId.value === sessionId) {
-                        currentSessionId.value = sessions.value.length > 0 ? sessions.value[0].id : null;
+                    sessions.value = sessions.value.filter(s => s.sessionId !== session.sessionId);
+                    delete sessionMessagesMap.value[session.sessionId];
+                    if (currentSessionId.value === session.sessionId) {
+                        currentSessionId.value = sessions.value.length > 0 ? sessions.value[0].sessionId : null;
                         messages.value = currentSessionId.value ? (sessionMessagesMap.value[currentSessionId.value] || []) : [];
                     }
                     ElementPlus.ElMessage.success('会话已删除');

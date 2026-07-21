@@ -16,8 +16,10 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -30,13 +32,16 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 class RagSessionServiceTest {
 
+    private static final Long TENANT_ID = 1L;
+    private static final Long USER_ID = 100L;
+    private static final String SESSION_ID = "test-session-uuid";
+    private static final String TITLE = "测试会话";
+
     @Mock
     private RagSessionMapper sessionMapper;
 
     @Mock
     private RagSessionMetaMapper sessionMetaMapper;
-
-    private RagSessionServiceImpl sessionService;
 
     @Captor
     private ArgumentCaptor<RagSessionMeta> metaCaptor;
@@ -44,16 +49,7 @@ class RagSessionServiceTest {
     @Captor
     private ArgumentCaptor<RagSession> sessionCaptor;
 
-    @Captor
-    private ArgumentCaptor<LambdaQueryWrapper<RagSessionMeta>> metaQueryCaptor;
-
-    @Captor
-    private ArgumentCaptor<LambdaQueryWrapper<RagSession>> sessionQueryCaptor;
-
-    private static final Long TENANT_ID = 100L;
-    private static final Long USER_ID = 200L;
-    private static final String SESSION_ID = "test-session-id-12345";
-    private static final String TITLE = "测试会话";
+    private RagSessionServiceImpl sessionService;
 
     @BeforeEach
     void setUp() {
@@ -70,8 +66,8 @@ class RagSessionServiceTest {
         assertEquals(TITLE, result.getTitle());
         assertEquals(0, result.getMessageCount());
         assertFalse(result.getIsDeleted());
-        assertEquals("[]", result.getTags());
-        assertEquals("{}", result.getMetadata());
+        assertEquals(new ArrayList<>(), result.getTags());
+        assertEquals(new HashMap<>(), result.getMetadata());
         verify(sessionMetaMapper).insert(metaCaptor.capture());
         RagSessionMeta captured = metaCaptor.getValue();
         assertEquals(result.getSessionId(), captured.getSessionId());
@@ -80,8 +76,8 @@ class RagSessionServiceTest {
         assertEquals(TITLE, captured.getTitle());
         assertEquals(0, captured.getMessageCount());
         assertFalse(captured.getIsDeleted());
-        assertEquals("[]", captured.getTags());
-        assertEquals("{}", captured.getMetadata());
+        assertEquals(new ArrayList<>(), captured.getTags());
+        assertEquals(new HashMap<>(), captured.getMetadata());
     }
 
     @Test
@@ -199,8 +195,7 @@ class RagSessionServiceTest {
         assertEquals(2, result.size());
         assertEquals("第一条消息", result.get(0).getQuery());
         assertEquals("第二条消息", result.get(1).getQuery());
-        verify(sessionMapper).selectList(sessionQueryCaptor.capture());
-        assertNotNull(sessionQueryCaptor.getValue());
+        verify(sessionMapper).selectList(any());
     }
 
     @Test
@@ -236,7 +231,7 @@ class RagSessionServiceTest {
         List<String> newTags = Arrays.asList("ai", "rag", "test");
         sessionService.updateSession(TENANT_ID, SESSION_ID, newTitle, newTags);
         assertEquals(newTitle, meta.getTitle());
-        assertEquals(newTags.toString(), meta.getTags());
+        assertEquals(newTags, meta.getTags());
         assertNotNull(meta.getUpdateTime());
         verify(sessionMetaMapper).updateById(meta);
     }
@@ -244,11 +239,11 @@ class RagSessionServiceTest {
     @Test
     void testUpdateSession_titleOnly() {
         RagSessionMeta meta = createDefaultMeta();
-        meta.setTags("[old]");
+        meta.setTags(Collections.singletonList("old"));
         when(sessionMetaMapper.selectOne(any())).thenReturn(meta);
         sessionService.updateSession(TENANT_ID, SESSION_ID, "仅更新标题", null);
         assertEquals("仅更新标题", meta.getTitle());
-        assertEquals("[old]", meta.getTags());
+        assertEquals(Collections.singletonList("old"), meta.getTags());
         assertNotNull(meta.getUpdateTime());
         verify(sessionMetaMapper).updateById(meta);
     }
@@ -261,7 +256,7 @@ class RagSessionServiceTest {
         List<String> newTags = Arrays.asList("new-tag");
         sessionService.updateSession(TENANT_ID, SESSION_ID, null, newTags);
         assertEquals("原标题", meta.getTitle());
-        assertEquals(newTags.toString(), meta.getTags());
+        assertEquals(newTags, meta.getTags());
         assertNotNull(meta.getUpdateTime());
         verify(sessionMetaMapper).updateById(meta);
     }
@@ -282,8 +277,8 @@ class RagSessionServiceTest {
         meta.setTitle(TITLE);
         meta.setMessageCount(0);
         meta.setIsDeleted(false);
-        meta.setTags("[]");
-        meta.setMetadata("{}");
+        meta.setTags(new ArrayList<>());
+        meta.setMetadata(new HashMap<>());
         meta.setCreateTime(LocalDateTime.now());
         return meta;
     }
