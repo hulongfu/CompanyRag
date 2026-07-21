@@ -14,6 +14,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -57,8 +59,8 @@ public class RagSessionServiceImpl implements RagSessionService {
         meta.setTitle(title);
         meta.setMessageCount(0);
         meta.setIsDeleted(false);
-        meta.setTags("[]");
-        meta.setMetadata("{}");
+        meta.setTags(new ArrayList<>());
+        meta.setMetadata(new HashMap<>());
 
         sessionMetaMapper.insert(meta);
         log.info("创建会话成功 | tenantId={} userId={} sessionId={} title={}",
@@ -184,7 +186,7 @@ public class RagSessionServiceImpl implements RagSessionService {
                 meta.setTitle(title);
             }
             if (tags != null) {
-                meta.setTags(tags.toString());
+                meta.setTags(tags);
             }
             meta.setUpdateTime(LocalDateTime.now());
             sessionMetaMapper.updateById(meta);
