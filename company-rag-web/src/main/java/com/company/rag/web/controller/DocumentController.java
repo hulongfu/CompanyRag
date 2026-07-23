@@ -40,4 +40,14 @@ public class DocumentController {
         }
         return R.ok(documentParseService.listDocuments(tenantId));
     }
+
+    @DeleteMapping("/{id}")
+    public R<Void> delete(@PathVariable Long id) {
+        Long tenantId = TenantContext.getTenantId();
+        if (tenantId == null) {
+            tenantId = 1L;
+        }
+        documentParseService.deleteDocument(id, tenantId);
+        return R.ok();
+    }
 }
