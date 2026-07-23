@@ -24,4 +24,12 @@ public interface DocumentParseService {
      * 查询租户下所有文档列表
      */
     List<Document> listDocuments(Long tenantId);
+
+    /**
+     * 删除文档（删除向量数据 + chunk 记录 + 文档记录）
+     *
+     * @param id       文档 ID
+     * @param tenantId 租户 ID
+     */
+    void deleteDocument(Long id, Long tenantId);
 }
