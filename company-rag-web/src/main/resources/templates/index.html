@@ -25,6 +25,9 @@
         .doc-item .doc-info { flex: 1; min-width: 0; }
         .doc-item .doc-name { font-size: 13px; color: #303133; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .doc-item .doc-meta { font-size: 11px; color: #909399; }
+        .doc-item .doc-delete { font-size: 12px; color: #c0c4cc; cursor: pointer; padding: 2px 4px; border-radius: 3px; display: none; }
+        .doc-item:hover .doc-delete { display: inline-block; }
+        .doc-item .doc-delete:hover { color: #f56c6c; background: #fef0f0; }
         /* 会话列表样式 */
         .session-list { max-height: 200px; overflow-y: auto; padding: 4px 8px; border-bottom: 1px solid #e4e7ed; }
         .session-item { padding: 8px 10px; border-radius: 6px; cursor: pointer; transition: all 0.2s; margin-bottom: 2px; display: flex; align-items: center; gap: 6px; }
@@ -237,6 +240,7 @@
                     <el-tag size="small" :type="doc.status === 2 ? 'success' : 'warning'" style="height:20px;line-height:18px;font-size:10px;">
                         {{ doc.status === 2 ? '已完成' : '处理中' }}
                     </el-tag>
+                    <span class="doc-delete" @click.stop="deleteDocument(doc)" title="删除文档">✕</span>
                 </div>
             </div>
         </aside>
@@ -365,6 +369,42 @@ createApp({
                 const json = await res.json();
                 if (json.code === 200) documents.value = json.data || [];
             } catch(e) { console.error('加载文档失败', e); }
+        }
+
+        // ========== 文档管理函数 ==========
+
+        async function deleteDocument(doc) {
+            try {
+                // 确认删除
+                await ElementPlus.ElMessageBox.confirm(
+                    `确定要删除文档「${doc.fileName}」吗？删除后不可恢复。`,
+                    '删除确认',
+                    { confirmButtonText: '确定删除', cancelButtonText: '取消', type: 'warning' }
+                );
+            } catch {
+                // 用户取消删除
+                return;
+            }
+            try {
+                const res = await fetch('/api/document/' + doc.id, {
+                    method: 'DELETE',
+                    headers: { 'X-Tenant-Id': tenantId.value }
+                });
+                const json = await res.json();
+                if (json.code === 200) {
+                    ElementPlus.ElMessage.success('文档已删除');
+                    // 如果删除的是当前选中的文档，取消选中
+                    if (selectedDocId.value === doc.id) {
+                        selectedDocId.value = null;
+                    }
+                    loadDocuments();
+                } else {
+                    ElementPlus.ElMessage.error('删除失败：' + (json.msg || ''));
+                }
+            } catch(e) {
+                console.error('删除文档失败', e);
+                ElementPlus.ElMessage.error('删除文档失败');
+            }
         }
 
         // ========== 会话管理函数 ==========
@@ -679,6 +719,7 @@ createApp({
             showUpload, showMetrics, splitStrategy, tenantId, chatContainer,
             metrics, uploadUrl, uploadHeaders, formatSize, renderMarkdown,
             sendMessage, loadDocuments, beforeUpload, onUploadSuccess,
+            deleteDocument,
             // 会话管理
             sessions, currentSessionId, createNewSession, switchSession, deleteSession, formatTime,
             // 租户管理

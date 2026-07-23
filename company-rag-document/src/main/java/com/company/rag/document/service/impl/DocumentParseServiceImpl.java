@@ -12,6 +12,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.tika.Tika;
 import org.apache.tika.exception.TikaException;
 import org.springframework.ai.vectorstore.VectorStore;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -44,6 +45,7 @@ public class DocumentParseServiceImpl implements DocumentParseService {
     private final List<DocumentSplitter> splitters;
     private final DocumentMapper documentMapper;
     private final DocumentChunkMapper chunkMapper;
+    private final JdbcTemplate jdbcTemplate;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -148,6 +150,26 @@ public class DocumentParseServiceImpl implements DocumentParseService {
                 .eq("tenant_id", tenantId)
                 .orderByDesc("create_time")
         );
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteDocument(Long id, Long tenantId) {
+        // 1. 删除向量数据（vector_store 表的 metadata 中存了 documentId）
+        String sql = "DELETE FROM vector_store WHERE metadata->>'documentId' = ?";
+        int deletedVectors = jdbcTemplate.update(sql, String.valueOf(id));
+        log.info("删除向量数据 | documentId={} | count={}", id, deletedVectors);
+
+        // 2. 删除 chunk 记录
+        int deletedChunks = chunkMapper.delete(
+            new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<DocumentChunk>()
+                .eq("document_id", id)
+        );
+        log.info("删除 chunk 记录 | documentId={} | count={}", id, deletedChunks);
+
+        // 3. 删除文档记录
+        documentMapper.deleteById(id);
+        log.info("删除文档记录 | documentId={}", id);
     }
 
     /**
