@@ -13,7 +13,7 @@ stages:
   - stage: Build and Test
     displayName: Build and Test
     steps:
-      - step: maven @alpine
+      - step: maven
         name: Maven Build
         displayName: Maven Build
         inputs:
@@ -23,7 +23,7 @@ stages:
   - stage: Docker Build
     displayName: Docker Build
     steps:
-      - step: bash @alpine
+      - step: bash
         name: Docker Build
         displayName: Docker Build
         inputs:
