@@ -12,22 +12,16 @@ triggers:
 stages:
   - stage: Build and Test
     displayName: Build and Test
-    jobs:
-      - job: Maven Build
-        displayName: Maven Build
-        steps:
-          - run: mvn clean package -B
-          - run: echo "构建完成，JAR 包已生成"
+    steps:
+      - run: mvn clean package -B
+      - run: echo "构建完成，JAR 包已生成"
   - stage: Docker Build
     displayName: Docker Build
-    jobs:
-      - job: Docker Build
-        displayName: Docker Build
-        steps:
-          - run: |
-              if [ -n "${GITEE_TAG}" ]; then
-                docker build -t company-rag:${GITEE_TAG} .
-                echo "Docker 镜像构建完成: company-rag:${GITEE_TAG}"
-              else
-                echo "非标签触发，跳过 Docker 构建"
-              fi
+    steps:
+      - run: |
+          if [ -n "${GITEE_TAG}" ]; then
+            docker build -t company-rag:${GITEE_TAG} .
+            echo "Docker 镜像构建完成: company-rag:${GITEE_TAG}"
+          else
+            echo "非标签触发，跳过 Docker 构建"
+          fi
