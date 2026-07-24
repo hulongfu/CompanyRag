@@ -26,4 +26,3 @@ stages:
       retry: "0"
       resource:
         cpu: "2"
-        memo
