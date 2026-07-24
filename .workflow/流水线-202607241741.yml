@@ -13,15 +13,24 @@ stages:
   - stage: Build and Test
     displayName: Build and Test
     steps:
-      - run: mvn clean package -B
-      - run: echo "构建完成，JAR 包已生成"
+      - step: maven @alpine
+        name: Maven Build
+        displayName: Maven Build
+        inputs:
+          commands: |
+            mvn clean package -B
+            echo "构建完成，JAR 包已生成"
   - stage: Docker Build
     displayName: Docker Build
     steps:
-      - run: |
-          if [ -n "${GITEE_TAG}" ]; then
-            docker build -t company-rag:${GITEE_TAG} .
-            echo "Docker 镜像构建完成: company-rag:${GITEE_TAG}"
-          else
-            echo "非标签触发，跳过 Docker 构建"
-          fi
+      - step: bash @alpine
+        name: Docker Build
+        displayName: Docker Build
+        inputs:
+          commands: |
+            if [ -n "${GITEE_TAG}" ]; then
+              docker build -t company-rag:${GITEE_TAG} .
+              echo "Docker 镜像构建完成: company-rag:${GITEE_TAG}"
+            else
+              echo "非标签触发，跳过 Docker 构建"
+            fi
