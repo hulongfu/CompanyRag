@@ -13,24 +13,24 @@ stages:
   - stage: Build and Test
     displayName: Build and Test
     steps:
-      - step: maven
+      - step: build@maven
         name: Maven Build
-        displayName: Maven Build
-        inputs:
-          commands: |
-            mvn clean package -B
-            echo "构建完成，JAR 包已生成"
+        displayName: Maven 构建
+        jdkVersion: "17"
+        mavenVersion: 3.9.9
+        commands: |
+          mvn clean package -B
+        artifacts:
+          - name: BUILD_ARTIFACT
+            path:
+              - ./company-rag-bootstrap/target/*.jar
+            type: .tar.gz
   - stage: Docker Build
     displayName: Docker Build
     steps:
-      - step: bash
+      - step: build@docker
         name: Docker Build
-        displayName: Docker Build
-        inputs:
-          commands: |
-            if [ -n "${GITEE_TAG}" ]; then
-              docker build -t company-rag:${GITEE_TAG} .
-              echo "Docker 镜像构建完成: company-rag:${GITEE_TAG}"
-            else
-              echo "非标签触发，跳过 Docker 构建"
-            fi
+        displayName: Docker 镜像构建
+        image:
+          tag: company-rag:${GITEE_TAG}
+        dockerfile: ./Dockerfile
