@@ -36,13 +36,6 @@ spring:
     multipart:
       max-file-size: 50MB
       max-request-size: 100MB
-  springdoc:
-    api-docs:
-      path: /api-docs
-    swagger-ui:
-      path: /swagger-ui.html
-      operations-sorter: method
-    show-actuator: false
   # Redis 配置
   data:
     redis:
@@ -50,6 +43,15 @@ spring:
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:}
       database: 0
+
+# SpringDoc OpenAPI 配置
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+  show-actuator: false
 
 # MyBatis-Plus
 mybatis-plus:
