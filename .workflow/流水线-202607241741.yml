@@ -8,16 +8,16 @@ stages:
   trigger: auto
   steps:
   - step: build@maven
-    name: 6b4fd096
+    name: Maven Build
     displayName: Maven 构建
     jdkVersion: "17"
-    mavenVersion: 3.3.9
+    mavenVersion: 3.9.9
     commands:
     - mvn clean package -B
     artifacts:
     - name: BUILD_ARTIFACT
       path:
-      - ./target
+      - ./company-rag-bootstrap/target/*.jar
       type: .tar.gz
     settings: []
     caches:
@@ -26,25 +26,4 @@ stages:
       retry: "0"
       resource:
         cpu: "2"
-        memory: "4"
-- name: Docker Build
-  displayName: Docker Build
-  strategy: naturally
-  trigger: auto
-  steps:
-  - step: build@docker
-    name: Docker Build
-    displayName: Docker 镜像构建
-    repository: "{{CERTIFICATION.${CERTIFICATE}.server}}"
-    username: "{{CERTIFICATION.${CERTIFICATE}.username}}"
-    password: "{{CERTIFICATION.${CERTIFICATE}.password}}"
-    dockerfile: ./Dockerfile
-triggers:
-  trigger: auto
-  push:
-    branches:
-      prefix:
-      - main
-      precise: []
-      include: []
-notify: []
+        memo
