@@ -1,0 +1,26 @@
+pipeline:
+  name: CompanyRag CI
+  trigger:
+    push:
+      - main
+    tag:
+      - v*
+  stages:
+    - stage: Build and Test
+      jobs:
+        - job: Maven Build
+          steps:
+            - run: mvn clean test -B
+            - run: mvn package -DskipTests -B
+            - run: echo "✅ 构建完成，JAR 包已生成"
+    - stage: Docker Build
+      jobs:
+        - job: Docker Build
+          steps:
+            - run: |
+                if [ -n "${GITEE_TAG}" ]; then
+                  docker build -t company-rag:${GITEE_TAG} .
+                  echo "✅ Docker 镜像构建完成: company-rag:${GITEE_TAG}"
+                else
+                  echo "⏭️ 非标签触发，跳过 Docker 构建"
+                fi
