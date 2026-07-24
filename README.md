@@ -1,5 +1,7 @@
 # CompanyRag - 企业知识库RAG系统
 
+[![Gitee Go CI](https://gitee.com/LongHuDaoChang/CompanyRag/badge/ci.svg)](https://gitee.com/LongHuDaoChang/CompanyRag/ci)
+
 > 企业级知识库检索增强生成(RAG)系统，基于 Spring AI（OpenAI 兼容，模型供应商可插拔）+ PGVector
 
 ## 系统架构
