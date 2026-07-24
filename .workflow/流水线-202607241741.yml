@@ -12,8 +12,7 @@ stages:
     displayName: Maven 构建
     jdkVersion: "17"
     mavenVersion: 3.9.9
-    commands:
-    - mvn clean package -B
+    commands: mvn clean package -B
     artifacts:
     - name: BUILD_ARTIFACT
       path:
@@ -26,3 +25,4 @@ stages:
       retry: "0"
       resource:
         cpu: "2"
+        memory: "4"
