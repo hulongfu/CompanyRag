@@ -53,5 +53,6 @@ stages:
         artifacts: []
         isCache: false
         # 可选项：amd64, arm64
-        processorType: "[amd64]"
+        processorType:
+          - amd64
         parameter: {}
