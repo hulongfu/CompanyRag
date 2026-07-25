@@ -11,7 +11,7 @@ stages:
     name: Maven Build
     displayName: Maven 构建
     jdkVersion: "17"
-    mavenVersion: 3.9.9
+    mavenVersion: 3.6.3
     commands:
     - echo "=== Current working directory ==="
     - pwd
