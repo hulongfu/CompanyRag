@@ -12,7 +12,16 @@ stages:
     displayName: Maven 构建
     jdkVersion: "17"
     mavenVersion: 3.9.9
-    commands: mvn clean package -B
+    commands:
+    - echo "=== Current working directory ==="
+    - pwd
+    - ls -la
+    - echo "=== Java version ==="
+    - java -version
+    - echo "=== Maven version ==="
+    - mvn -version
+    - echo "=== Starting Maven build ==="
+    - mvn clean package -B
     artifacts:
     - name: BUILD_ARTIFACT
       path:
