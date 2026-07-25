@@ -13,7 +13,7 @@ stages:
     jdkVersion: "17"
     mavenVersion: 3.6.3
     commands:
-    - mvn clean package -B -DskipTests
+    - mvn clean package -B -Dtest='!@IntegrationTest'
     artifacts:
     - name: BUILD_ARTIFACT
       path:
