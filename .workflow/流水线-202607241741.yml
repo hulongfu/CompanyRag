@@ -13,7 +13,7 @@ stages:
     jdkVersion: "17"
     mavenVersion: 3.6.3
     commands:
-    - mvn clean package -B -Dtest='!@IntegrationTest' -Dsurefire.failIfNoSpecifiedTests=false
+    - mvn clean package -B -DexcludedGroups=integration-test -Dsurefire.failIfNoSpecifiedTests=false
     artifacts:
     - name: BUILD_ARTIFACT
       path:
