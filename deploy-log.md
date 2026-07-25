@@ -95,3 +95,26 @@
 - remote_head_check_command: git rev-parse HEAD && git ls-remote gitee HEAD
 - remote_head:            d645fe3aa7d460d5071d5d6ddda26859ca80d1ee (gitee)
 - result:                 推送成功，Gitee 远端 HEAD 与本地提交哈希一致
+
+## Git Push
+
+- commit_type:            Task
+- task_id:                0000
+- task_name:              untitled
+- commit_hash:            6c9626e9fa6c5af2787d4fa005b4ab2f9f8ca86f
+- branch:                 main
+- remote:                 gitee
+- staged_files:
+  - company-rag-document/pom.xml
+  - company-rag-document/src/main/java/com/company/rag/document/service/DocumentParseService.java
+  - company-rag-document/src/main/java/com/company/rag/document/service/impl/DocumentParseServiceImpl.java
+  - company-rag-web/src/main/java/com/company/rag/web/controller/DocumentController.java
+  - company-rag-web/src/main/resources/templates/index.html
+- commit_message:         Task:0000_untitled：add document delete feature in chat page
+- commit_command:         git commit -m "Task:0000_untitled：add document delete feature in chat page"
+- commit_exit_code:       0
+- push_command:           git push gitee main
+- push_exit_code:         0
+- remote_head_check_command: git rev-parse HEAD && git ls-remote gitee HEAD
+- remote_head:            6c9626e9fa6c5af2787d4fa005b4ab2f9f8ca86f (gitee)
+- result:                 推送成功，Gitee 远端 HEAD 与本地提交哈希一致
