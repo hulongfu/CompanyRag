@@ -1,6 +1,21 @@
 # 构建阶段
 FROM maven:3.9-eclipse-temurin-17 AS build
 WORKDIR /build
+
+# 配置阿里云 Maven 镜像加速
+COPY <<EOF /usr/share/maven/ref/settings-docker.xml
+<settings>
+  <mirrors>
+    <mirror>
+      <id>aliyun-maven</id>
+      <mirrorOf>central</mirrorOf>
+      <name>阿里云公共仓库</name>
+      <url>https://maven.aliyun.com/repository/public</url>
+    </mirror>
+  </mirrors>
+</settings>
+EOF
+
 COPY pom.xml .
 COPY company-rag-common/pom.xml company-rag-common/
 COPY company-rag-tenant/pom.xml company-rag-tenant/
