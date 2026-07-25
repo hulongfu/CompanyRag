@@ -90,6 +90,11 @@
                 <version>${jsoup.version}</version>
             </dependency>
             <dependency>
+                <groupId>org.springdoc</groupId>
+                <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+                <version>${springdoc.version}</version>
+            </dependency>
+            <dependency>
                 <groupId>com.company</groupId>
                 <artifactId>company-rag-common</artifactId>
                 <version>${project.version}</version>
@@ -157,16 +162,6 @@
             </plugins>
         </pluginManagement>
     </build>
-
-    <profiles>
-        <!-- 集成测试 Profile：默认关闭，通过 -Pintegration-test 启用 -->
-        <profile>
-            <id>integration-test</id>
-            <properties>
-                <skipTests>false</skipTests>
-            </properties>
-        </profile>
-    </profiles>
 
     <repositories>
         <repository>
