@@ -1,20 +1,9 @@
 # 构建阶段
-FROM maven:3.9-eclipse-temurin-17 AS build
+FROM docker.m.daocloud.io/library/maven:3.9-eclipse-temurin-17 AS build
 WORKDIR /build
 
 # 配置阿里云 Maven 镜像加速
-COPY <<EOF /usr/share/maven/ref/settings-docker.xml
-<settings>
-  <mirrors>
-    <mirror>
-      <id>aliyun-maven</id>
-      <mirrorOf>central</mirrorOf>
-      <name>阿里云公共仓库</name>
-      <url>https://maven.aliyun.com/repository/public</url>
-    </mirror>
-  </mirrors>
-</settings>
-EOF
+COPY maven-settings.xml /usr/share/maven/ref/settings-docker.xml
 
 COPY pom.xml .
 COPY company-rag-common/pom.xml company-rag-common/
@@ -30,7 +19,7 @@ COPY . .
 RUN mvn package -DskipTests -B
 
 # 运行阶段
-FROM eclipse-temurin:17-jre
+FROM docker.m.daocloud.io/library/eclipse-temurin:17-jre
 WORKDIR /app
 COPY --from=build /build/company-rag-bootstrap/target/*.jar app.jar
 EXPOSE 8080
