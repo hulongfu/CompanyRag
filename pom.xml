@@ -15,8 +15,8 @@
     <artifactId>company-rag</artifactId>
     <version>1.0.0-SNAPSHOT</version>
     <packaging>pom</packaging>
-    <name>CompanyRag - 企业知识库RAG系统</name>
-    <description>企业级知识库RAG系统：文档解析→智能切分→向量化→混合检索→Rerank→流式回答</description>
+    <name>CompanyRag - 企业知识库 RAG 系统</name>
+    <description>企业级知识库 RAG 系统：文档解析→智能切分→向量化→混合检索→Rerank→流式回答</description>
 
     <modules>
         <module>company-rag-common</module>
@@ -36,6 +36,7 @@
         <redisson.version>3.40.2</redisson.version>
         <jsoup.version>1.18.3</jsoup.version>
         <tika.version>3.1.0</tika.version>
+        <springdoc.version>2.8.6</springdoc.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
 
@@ -162,6 +163,16 @@
             </plugins>
         </pluginManagement>
     </build>
+
+    <profiles>
+        <!-- 集成测试 Profile：默认关闭，通过 -Pintegration-test 启用 -->
+        <profile>
+            <id>integration-test</id>
+            <properties>
+                <skipTests>false</skipTests>
+            </properties>
+        </profile>
+    </profiles>
 
     <repositories>
         <repository>
