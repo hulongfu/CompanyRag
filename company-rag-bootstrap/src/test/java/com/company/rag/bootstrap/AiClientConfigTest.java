@@ -1,10 +1,9 @@
 package com.company.rag.bootstrap;
 
+import com.company.rag.common.IntegrationTest;
 import com.company.rag.rag.config.AiClientConfig;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.ActiveProfiles;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -13,8 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * 验证 AI 客户端配置能否正确加载
  * 测试使用统一的 spring.ai.openai 配置支持不同厂商的兼容模型
  */
-@SpringBootTest
-@ActiveProfiles("dev")
+@IntegrationTest
 public class AiClientConfigTest {
 
     @Autowired
