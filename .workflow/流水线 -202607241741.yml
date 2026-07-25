@@ -28,9 +28,9 @@ stages:
     name: build-docker-example
     displayName: 镜像构建
     type: account
-    repository: "{{CERTIFICATION.${CERTIFICATE}.server}}"
-    username: "{{CERTIFICATION.${CERTIFICATE}.username}}"
-    password: "{{CERTIFICATION.${CERTIFICATE}.password}}"
+    repository: "{{CERTIFICATION.gitee-docker-cred.server}}"
+    username: "{{CERTIFICATION.gitee-docker-cred.username}}"
+    password: "{{CERTIFICATION.gitee-docker-cred.password}}"
     tag: "${GITEE_PIPELINE_BUILD_NUMBER}"
     dockerfile: ./Dockerfile
     context: ""
