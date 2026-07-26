@@ -15,19 +15,14 @@ public class FusedResult extends NormalizedResult {
      */
     private Double finalScore = 0.0;
     
-    /**
-     * 文档 ID（用于去重）
-     */
-    private String documentId;
-    
     public FusedResult() {
         super();
     }
     
     public FusedResult(NormalizedResult original) {
         super(original);
-        this.original = original.original;
-        this.normalizedScore = original.normalizedScore;
+        this.original = original.getOriginal();
+        this.normalizedScore = original.getNormalizedScore();
     }
     
     /**
