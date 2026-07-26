@@ -47,7 +47,7 @@ class DocumentParseServiceImplEventTest {
         // Given
         when(jdbcTemplate.update(anyString(), anyString())).thenReturn(0);
         when(chunkMapper.delete(any())).thenReturn(0);
-        when(documentMapper.deleteById(any())).thenReturn(0);
+        when(documentMapper.deleteById(anyLong())).thenReturn(0);
 
         // When
         service.deleteDocument(100L, 1L);
