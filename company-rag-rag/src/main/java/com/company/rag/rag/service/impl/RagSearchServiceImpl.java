@@ -8,6 +8,9 @@ import com.company.rag.rag.model.RagResult;
 import com.company.rag.rag.observability.RagMetricsRecorder;
 import com.company.rag.rag.prompt.PromptTemplate;
 import com.company.rag.rag.rerank.CrossEncoderReranker;
+import com.company.rag.rag.retriever.impl.FullTextRetriever;
+import com.company.rag.rag.retriever.impl.VectorRetriever;
+import com.company.rag.rag.service.MultiRetrieveService;
 import com.company.rag.rag.service.RagSearchService;
 import com.company.rag.rag.service.RagSessionService;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
@@ -36,6 +39,9 @@ public class RagSearchServiceImpl implements RagSearchService {
     private final RagMetricsRecorder metricsRecorder;
     private final PromptTemplate promptTemplate;
     private final RagSessionService ragSessionService;
+    private final MultiRetrieveService multiRetrieveService;
+    private final VectorRetriever vectorRetriever;
+    private final FullTextRetriever fullTextRetriever;
 
     @Override
     @CircuitBreaker(name = "rag", fallbackMethod = "searchFallback")
@@ -193,72 +199,20 @@ public class RagSearchServiceImpl implements RagSearchService {
     }
 
     /**
-     * 混合检索：向量检索 + 关键词检索（加权融合）
+     * 混合检索：委托给多路检索服务
      */
     private List<RagResult.ChunkResult> hybridRetrieve(RagQuery query) {
-        // 向量检索
-        SearchRequest request = SearchRequest.builder()
-                .query(query.getQuery())
-                .topK(query.getTopK())
-                .similarityThreshold(0.5)
-                .build();
-        var vectorResults = vectorStore.similaritySearch(request);
-
-        // 将向量结果转换为 ChunkResult
-        // 注意：实际项目中需从 VectorStore 返回的 Document 中提取 metadata
-        List<RagResult.ChunkResult> allChunks = new ArrayList<>();
-        for (var doc : vectorResults) {
-            RagResult.ChunkResult cr = new RagResult.ChunkResult();
-            cr.setChunkId(doc.getId() != null ? doc.getId() : "");
-            cr.setContent(doc.getText());
-            cr.setVectorScore(doc.getMetadata() != null ?
-                    ((Number) doc.getMetadata().getOrDefault("distance", 0.0)).doubleValue() : 0.0);
-            cr.setDocumentName(doc.getMetadata() != null ?
-                    (String) doc.getMetadata().getOrDefault("documentName", "未知") : "未知");
-            // 设置 chunkIndex（从 metadata 中获取）
-            Object chunkIndexObj = doc.getMetadata() != null ? doc.getMetadata().get("chunkIndex") : null;
-            if (chunkIndexObj != null) {
-                cr.setChunkIndex(((Number) chunkIndexObj).intValue());
-            }
-            cr.setFinalScore(cr.getVectorScore());
-            allChunks.add(cr);
+        // 根据检索策略选择检索方式
+        if ("VECTOR_ONLY".equalsIgnoreCase(query.getRetrievalStrategy())) {
+            // 降级为仅向量检索
+            return vectorRetriever.retrieve(query.getQuery(), query.getTopK());
+        } else if ("FULLTEXT_ONLY".equalsIgnoreCase(query.getRetrievalStrategy())) {
+            // 降级为仅全文检索
+            return fullTextRetriever.retrieve(query.getQuery(), query.getTopK());
+        } else {
+            // 默认：多路混合检索
+            return multiRetrieveService.retrieve(query);
         }
-        
-        // 诊断日志：打印每个 chunk 的简要信息
-        log.info("转换为 ChunkResult 完成 | 数量={} | 前 3 个 chunk 内容预览：{}", allChunks.size(),
-                allChunks.stream().limit(3).map(c -> 
-                    String.format("[文档:%s, chunkIndex:%s, 内容:%s...]", 
-                        c.getDocumentName(), 
-                        c.getChunkIndex(), 
-                        c.getContent() != null && c.getContent().length() > 30 ? c.getContent().substring(0, 30) : "N/A")
-                ).collect(Collectors.joining(" | ")));
-
-        // 关键词检索增强（简单实现：用BM25风格评分）
-        // 实际项目中可集成Elasticsearch或PostgreSQL全文检索
-        String[] queryTerms = query.getQuery().toLowerCase().split("\s+");
-        for (RagResult.ChunkResult chunk : allChunks) {
-            double keywordScore = computeKeywordScore(chunk.getContent(), queryTerms);
-            chunk.setKeywordScore(keywordScore);
-            // 加权融合
-            chunk.setFinalScore(
-                    query.getVectorWeight() * (chunk.getVectorScore() != null ? chunk.getVectorScore() : 0)
-                            + query.getKeywordWeight() * keywordScore);
-        }
-        // 按最终得分排序
-        allChunks.sort((a, b) -> Double.compare(b.getFinalScore(), a.getFinalScore()));
-        return allChunks;
-    }
-
-    /**
-     * 简单关键词匹配评分
-     */
-    private double computeKeywordScore(String content, String[] terms) {
-        String lower = content.toLowerCase();
-        int matchCount = 0;
-        for (String term : terms) {
-            if (lower.contains(term)) matchCount++;
-        }
-        return terms.length > 0 ? (double) matchCount / terms.length : 0;
     }
 
     private String buildCacheKey(RagQuery query) {
