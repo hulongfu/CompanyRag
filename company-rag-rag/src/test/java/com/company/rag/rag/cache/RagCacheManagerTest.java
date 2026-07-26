@@ -1,7 +1,6 @@
 package com.company.rag.rag.cache;
 
 import com.company.rag.common.constant.RagConstant;
-import com.company.rag.rag.model.RagResult;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -22,7 +21,7 @@ class RagCacheManagerTest {
     private RedissonClient redissonClient;
 
     @Mock
-    private RMapCache<String, RagResult> cache;
+    private RMapCache<Object, Object> cache;
 
     private RagCacheManager manager;
 

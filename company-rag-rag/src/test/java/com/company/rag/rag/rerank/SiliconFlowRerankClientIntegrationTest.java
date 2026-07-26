@@ -95,7 +95,7 @@ class SiliconFlowRerankClientIntegrationTest {
         // Then
         Collections.sort(latencies);
         long p95 = latencies.get((int) (latencies.size() * 0.95));
-        long avg = latencies.stream().mapToLong(Long::longValue).average().orElse(0);
+        long avg = (long) latencies.stream().mapToLong(Long::longValue).average().orElse(0);
 
         // P95 < 200ms, 平均 < 150ms
         assertThat(p95).isLessThan(5000); // 首次调用可能有网络延迟，放宽限制
