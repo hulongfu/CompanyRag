@@ -1,5 +1,7 @@
 package com.company.rag.document.service.impl;
 
+import com.company.rag.common.event.DocumentEvent;
+import com.company.rag.common.event.DocumentEventType;
 import com.company.rag.document.entity.Document;
 import com.company.rag.document.entity.DocumentChunk;
 import com.company.rag.document.mapper.DocumentChunkMapper;
@@ -46,6 +48,7 @@ public class DocumentParseServiceImpl implements DocumentParseService {
     private final DocumentMapper documentMapper;
     private final DocumentChunkMapper chunkMapper;
     private final JdbcTemplate jdbcTemplate;
+    private final org.springframework.context.ApplicationEventPublisher eventPublisher;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -96,6 +99,8 @@ public class DocumentParseServiceImpl implements DocumentParseService {
             try { documentMapper.updateById(doc); } catch (Exception ignored) {}
         }
 
+        // 发布文档事件触发缓存失效
+        eventPublisher.publishEvent(new DocumentEvent(this, tenantId, doc.getId(), DocumentEventType.ADDED));
         return doc;
     }
 
@@ -170,6 +175,8 @@ public class DocumentParseServiceImpl implements DocumentParseService {
         // 3. 删除文档记录
         documentMapper.deleteById(id);
         log.info("删除文档记录 | documentId={}", id);
+        // 发布文档事件触发缓存失效
+        eventPublisher.publishEvent(new DocumentEvent(this, tenantId, id, DocumentEventType.DELETED));
     }
 
     /**
