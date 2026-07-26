@@ -19,5 +19,23 @@ public class RagQuery {
     private Boolean enableRerank = true;
     private Long userId;                // 用户ID
     private Boolean stream = false;     // 是否流式
-    private String sessionId;           // 会话ID（用于对话历史）
+    private String sessionId;           // 会话 ID（用于对话历史）
+    
+    /**
+     * 检索策略
+     * HYBRID: 多路混合检索（默认）
+     * VECTOR_ONLY: 仅向量检索
+     * FULLTEXT_ONLY: 仅全文检索
+     */
+    private String retrievalStrategy = "HYBRID";
+    
+    /**
+     * 融合后进入 Rerank 的候选数（默认 50）
+     */
+    private Integer fusionTopK = 50;
+    
+    /**
+     * 分数阈值（默认 0.3）
+     */
+    private Double scoreThreshold = 0.3;
 }
