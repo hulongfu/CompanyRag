@@ -93,7 +93,8 @@ public class RagCacheManager {
      */
     public void invalidateByTenant(Long tenantId) {
         RMapCache<String, RagResult> cache = getCache();
-        String prefix = tenantId + ":";
+        // Cache key 格式: company:rag:vector:{tenantId}:{query}
+        String prefix = RagConstant.CACHE_DOC_VECTOR + tenantId + ":";
 
         try {
             int deletedCount = 0;
