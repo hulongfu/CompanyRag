@@ -60,7 +60,7 @@ public class CrossEncoderReranker {
     /**
      * 将 RerankResponse 映射为 ChunkResult 列表
      */
-    private List<RagResult.ChunkResult> mapToChunkResults(RerankResponse response,
+    private List<RagResult.ChunkResult> mapToChunkResults(RerankResponse response, 
                                                            List<RagResult.ChunkResult> originalChunks) {
         // 创建索引到原始 chunk 的映射
         Map<Integer, RagResult.ChunkResult> indexToChunk = new HashMap<>();
@@ -87,9 +87,9 @@ public class CrossEncoderReranker {
      */
     public List<RagResult.ChunkResult> rerankFallback(String query, List<RagResult.ChunkResult> chunks,
                                                        int topK, Throwable t) {
-        log.warn("重排序服务降级 | query={} | 候选数={} | 原因：{}",
+        log.warn("重排序服务降级 | query={} | 候选数={} | 原因：{}", 
                  query, chunks.size(), t.getMessage());
-
+        
         // 按 finalScore 降序排列
         return chunks.stream()
                 .sorted(Comparator.comparingDouble(RagResult.ChunkResult::getFinalScore).reversed())
