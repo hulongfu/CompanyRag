@@ -21,6 +21,7 @@ import com.company.rag.tenant.context.TenantAwareJdbcTemplate;
  * 使用统一的 spring.ai.openai 配置，支持不同厂商的 OpenAI 兼容模型：
  * - Chat 模型：使用 spring.ai.openai.chat 配置
  * - Embedding 模型：使用 spring.ai.openai.embedding 配置
+ * - Rerank 模型：使用 spring.ai.openai.rerank 配置
  * </p>
  */
 @Configuration
@@ -32,26 +33,9 @@ public class AiClientConfig {
     @Configuration
     @ConfigurationProperties(prefix = "spring.ai.openai")
     public static class OpenAiConfigProperties {
-        private String apiKey;
-        private String baseUrl;
         private ChatConfig chat = new ChatConfig();
         private EmbeddingConfig embedding = new EmbeddingConfig();
-
-        public String getApiKey() {
-            return apiKey;
-        }
-
-        public void setApiKey(String apiKey) {
-            this.apiKey = apiKey;
-        }
-
-        public String getBaseUrl() {
-            return baseUrl;
-        }
-
-        public void setBaseUrl(String baseUrl) {
-            this.baseUrl = baseUrl;
-        }
+        private RerankConfig rerank = new RerankConfig();
 
         public ChatConfig getChat() {
             return chat;
@@ -69,11 +53,37 @@ public class AiClientConfig {
             this.embedding = embedding;
         }
 
+        public RerankConfig getRerank() {
+            return rerank;
+        }
+
+        public void setRerank(RerankConfig rerank) {
+            this.rerank = rerank;
+        }
+
         /**
          * Chat 模型配置
          */
         public static class ChatConfig {
+            private String apiKey;
+            private String baseUrl;
             private Options options = new Options();
+
+            public String getApiKey() {
+                return apiKey;
+            }
+
+            public void setApiKey(String apiKey) {
+                this.apiKey = apiKey;
+            }
+
+            public String getBaseUrl() {
+                return baseUrl;
+            }
+
+            public void setBaseUrl(String baseUrl) {
+                this.baseUrl = baseUrl;
+            }
 
             public Options getOptions() {
                 return options;
@@ -149,24 +159,61 @@ public class AiClientConfig {
                 }
             }
         }
+
+        /**
+         * Rerank 模型配置
+         */
+        public static class RerankConfig {
+            private String apiKey;
+            private String baseUrl;
+            private Options options = new Options();
+
+            public String getApiKey() {
+                return apiKey;
+            }
+
+            public void setApiKey(String apiKey) {
+                this.apiKey = apiKey;
+            }
+
+            public String getBaseUrl() {
+                return baseUrl;
+            }
+
+            public void setBaseUrl(String baseUrl) {
+                this.baseUrl = baseUrl;
+            }
+
+            public Options getOptions() {
+                return options;
+            }
+
+            public void setOptions(Options options) {
+                this.options = options;
+            }
+
+            public static class Options {
+                private String model;
+
+                public String getModel() {
+                    return model;
+                }
+
+                public void setModel(String model) {
+                    this.model = model;
+                }
+            }
+        }
     }
 
     /**
      * 创建 Embedding 模型（使用 spring.ai.openai.embedding 配置）
-     * 优先使用 embedding 专用配置，如果不存在则使用顶层配置
      */
     @Bean
     @Primary
     public EmbeddingModel embeddingModel(OpenAiConfigProperties properties) {
-        // 优先使用 embedding 专用的 apiKey 和 baseUrl，如果不存在则使用顶层配置
-        String apiKey = properties.getEmbedding().getApiKey() != null 
-                ? properties.getEmbedding().getApiKey() 
-                : properties.getApiKey();
-        
-        String baseUrl = properties.getEmbedding().getBaseUrl() != null 
-                ? properties.getEmbedding().getBaseUrl() 
-                : properties.getBaseUrl();
-        
+        String apiKey = properties.getEmbedding().getApiKey();
+        String baseUrl = properties.getEmbedding().getBaseUrl();
         String model = properties.getEmbedding().getOptions().getModel() != null 
                 ? properties.getEmbedding().getOptions().getModel() 
                 : "text-embedding-ada-002";
