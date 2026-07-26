@@ -59,7 +59,7 @@
 2. **语义切分**：三种切分策略可选
 3. **向量化**：OpenAI 兼容 Embedding 模型（默认硅基流动）→ PGVector(HNSW索引)
 4. **混合检索**：向量检索 + 关键词检索加权融合
-5. **重排序**：Cross-Encoder Rerank 提升Top-K准确率
+5. **重排序**：Cross-Encoder Rerank 提升Top-K准确率（硅基流动 BAAI/bge-reranker-v2-m3 模型）
 6. **流式回答**：SSE 流式输出
 
 ### 🎯 切分策略对比 (工程亮点)
@@ -100,7 +100,7 @@
 | 数据库 | PostgreSQL 16 + PGVector |
 | 缓存 | Redis (Redisson) |
 | ORM | MyBatis-Plus 3.5 |
-| AI模型 | Chat: 通义千问 qwen-max（默认，OpenAI 兼容）／Embedding: 硅基流动（默认，可独立替换） |
+| AI模型 | Chat: 通义千问 qwen-max（默认，OpenAI 兼容）／Embedding: 硅基流动（默认，可独立替换）／Rerank: 硅基流动 BAAI/bge-reranker-v2-m3（默认，零Token成本） |
 | 文档解析 | Apache Tika |
 | 熔断限流 | Resilience4j |
 | 可观测性 | Micrometer + Prometheus + Grafana |
