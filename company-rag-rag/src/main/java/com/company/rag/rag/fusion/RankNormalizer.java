@@ -1,5 +1,6 @@
 package com.company.rag.rag.fusion;
 
+import com.company.rag.rag.model.NormalizedResult;
 import com.company.rag.rag.model.RagResult;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
