@@ -28,9 +28,9 @@ stages:
     name: build-docker-example
     displayName: 镜像构建
     type: account
-    repository: "{{CERTIFICATION.gitee-docker-cred.server}}"
-    username: "{{CERTIFICATION.gitee-docker-cred.username}}"
-    password: "{{CERTIFICATION.gitee-docker-cred.password}}"
+    repository: hub.gitee.com
+    username: LongHuDaoChang
+    password: 33b59a1f781682e426be8fe3606b40ff
     tag: "${GITEE_PIPELINE_BUILD_NUMBER}"
     dockerfile: ./Dockerfile
     context: ""
@@ -39,6 +39,8 @@ stages:
     processorType:
     - amd64
     parameter: {}
+    strategy:
+      retry: "0"
     outParamsAlias:
       GITEE_DOCKER_IMAGE: GITEE_DOCKER_IMAGE_0
 triggers:
