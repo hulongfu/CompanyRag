@@ -80,7 +80,9 @@ public class MultiRetrieveServiceImpl implements MultiRetrieveService {
         // 5. Rerank 精排
         List<RagResult.ChunkResult> reranked;
         if (query.getEnableRerank() && !filtered.isEmpty()) {
-            reranked = reranker.rerank(query.getQuery(), filtered, query.getRerankTopK());
+            // FusedResult 是 ChunkResult 的子类，可以直接转换
+            List<RagResult.ChunkResult> candidates = new java.util.ArrayList<>(filtered);
+            reranked = reranker.rerank(query.getQuery(), candidates, query.getRerankTopK());
             log.info("Rerank 完成 | 最终数量={}", reranked.size());
         } else {
             reranked = new java.util.ArrayList<>(filtered);
