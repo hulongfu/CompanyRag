@@ -21,8 +21,7 @@ public class FusedResult extends NormalizedResult {
     
     public FusedResult(NormalizedResult original) {
         super(original);
-        this.original = original.getOriginal();
-        this.normalizedScore = original.getNormalizedScore();
+        // 不需要额外设置，super(original) 已经复制了所有字段
     }
     
     /**
