@@ -18,16 +18,16 @@ spring:
         options:
           model: BAAI/bge-large-zh-v1.5
        # Rerank 模型配置（硅基流动 - 专用 Rerank API）
-       rerank:
-         api-key: ${SILICONFLOW_API_KEY:default_siliconflow_api_key}
-         base-url: https://api.siliconflow.cn
-         options:
-           model: BAAI/bge-reranker-v2-m3
-   data:
-     redis:
-       host: ${REDIS_HOST:localhost}
-       port: ${REDIS_PORT:6379}
-       password: ${REDIS_PASSWORD:[REDACTED-REDIS-PASSWORD]}
+      rerank:
+        api-key: ${SILICONFLOW_API_KEY:default_siliconflow_api_key}
+        base-url: https://api.siliconflow.cn
+        options:
+          model: BAAI/bge-reranker-v2-m3
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:[REDACTED-REDIS-PASSWORD]}
 
 # 多路检索配置
 rag:
