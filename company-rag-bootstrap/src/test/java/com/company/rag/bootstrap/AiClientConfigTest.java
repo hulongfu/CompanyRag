@@ -24,8 +24,8 @@ public class AiClientConfigTest {
     @Test
     public void testOpenAiConfigPropertiesShouldNotBeNull() {
         assertNotNull(openAiConfigProperties, "OpenAiConfigProperties 应该被创建");
-        assertNotNull(openAiConfigProperties.getApiKey(), 
-            "API key 不能为 null - 需要配置 spring.ai.openai.api-key");
+        assertNotNull(openAiConfigProperties.getChat().getApiKey(), 
+            "Chat API key 不能为 null - 需要配置 spring.ai.openai.chat.api-key");
     }
 
     /**

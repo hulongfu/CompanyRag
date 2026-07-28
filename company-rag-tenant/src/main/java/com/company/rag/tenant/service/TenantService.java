@@ -30,4 +30,11 @@ public interface TenantService {
      * 获取所有租户列表
      */
     java.util.List<Tenant> getAllTenants();
+
+    /**
+     * 删除租户及其 Schema（级联删除所有数据）
+     * @param tenantId 租户 ID
+     * @return 是否删除成功
+     */
+    boolean deleteTenantWithSchema(Long tenantId);
 }
