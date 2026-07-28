@@ -92,7 +92,21 @@ public class TenantServiceImpl implements TenantService {
                 latency_ms INTEGER DEFAULT 0,
                 create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
-            """.formatted(schemaName, schemaName, schemaName, schemaName, schemaName);
+            CREATE TABLE IF NOT EXISTS %s.rag_session_meta (
+                id BIGSERIAL PRIMARY KEY,
+                session_id VARCHAR(128) NOT NULL,
+                tenant_id BIGINT NOT NULL,
+                user_id BIGINT,
+                title VARCHAR(256),
+                last_query TEXT,
+                message_count INTEGER DEFAULT 0,
+                is_deleted BOOLEAN DEFAULT FALSE,
+                tags JSONB,
+                metadata JSONB,
+                create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            """.formatted(schemaName, schemaName, schemaName, schemaName, schemaName, schemaName);
         jdbcTemplate.execute(createTableSql);
 
         // 3. 创建索引
@@ -111,11 +125,41 @@ public class TenantServiceImpl implements TenantService {
             );
         jdbcTemplate.execute(createIndexSql);
 
-        // 4. 启用RLS并创建策略
+        // 4. 初始化全文检索支持（添加 tsvector 列、索引、触发器）
+        String initFullTextSearchSql = """
+            -- 添加 tsvector 列用于全文检索
+            ALTER TABLE %1$s.vector_store ADD COLUMN IF NOT EXISTS content_tsv tsvector;
+            
+            -- 创建 GIN 索引加速全文检索
+            CREATE INDEX IF NOT EXISTS idx_%1$s_vector_store_content_tsv 
+                ON %1$s.vector_store USING GIN (content_tsv);
+            
+            -- 创建触发器自动更新 tsvector
+            DROP TRIGGER IF EXISTS tsvectorupdate_%1$s ON %1$s.vector_store;
+            CREATE TRIGGER tsvectorupdate_%1$s 
+                BEFORE INSERT OR UPDATE ON %1$s.vector_store
+                FOR EACH ROW EXECUTE FUNCTION
+                tsvector_update_trigger(content_tsv, 'pg_catalog.simple', content);
+            
+            -- 初始化现有数据的 tsvector
+            UPDATE %1$s.vector_store SET content_tsv = to_tsvector('pg_catalog.simple', content);
+            
+            -- 启用 pg_trgm 扩展（用于模糊匹配）
+            CREATE EXTENSION IF NOT EXISTS pg_trgm;
+            
+            -- 创建 trgm 索引加速模糊匹配
+            CREATE INDEX IF NOT EXISTS idx_%1$s_vector_store_content_trgm 
+                ON %1$s.vector_store USING GIN (content gin_trgm_ops);
+            """.formatted(schemaName);
+        jdbcTemplate.execute(initFullTextSearchSql);
+        log.info("为租户 [{}] 初始化全文检索支持：content_tsv 列、GIN 索引、触发器、trgm 索引", schemaName);
+
+        // 5. 启用 RLS 并创建策略
         String rlsSql = """
             ALTER TABLE %s.rag_document ENABLE ROW LEVEL SECURITY;
             ALTER TABLE %s.doc_chunk ENABLE ROW LEVEL SECURITY;
             ALTER TABLE %s.rag_session ENABLE ROW LEVEL SECURITY;
+            ALTER TABLE %s.rag_session_meta ENABLE ROW LEVEL SECURITY;
             DROP POLICY IF EXISTS tenant_isolation_document ON %s.rag_document;
             CREATE POLICY tenant_isolation_document ON %s.rag_document
                 USING (tenant_id = current_tenant_id() OR current_user = 'postgres');
@@ -125,8 +169,11 @@ public class TenantServiceImpl implements TenantService {
             DROP POLICY IF EXISTS tenant_isolation_session ON %s.rag_session;
             CREATE POLICY tenant_isolation_session ON %s.rag_session
                 USING (tenant_id = current_tenant_id() OR current_user = 'postgres');
-            """.formatted(schemaName, schemaName, schemaName,
-                schemaName, schemaName, schemaName, schemaName, schemaName, schemaName);
+            DROP POLICY IF EXISTS tenant_isolation_session_meta ON %s.rag_session_meta;
+            CREATE POLICY tenant_isolation_session_meta ON %s.rag_session_meta
+                USING (tenant_id = current_tenant_id() OR current_user = 'postgres');
+            """.formatted(schemaName, schemaName, schemaName, schemaName,
+                schemaName, schemaName, schemaName, schemaName, schemaName, schemaName, schemaName, schemaName);
         jdbcTemplate.execute(rlsSql);
 
         // 5. 更新租户记录
@@ -180,6 +227,45 @@ public class TenantServiceImpl implements TenantService {
     @Override
     public List<Tenant> getAllTenants() {
         return tenantMapper.selectList(new LambdaQueryWrapper<Tenant>().orderByDesc(Tenant::getCreateTime));
+    }
+
+    @Override
+    @Transactional
+    public boolean deleteTenantWithSchema(Long tenantId) {
+        // 1. 查询租户信息
+        Tenant tenant = tenantMapper.selectById(tenantId);
+        if (tenant == null) {
+            log.warn("租户不存在：{}", tenantId);
+            return false;
+        }
+
+        String schemaName = tenant.getSchemaName();
+        if (schemaName == null || schemaName.isEmpty()) {
+            log.error("租户 Schema 名称为空：{}", tenantId);
+            return false;
+        }
+
+        try {
+            // 2. 级联删除 Schema（自动删除该 Schema 下的所有表和数据）
+            log.info("正在删除租户 [{}] 的 Schema: {}", tenant.getTenantCode(), schemaName);
+            jdbcTemplate.execute("DROP SCHEMA IF EXISTS " + schemaName + " CASCADE");
+            log.info("已删除租户 [{}] 的 Schema: {}", tenant.getTenantCode(), schemaName);
+
+            // 3. 先删除关联用户（外键约束：sys_user.tenant_id 引用 sys_tenant.id）
+            // 使用 JdbcTemplate 绕过 MyBatis-Plus 多租户拦截器，避免自动追加 tenant_id = null
+            int deletedUsers = jdbcTemplate.update("DELETE FROM sys_user WHERE tenant_id = ?", tenantId);
+            log.info("已删除租户 [{}] 的关联用户，共 {} 条", tenant.getTenantCode(), deletedUsers);
+
+            // 4. 删除租户记录
+            tenantMapper.deleteById(tenantId);
+            log.info("已删除租户记录：{} (ID={})", tenant.getTenantCode(), tenantId);
+
+            log.info("租户 [{}] 删除成功", tenant.getTenantCode());
+            return true;
+        } catch (Exception e) {
+            log.error("租户 [{}] 删除失败", tenant.getTenantCode(), e);
+            throw new BizException("删除租户失败：" + e.getMessage());
+        }
     }
 
     /**

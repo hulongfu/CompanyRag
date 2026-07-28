@@ -98,4 +98,20 @@ public class TenantController {
         
         return R.ok(response);
     }
+
+    /**
+     * 删除租户（级联删除 Schema 和所有数据）
+     */
+    @DeleteMapping("/{id}")
+    public R<Boolean> delete(@PathVariable Long id) {
+        try {
+            boolean success = tenantService.deleteTenantWithSchema(id);
+            if (!success) {
+                return R.fail(404, "租户不存在");
+            }
+            return R.ok(true);
+        } catch (Exception e) {
+            return R.fail(500, "删除租户失败：" + e.getMessage());
+        }
+    }
 }

@@ -186,10 +186,11 @@
                                 </td>
                                 <td>{{ tenant.contactName || '-' }}</td>
                                 <td>{{ tenant.contactPhone || '-' }}</td>
-                                <td>
-                                    <button class="table-btn" @click="viewTenantDetail(tenant)">详情</button>
-                                    <button class="table-btn table-btn-primary" @click="selectTenant(tenant)">选择</button>
-                                </td>
+                                 <td>
+                                     <button class="table-btn" @click="viewTenantDetail(tenant)">详情</button>
+                                     <button class="table-btn table-btn-primary" @click="selectTenant(tenant)">选择</button>
+                                     <button class="table-btn" style="color:#f56c6c;" @click="deleteTenant(tenant)">删除</button>
+                                 </td>
                             </tr>
                             <tr v-if="tenants.length === 0">
                                 <td colspan="8" style="text-align: center; padding: 40px; color: #909399;">暂无数据</td>
@@ -701,11 +702,44 @@ createApp({
             uploadHeaders['X-Tenant-Id'] = row.id.toString();
             ElementPlus.ElMessage.success('已选择租户：' + row.tenantName);
             currentTab.value = 'chat';
-            // 切换租户时清理当前会话和消息，加载新租户的数据
             currentSessionId.value = null;
             messages.value = [];
             loadDocuments();
             loadSessions();
+        }
+
+        async function deleteTenant(tenant) {
+            try {
+                await ElementPlus.ElMessageBox.confirm(
+                    '确定要删除租户「' + tenant.tenantName + '」（' + tenant.tenantCode + '）吗？\n\n注意：这将级联删除该租户的所有数据（文档、向量、会话等），且不可恢复！',
+                    '删除确认',
+                    { confirmButtonText: '确定删除', cancelButtonText: '取消', type: 'warning' }
+                );
+            } catch (cancel) {
+                return;
+            }
+
+            try {
+                const res = await fetch('/api/tenant/' + tenant.id, {
+                    method: 'DELETE'
+                });
+                const json = await res.json();
+                if (json.code === 200) {
+                    ElementPlus.ElMessage.success('租户已删除');
+                    if (tenantId.value === tenant.id.toString()) {
+                        tenantId.value = tenants.value.length > 0 ? tenants.value[0].id.toString() : '1';
+                        uploadHeaders['X-Tenant-Id'] = tenantId.value;
+                        currentSessionId.value = null;
+                        messages.value = [];
+                    }
+                    loadTenants();
+                } else {
+                    ElementPlus.ElMessage.error('删除失败：' + (json.msg || ''));
+                }
+            } catch(e) {
+                console.error('删除租户失败', e);
+                ElementPlus.ElMessage.error('删除租户失败');
+            }
         }
 
         onMounted(() => {
@@ -724,7 +758,7 @@ createApp({
             sessions, currentSessionId, createNewSession, switchSession, deleteSession, formatTime,
             // 租户管理
             currentTab, tenants, loadingTenants, creating, tenantForm,
-            loadTenants, createTenant, resetForm, viewTenantDetail, selectTenant
+            loadTenants, createTenant, resetForm, viewTenantDetail, selectTenant, deleteTenant
         };
     }
 }).use(ElementPlus).mount('#app');
