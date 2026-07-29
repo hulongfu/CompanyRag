@@ -28,7 +28,7 @@ stages:
     name: build-docker-example
     displayName: 镜像构建
     type: account
-    repository: hub.gitee.com
+    repository: registry.gitee.com/LongHuDaoChang/company-rag
     username: LongHuDaoChang
     password: 33b59a1f781682e426be8fe3606b40ff
     tag: "${GITEE_PIPELINE_BUILD_NUMBER}"
