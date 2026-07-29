@@ -1,0 +1,21 @@
+## Git Push
+
+- commit_type: BugFix
+- task_id: 0000
+- task_name: 修复 Rerank 反序列化失败
+- commit_hash: 565e2a7
+- branch: main
+- remote: gitee (https://gitee.com/LongHuDaoChang/CompanyRag.git)
+- staged_files:
+  - company-rag-rag/src/main/java/com/company/rag/rag/model/RerankResponse.java
+  - company-rag-rag/src/main/java/com/company/rag/rag/model/RerankResult.java
+  - company-rag-rag/src/main/java/com/company/rag/rag/rerank/SiliconFlowRerankClient.java
+  - company-rag-rag/src/test/java/com/company/rag/rag/rerank/RerankResponseDeserializationTest.java
+- commit_message: BugFix:0000_修复 Rerank 反序列化失败：fix RerankResponse deserialization and add diagnostic test
+- commit_command: git commit -m "BugFix:0000_修复 Rerank 反序列化失败：fix RerankResponse deserialization and add diagnostic test"
+- commit_exit_code: 0
+- push_command: git push gitee main
+- push_exit_code: 0
+- remote_head_check_command: git ls-remote gitee main && git rev-parse HEAD
+- remote_head: 565e2a7adee79d6d74c00d489d875d70c7e4b83b
+- result: 推送成功，远端 HEAD (565e2a7) 与本地提交一致，仅推送到 gitee 远端
