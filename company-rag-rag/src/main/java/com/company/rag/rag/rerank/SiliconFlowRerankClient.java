@@ -37,7 +37,7 @@ public class SiliconFlowRerankClient implements RerankModel {
             "model", config.getOptions().getModel(),
             "query", query,
             "documents", documents,
-            "return_documents", true,
+            "return_documents", false,
             "top_n", topN
         );
 
