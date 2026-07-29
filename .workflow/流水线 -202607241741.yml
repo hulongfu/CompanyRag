@@ -28,10 +28,10 @@ stages:
     name: build-docker-example
     displayName: 镜像构建
     type: account
-    repository: registry.gitee.com/longhudaochang/company-rag:${GITEE_PIPELINE_BUILD_NUMBER}
+    repository: registry.gitee.com/longhudaochang/company-rag
     username: LongHuDaoChang
     password: 33b59a1f781682e426be8fe3606b40ff
-    tag: ""
+    tag: latest
     dockerfile: ./Dockerfile
     context: ""
     artifacts: []
