@@ -73,12 +73,24 @@ public class IntentRecognizer {
         PatternRule codeRule = PatternRule.builder()
             .intent(IntentType.CODE)
             .patterns(List.of(
-                ".*代码.*",
+                // 代码搜索场景 → CodeSearchTool
+                ".*搜索.*代码.*",
+                ".*查找.*代码.*",
+                ".*哪里.*调用.*",
+                ".*包含.*的代码.*",
+                ".*使用.*的地方.*",
+                ".*代码示例.*",
+                ".*代码片段.*",
+                // API 文档生成场景 → ApiDocTool
+                ".*生成.*API.*",
+                ".*API 文档.*",
+                ".*扫描.*端点.*",
+                ".*获取.*接口.*",
+                // 通用代码查询
                 ".*怎么实现.*",
                 ".*java.*",
                 ".*python.*",
-                ".*函数.*怎么写.*",
-                ".*示例.*"
+                ".*函数.*怎么写.*"
             ))
             .confidence(0.85)
             .build();
@@ -163,16 +175,32 @@ public class IntentRecognizer {
 
     /**
      * 构建 LLM 提示词
+     * 
+     * 意图分类说明：
+     * - DOCUMENT: 检索企业文档、需求文档、知识库内容（如："API 文档相关的任务是什么"、"需求文档中关于登录的描述"）
+     * - DATABASE: 查询数据库、表结构、SQL 相关（如："查询用户表"、"数据库字段"）
+     * - CODE: 代码相关操作，包括：
+     *   - 代码搜索：在源码中查找代码片段（如："在哪里调用了 UserService"、"搜索包含@Transactional 的代码"）
+     *   - API 文档生成：动态扫描当前系统的 API 接口（如："生成 API 文档"、"扫描所有接口"）
+     *   - 代码实现：询问代码怎么写、实现方式（如："这个功能怎么实现"、"java 示例"）
+     * - CHAT: 日常聊天、问候（如："你好"、"谢谢"）
      *
      * @param query 用户查询
      * @return 提示词
      */
     private String buildLLMPrompt(String query) {
         return String.format(
-            "请分析以下用户查询的意图，并返回 JSON 格式的结果。\n" +
-            "意图类型只能是：DOCUMENT, DATABASE, CODE, CHAT\n" +
-            "返回格式：INTENT: <意图类型>\\nCONFIDENCE: <置信度 0.0-1.0>\n" +
-            "用户查询：%s\n" +
+            "请分析以下用户查询的意图，并返回 JSON 格式的结果。\\n" +
+            "意图类型说明：\\n" +
+            "- DOCUMENT: 检索企业文档、需求文档、知识库内容（如：\"API 文档相关的任务是什么\"、\"需求文档中关于登录的描述\"）\\n" +
+            "- DATABASE: 查询数据库、表结构、SQL 相关（如：\"查询用户表\"、\"数据库字段\"）\\n" +
+            "- CODE: 代码相关操作，包括：\\n" +
+            "  1. 代码搜索：在源码中查找代码片段（如：\"在哪里调用了 UserService\"、\"搜索包含@Transactional 的代码\"）\\n" +
+            "  2. API 文档生成：动态扫描当前系统的 API 接口（如：\"生成 API 文档\"、\"扫描所有接口\"）\\n" +
+            "  3. 代码实现：询问代码怎么写、实现方式（如：\"这个功能怎么实现\"、\"java 示例\"）\\n" +
+            "- CHAT: 日常聊天、问候（如：\"你好\"、\"谢谢\"）\\n" +
+            "返回格式：INTENT: <意图类型>\\nCONFIDENCE: <置信度 0.0-1.0>\\n" +
+            "用户查询：%s\\n" +
             "请分析：",
             query
         );

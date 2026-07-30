@@ -45,16 +45,63 @@ public class FullTextRetriever {
     /**
      * 构建 PostgreSQL tsquery
      * 将用户查询转换为 tsquery 语法（& 连接，前缀匹配）
+     * 
+     * 注意：pg_catalog.simple 分词器对中文支持有限，这里采用简化策略：
+     * - 英文单词：使用前缀匹配（word:*）
+     * - 中文字符：直接使用原词（依赖 PostgreSQL 中文分词扩展或精确匹配）
+     * - 多个词之间用 & 连接
      */
     private String buildTsQuery(String query) {
-        String[] terms = query.split("\\s+");
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < terms.length; i++) {
-            if (i > 0) sb.append(" & ");
-            sb.append(terms[i].replaceAll("[^a-zA-Z0-9]", ""));
-            sb.append(":*");  // 前缀匹配
+        if (query == null || query.trim().isEmpty()) {
+            return "";
         }
-        return sb.toString();
+        
+        // 提取所有连续的字母数字序列作为英文词
+        List<String> terms = new ArrayList<>();
+        
+        // 使用正则提取英文单词和数字
+        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("[a-zA-Z0-9]+");
+        java.util.regex.Matcher matcher = pattern.matcher(query);
+        
+        int lastEnd = 0;
+        while (matcher.find()) {
+            // 添加英文词（前缀匹配）
+            terms.add(matcher.group() + ":*");
+            
+            // 检查英文词之间的中文部分
+            if (matcher.start() > lastEnd) {
+                String chinesePart = query.substring(lastEnd, matcher.start()).trim();
+                if (!chinesePart.isEmpty()) {
+                    // 中文部分直接添加（精确匹配）
+                    terms.add(escapeTsQuery(chinesePart));
+                }
+            }
+            lastEnd = matcher.end();
+        }
+        
+        // 添加剩余的中文部分
+        if (lastEnd < query.length()) {
+            String chinesePart = query.substring(lastEnd).trim();
+            if (!chinesePart.isEmpty()) {
+                terms.add(escapeTsQuery(chinesePart));
+            }
+        }
+        
+        // 如果没有提取到任何词，使用整个查询（精确匹配）
+        if (terms.isEmpty()) {
+            terms.add(escapeTsQuery(query.trim()));
+        }
+        
+        return String.join(" & ", terms);
+    }
+    
+    /**
+     * 转义 tsquery 特殊字符
+     * PostgreSQL tsquery 特殊字符：& | ! ( ) : * ' " \
+     */
+    private String escapeTsQuery(String term) {
+        // 移除可能导致语法错误的特殊字符
+        return term.replaceAll("[&|!()::*'\"\\\\]", " ").trim();
     }
     
     private List<RagResult.ChunkResult> convertToChunkResults(List<Map<String, Object>> rows) {
