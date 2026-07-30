@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.stereotype.Component;
 
 import java.util.List;
 
@@ -12,6 +13,7 @@ import java.util.List;
  * 使用混合策略：规则匹配优先，失败降级到 LLM，再失败使用默认 DOCUMENT
  */
 @Slf4j
+@Component
 public class IntentRecognizer {
 
     /**

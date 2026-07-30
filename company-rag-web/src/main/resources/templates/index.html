@@ -105,10 +105,26 @@
             <button class="hdr-btn" :class="{ active: currentTab === 'tenant' }" @click="currentTab = 'tenant'">🏢 租户</button>
             <button class="hdr-btn" @click="showUpload = true">📤 上传文件</button>
             <button class="hdr-btn" :class="{ active: showMetrics }" @click="showMetrics = !showMetrics">📊 实时指标</button>
+            <button class="hdr-btn" @click="showAdvanced = !showAdvanced" title="高级设置">⚙️ 设置</button>
         </div>
     </header>
     <div class="app-main">
         <!-- 租户管理区域 -->
+        <!-- 高级模式设置面板 -->
+        <div v-if="showAdvanced" class="advanced-settings" style="padding: 12px 16px; background: white; border-bottom: 1px solid #e4e7ed;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <span style="font-size: 13px; color: #606266; font-weight: 500;">🤖 聊天模式:</span>
+                <el-select v-model="chatMode" size="small" style="width: 180px;">
+                    <el-option label="🤖 智能自动" value="auto" />
+                    <el-option label="📚 仅查文档" value="rag" />
+                    <el-option label="🔧 Agent 模式" value="agent" />
+                </el-select>
+                <span style="font-size: 12px; color: #909399;">
+                    {{ chatMode === 'auto' ? '(根据问题自动选择)' : chatMode === 'rag' ? '(仅检索知识库)' : '(使用 Agent 工具)' }}
+                </span>
+            </div>
+        </div>
+        
         <div v-if="currentTab === 'tenant'" class="tenant-management">
             <h2 style="margin-bottom: 20px; color: #303133;">🏢 租户管理</h2>
             
@@ -327,6 +343,10 @@ createApp({
         const tenantId = ref('1');
         const chatContainer = ref(null);
         const metrics = ref({ totalRequests: 0, cacheHits: 0, avgLatency: 0, totalTokens: 0 });
+        
+        // 聊天模式：auto(智能自动), rag(仅文档), agent(Agent 模式)
+        const chatMode = ref('auto');
+        const showAdvanced = ref(false); // 是否显示高级模式
         
         // 会话管理相关
         const sessions = ref([]);
@@ -553,21 +573,18 @@ createApp({
             scrollToBottom();
 
             try {
-                const reqBody = {
-                    query: text,
-                    tenantId: parseInt(tenantId.value),
-                    topK: 10,
-                    rerankTopK: 5,
-                    enableRerank: true
-                };
-                // 如果当前有活跃会话，携带 sessionId
-                if (currentSessionId.value) {
-                    reqBody.sessionId = currentSessionId.value;
-                }
-                const res = await fetch('/api/rag/search', {
+                const res = await fetch('/api/chat', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'X-Tenant-Id': tenantId.value },
-                    body: JSON.stringify(reqBody)
+                    body: JSON.stringify({
+                        query: text,
+                        sessionId: currentSessionId.value,
+                        tenantId: parseInt(tenantId.value),
+                        topK: 10,
+                        enableRerank: true,
+                        mode: chatMode.value === 'auto' ? undefined : chatMode.value,
+                        includeDebug: false
+                    })
                 });
                 const json = await res.json();
                 if (json.code === 200 && json.data) {
@@ -758,7 +775,9 @@ createApp({
             sessions, currentSessionId, createNewSession, switchSession, deleteSession, formatTime,
             // 租户管理
             currentTab, tenants, loadingTenants, creating, tenantForm,
-            loadTenants, createTenant, resetForm, viewTenantDetail, selectTenant, deleteTenant
+            loadTenants, createTenant, resetForm, viewTenantDetail, selectTenant, deleteTenant,
+            // 高级模式
+            chatMode, showAdvanced
         };
     }
 }).use(ElementPlus).mount('#app');
