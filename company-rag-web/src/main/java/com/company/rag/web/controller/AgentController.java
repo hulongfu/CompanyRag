@@ -20,8 +20,8 @@ public class AgentController {
     @PostMapping("/chat")
     public R<String> chat(@RequestBody Map<String, String> request) {
         String message = request.get("message");
-        String context = request.get("context");
-        return R.ok(agentService.process(message, context));
+        // context 参数不再使用，忽略
+        return R.ok(agentService.process(message).getAnswer());
     }
 
     @PostMapping("/query-db")

@@ -64,10 +64,15 @@ public class DatabaseQueryTool implements AgentTool {
         int limit = params.containsKey("limit") ?
                 Integer.parseInt(params.get("limit").toString()) : MAX_ROWS;
 
-        // 安全检查：只允许SELECT
+        // 参数验证
+        if (sql == null || sql.trim().isEmpty()) {
+            return "错误：SQL 查询语句不能为空";
+        }
+
+        // 安全检查：只允许 SELECT
         String upperSql = sql.trim().toUpperCase();
         if (!upperSql.startsWith("SELECT")) {
-            return "错误：仅支持SELECT查询";
+            return "错误：仅支持 SELECT 查询";
         }
 
         // 检查危险关键字
