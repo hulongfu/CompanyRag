@@ -1,6 +1,8 @@
 package com.company.rag.agent.tool;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.ai.tool.annotation.Tool;
+import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
@@ -9,14 +11,14 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * MCP工具 - 数据库查询
- * 允许Agent通过自然语言查询业务数据库
+ * MCP 工具 - 数据库查询
+ * 允许 Agent 通过自然语言查询业务数据库
  * 
  * 安全措施：
- * 1. 只允许SELECT查询（防止注入和修改）
- * 2. SQL白名单检查（禁止危险关键字）
- * 3. 结果行数限制（默认100行）
- * 4. 多租户隔离（自动注入tenant_id过滤）
+ * 1. 只允许 SELECT 查询（防止注入和修改）
+ * 2. SQL 白名单检查（禁止危险关键字）
+ * 3. 结果行数限制（默认 100 行）
+ * 4. 多租户隔离（自动注入 tenant_id 过滤）
  */
 @Slf4j
 @Component
@@ -36,7 +38,7 @@ public class DatabaseQueryTool implements AgentTool {
 
     @Override
     public String getDescription() {
-        return "查询企业业务数据库，获取订单、用户、产品等业务数据。仅支持SELECT查询。";
+        return "查询企业业务数据库，获取订单、用户、产品等业务数据。仅支持 SELECT 查询。";
     }
 
     @Override
@@ -46,11 +48,11 @@ public class DatabaseQueryTool implements AgentTool {
         schema.put("properties", Map.of(
                 "sql", Map.of(
                         "type", "string",
-                        "description", "SQL查询语句（仅支持SELECT）"
+                        "description", "SQL 查询语句（仅支持 SELECT）"
                 ),
                 "limit", Map.of(
                         "type", "integer",
-                        "description", "返回行数限制（默认100）",
+                        "description", "返回行数限制（默认 100）",
                         "default", 100
                 )
         ));
@@ -61,9 +63,23 @@ public class DatabaseQueryTool implements AgentTool {
     @Override
     public String execute(Map<String, Object> params) {
         String sql = (String) params.get("sql");
-        int limit = params.containsKey("limit") ?
+        Integer limit = params.containsKey("limit") ?
                 Integer.parseInt(params.get("limit").toString()) : MAX_ROWS;
 
+        return queryDatabase(sql, limit);
+    }
+
+    /**
+     * 数据库查询（@Tool 注解版本，供 Spring AI 自动调用）
+     * @param sql SQL 查询语句（仅支持 SELECT）
+     * @param limit 返回行数限制（默认 100）
+     * @return 查询结果
+     */
+    @Tool(name = "database_query", description = "查询企业业务数据库，获取订单、用户、产品等业务数据。仅支持 SELECT 查询。")
+    public String queryDatabase(
+            @ToolParam(description = "SQL 查询语句（仅支持 SELECT）", required = true) String sql,
+            @ToolParam(description = "返回行数限制（默认 100）", required = false) Integer limit) {
+        
         // 参数验证
         if (sql == null || sql.trim().isEmpty()) {
             return "错误：SQL 查询语句不能为空";
@@ -77,21 +93,21 @@ public class DatabaseQueryTool implements AgentTool {
 
         // 检查危险关键字
         if (containsDangerousKeywords(upperSql)) {
-            return "错误：SQL包含禁止的操作";
+            return "错误：SQL 包含禁止的操作";
         }
 
-        // 添加LIMIT限制
+        // 添加 LIMIT 限制
         if (!upperSql.contains("LIMIT")) {
-            sql += " LIMIT " + Math.min(limit, MAX_ROWS);
+            sql += " LIMIT " + Math.min(limit != null ? limit : MAX_ROWS, MAX_ROWS);
         }
 
         try {
-            log.info("Agent执行数据库查询: {}", sql);
+            log.info("Agent 执行数据库查询：{}", sql);
             List<Map<String, Object>> result = jdbcTemplate.queryForList(sql);
             return formatResult(result);
         } catch (Exception e) {
-            log.error("数据库查询失败: {}", e.getMessage());
-            return "查询失败: " + e.getMessage();
+            log.error("数据库查询失败：{}", e.getMessage());
+            return "查询失败：" + e.getMessage();
         }
     }
 
@@ -110,12 +126,12 @@ public class DatabaseQueryTool implements AgentTool {
             List<Map<String, Object>> columns = jdbcTemplate.queryForList(sql, tableName);
             return formatResult(columns);
         } catch (Exception e) {
-            return "获取表结构失败: " + e.getMessage();
+            return "获取表结构失败：" + e.getMessage();
         }
     }
 
     /**
-     * 检查SQL是否包含危险关键字
+     * 检查 SQL 是否包含危险关键字
      */
     private boolean containsDangerousKeywords(String upperSql) {
         String[] dangerousKeywords = {
@@ -127,7 +143,7 @@ public class DatabaseQueryTool implements AgentTool {
         
         for (String keyword : dangerousKeywords) {
             if (upperSql.contains(keyword)) {
-                log.warn("检测到危险SQL关键字: {}", keyword);
+                log.warn("检测到危险 SQL 关键字：{}", keyword);
                 return true;
             }
         }
@@ -161,7 +177,7 @@ public class DatabaseQueryTool implements AgentTool {
                         .map(v -> v != null ? v.toString() : "NULL")
                         .reduce((a, b) -> a + " | " + b)
                         .orElse(""))
-                  .append("\n");
+                      .append("\n");
             }
         }
         

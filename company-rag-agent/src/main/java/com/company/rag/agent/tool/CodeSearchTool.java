@@ -1,6 +1,8 @@
 package com.company.rag.agent.tool;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.ai.tool.annotation.Tool;
+import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -13,14 +15,14 @@ import java.util.Map;
 import java.util.stream.Stream;
 
 /**
- * MCP工具 - 代码检索
+ * MCP 工具 - 代码检索
  * 在项目源码目录中搜索代码片段
  */
 @Slf4j
 @Component
 public class CodeSearchTool implements AgentTool {
 
-    /** 源码根目录，可通过配置覆盖（Docker容器中可能不同） */
+    /** 源码根目录，可通过配置覆盖（Docker 容器中可能不同） */
     private final String srcBase;
 
     public CodeSearchTool(@Value("${app.code-search.src-base:./src}") String srcBase) {
@@ -59,16 +61,26 @@ public class CodeSearchTool implements AgentTool {
     public String execute(Map<String, Object> params) {
         String keyword = (String) params.get("keyword");
         String ext = (String) params.get("ext");
-        if (keyword == null || keyword.isBlank()) {
-            return "错误：搜索关键词不能为空";
-        }
         return searchCode(keyword, ext);
     }
 
     /**
-     * 在源码中搜索关键词
+     * 在源码中搜索关键词（@Tool 注解版本，供 Spring AI 自动调用）
+     * @param keyword 搜索关键词
+     * @param fileExtension 文件扩展名过滤（如 .java），可选
+     * @return 搜索结果
      */
-    public String searchCode(String keyword, String fileExtension) {
+    @Tool(name = "code_search", description = "在项目源码目录中搜索代码片段，支持按关键词和文件类型过滤。")
+    public String searchCode(
+            @ToolParam(description = "搜索关键词", required = true) String keyword,
+            @ToolParam(description = "文件扩展名过滤（如 .java），可选", required = false) String fileExtension) {
+        
+        if (keyword == null || keyword.isBlank()) {
+            return "错误：搜索关键词不能为空";
+        }
+        
+        log.info("代码搜索：keyword={}, ext={}", keyword, fileExtension);
+        
         StringBuilder result = new StringBuilder();
         try (Stream<java.nio.file.Path> paths = Files.walk(Paths.get(srcBase))) {
             paths.filter(Files::isRegularFile)
@@ -83,8 +95,11 @@ public class CodeSearchTool implements AgentTool {
                         }
                     });
         } catch (IOException e) {
-            return "代码搜索失败: " + e.getMessage();
+            return "代码搜索失败：" + e.getMessage();
         }
-        return result.length() > 0 ? result.toString() : "未找到匹配的代码";
+        
+        String finalResult = result.length() > 0 ? result.toString() : "未找到匹配的代码";
+        log.info("代码搜索完成，找到{}个匹配", result.length() > 0 ? result.toString().split("\n").length : 0);
+        return finalResult;
     }
 }
