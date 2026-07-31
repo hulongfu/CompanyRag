@@ -577,7 +577,7 @@ createApp({
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'X-Tenant-Id': tenantId.value },
                     body: JSON.stringify({
-                        query: text,
+                        message: text,
                         sessionId: currentSessionId.value,
                         tenantId: parseInt(tenantId.value),
                         topK: 10,
