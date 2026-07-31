@@ -4,12 +4,10 @@ import com.company.rag.agent.tool.AgentToolRegistry;
 import com.company.rag.agent.tool.ApiDocTool;
 import com.company.rag.agent.tool.CodeSearchTool;
 import com.company.rag.agent.tool.DatabaseQueryTool;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.chat.messages.SystemMessage;
-import org.springframework.ai.chat.messages.UserMessage;
-import org.springframework.ai.chat.prompt.Prompt;
-import org.springframework.ai.openai.OpenAiChatModel;
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.stereotype.Service;
 
 import java.util.HashMap;
@@ -17,34 +15,56 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * RAG Agent服务
- * 基于Spring AI实现智能工具调用编排
+ * RAG Agent 服务
+ * 基于 Spring AI ChatClient 实现智能工具调用编排
  * 
- * Agent模式工作流程：
- * 1. 用户提问 → LLM分析意图
- * 2. LLM决定是否需要调用工具
- * 3. 如果需要：选择工具 → 执行 → 将结果反馈给LLM
- * 4. LLM基于工具结果生成最终回答
+ * Agent 模式工作流程：
+ * 1. 用户提问 → ChatClient 分析意图
+ * 2. ChatClient 自动决定是否需要调用工具（Function Calling）
+ * 3. 如果需要：自动选择工具 → 执行 → 将结果反馈给 LLM
+ * 4. LLM 基于工具结果生成最终回答
  * 5. 流式返回给用户
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class RagAgentService {
 
+    private final ChatModel chatModel;
+    private final ToolCallbackProvider toolCallbackProvider;
     private final AgentToolRegistry toolRegistry;
-    private final OpenAiChatModel chatModel;
+    
+    private final ChatClient chatClient;
 
-    private static final String AGENT_SYSTEM_PROMPT = """
-            你是一个智能企业助手，拥有以下工具可以使用：
-
-            %s
-
-            当用户的问题需要使用工具时，请在回答中标注 [USE_TOOL:工具名] 并说明理由。
-            如果需要调用 database_query 工具，请同时生成 SQL 语句，格式：[SQL:SELECT * FROM table WHERE condition]
-            当不需要工具时，直接回答用户问题。
-            回答要简洁专业。
-            """;
+    /**
+     * 构造方法，初始化 ChatClient 并注册工具
+     */
+    public RagAgentService(ChatModel chatModel, 
+                           ToolCallbackProvider toolCallbackProvider,
+                           AgentToolRegistry toolRegistry) {
+        this.chatModel = chatModel;
+        this.toolCallbackProvider = toolCallbackProvider;
+        this.toolRegistry = toolRegistry;
+        
+        // 构建 ChatClient，注册工具回调
+        this.chatClient = ChatClient.builder(chatModel)
+                .defaultToolCallbacks(toolCallbackProvider)
+                .build();
+        
+        // 调试日志：输出工具信息
+        log.info("RagAgentService 初始化：chatModel={}, toolCallbackProvider={}", 
+                 chatModel.getClass().getSimpleName(), 
+                 toolCallbackProvider != null ? toolCallbackProvider.getClass().getSimpleName() : "null");
+        
+        if (toolCallbackProvider != null) {
+            var callbacks = toolCallbackProvider.getToolCallbacks();
+            log.info("注册的工具数量：{}", callbacks.length);
+            for (var callback : callbacks) {
+                log.info("  - 工具：{}, 描述：{}", 
+                         callback.getToolDefinition().name(),
+                         callback.getToolDefinition().description());
+            }
+        }
+    }
 
     /**
      * 处理 Agent 请求，自动选择工具
@@ -52,158 +72,42 @@ public class RagAgentService {
      * @return Agent 处理结果（包含回答和工具上下文）
      */
     public AgentResult process(String userMessage) {
-        long startTime = System.currentTimeMillis();
+        log.info("收到 Agent 请求：{}", userMessage);
         
-        // 获取工具列表
-        List<Map<String, Object>> tools = toolRegistry.listTools();
-        String toolDescriptions = formatToolDescriptions(tools);
-
-        String systemPrompt = String.format(AGENT_SYSTEM_PROMPT, toolDescriptions);
-
-        // 第一步：让 LLM 分析是否需要工具
-        String initialResponse = chatModel.call(
-                new Prompt(List.of(
-                        new SystemMessage(systemPrompt),
-                        new UserMessage(userMessage)
-                ))
-        ).getResult().getOutput().getText();
-
-        String answer;
-        String toolContext = null;
-
-        // 检查是否需要调用工具
-        if (initialResponse.contains("[USE_TOOL:")) {
-            String toolName = extractToolName(initialResponse);
-            if (toolName == null) {
-                log.warn("Agent 检测到工具标记但解析失败，返回原始回答");
-                answer = initialResponse;
-                toolContext = "tool:parse-failed";
-            } else {
-                log.info("Agent 决定调用工具：{}", toolName);
-
-                try {
-                    // 执行工具，根据工具类型传递不同的参数
-                    Map<String, Object> toolParams = buildToolParams(toolName, userMessage, initialResponse);
-                    String toolResult = toolRegistry.executeTool(toolName, toolParams);
-                    toolContext = "tool:" + toolName;
-
-                    // 第二步：LLM 基于工具结果生成最终回答
-                    String enhancedQuery = String.format(
-                            "用户问题：%s\n\n工具 [%s] 返回结果:\n%s\n\n请基于以上工具结果回答用户问题。",
-                            userMessage, toolName, toolResult
-                    );
-
-                    answer = chatModel.call(
-                            new Prompt(List.of(
-                                    new SystemMessage(systemPrompt),
-                                    new UserMessage(enhancedQuery)
-                            ))
-                    ).getResult().getOutput().getText();
-
-                } catch (Exception e) {
-                    log.error("Agent 工具执行失败：{}", e.getMessage());
-                    answer = "工具执行失败：" + e.getMessage();
-                    toolContext = "tool:" + toolName + ":error";
-                }
-            }
-        } else {
-            // 不需要工具，直接返回 LLM 的回答
-            answer = initialResponse;
+        try {
+            // ChatClient 自动处理工具调用
+            String response = chatClient.prompt()
+                    .user(userMessage)
+                    .call()
+                    .content();
+            
+            log.info("Agent 处理完成，回答长度：{}", response != null ? response.length() : 0);
+            return new AgentResult(response != null ? response : "", null);
+            
+        } catch (Exception e) {
+            log.error("Agent 处理失败：{}", e.getMessage(), e);
+            return new AgentResult("抱歉，系统繁忙，请稍后重试。", "error:" + e.getMessage());
         }
-
-        return new AgentResult(answer, toolContext);
     }
 
     /**
-     * 直接调用数据库查询工具
+     * 直接调用数据库查询工具（保留原有接口，供 AgentController 使用）
      */
     public String queryDatabase(String sql) {
         return toolRegistry.executeTool("database_query", Map.of("sql", sql));
     }
 
     /**
-     * 直接调用代码搜索工具
+     * 直接调用代码搜索工具（保留原有接口，供 AgentController 使用）
      */
     public String searchCode(String keyword, String ext) {
         return toolRegistry.executeTool("code_search", Map.of("keyword", keyword, "ext", ext));
     }
 
     /**
-     * 直接调用API文档工具
+     * 直接调用 API 文档工具（保留原有接口，供 AgentController 使用）
      */
     public String getApiDoc(String filter) {
         return toolRegistry.executeTool("api_doc", Map.of("filter", filter));
-    }
-
-    private String formatToolDescriptions(List<Map<String, Object>> tools) {
-        StringBuilder sb = new StringBuilder();
-        for (Map<String, Object> tool : tools) {
-            sb.append("- ").append(tool.get("name"))
-              .append(": ").append(tool.get("description"))
-              .append("\n");
-        }
-        return sb.toString();
-    }
-
-    private String extractToolName(String response) {
-        int start = response.indexOf("[USE_TOOL:") + 10;
-        int end = response.indexOf("]", start);
-        if (start > 9 && end > start) {
-            return response.substring(start, end).trim();
-        }
-        // 解析失败时仍需判断，但返回 null 让调用方处理
-        return null;
-    }
-
-    /**
-     * 根据工具类型构建参数
-     */
-    private Map<String, Object> buildToolParams(String toolName, String userMessage, String llmResponse) {
-        Map<String, Object> params = new HashMap<>();
-        
-        switch (toolName) {
-            case "database_query":
-                // 从 LLM 响应中提取 SQL
-                String sql = extractSqlFromResponse(llmResponse);
-                if (sql == null) {
-                    // 如果 LLM 没有生成 SQL，返回错误信息
-                    params.put("sql", null);
-                } else {
-                    params.put("sql", sql);
-                }
-                break;
-            case "code_search":
-                // 提取搜索关键词
-                params.put("keyword", userMessage);
-                break;
-            case "api_doc":
-                // 可选的过滤条件
-                params.put("filter", userMessage);
-                break;
-            default:
-                // 其他工具默认传递 query 参数
-                params.put("query", userMessage);
-        }
-        
-        return params;
-    }
-
-    /**
-     * 从 LLM 响应中提取 SQL 语句
-     * 期望格式：[SQL:SELECT * FROM table WHERE condition]
-     */
-    private String extractSqlFromResponse(String response) {
-        if (response == null || !response.contains("[SQL:")) {
-            return null;
-        }
-        
-        int start = response.indexOf("[SQL:") + 5;
-        int end = response.indexOf("]", start);
-        
-        if (end > start) {
-            return response.substring(start, end).trim();
-        }
-        
-        return null;
     }
 }
