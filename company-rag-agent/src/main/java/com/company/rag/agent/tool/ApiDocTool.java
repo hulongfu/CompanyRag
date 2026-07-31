@@ -1,6 +1,8 @@
 package com.company.rag.agent.tool;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.ai.tool.annotation.Tool;
+import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
@@ -33,7 +35,7 @@ public class ApiDocTool implements AgentTool {
 
     @Override
     public String getDescription() {
-        return "扫描Spring MVC端点生成API文档，获取当前系统的所有REST接口信息。";
+        return "扫描 Spring MVC 端点生成 API 文档，获取当前系统的 REST 接口信息。";
     }
 
     @Override
@@ -56,9 +58,15 @@ public class ApiDocTool implements AgentTool {
     }
 
     /**
-     * 生成API文档
+     * 生成 API 文档（@Tool 注解版本，供 Spring AI 自动调用）
+     * @param filter 过滤关键字（可选）
+     * @return API 文档 Markdown 字符串
      */
-    public String generateApiDoc(String filter) {
+    @Tool(name = "api_doc", description = "扫描 Spring MVC 端点生成 API 文档，获取当前系统的 REST 接口信息。")
+    public String generateApiDoc(
+            @ToolParam(description = "端点名称过滤关键字（可选）", required = false) String filter) {
+        log.info("生成 API 文档，filter={}", filter);
+        
         var endpoints = handlerMapping.getHandlerMethods().entrySet().stream()
                 .filter(entry -> filter == null || entry.getKey().toString().contains(filter))
                 .map(entry -> {
@@ -72,6 +80,8 @@ public class ApiDocTool implements AgentTool {
                 })
                 .collect(Collectors.joining("\n"));
 
-        return "## API文档\n" + (endpoints.isEmpty() ? "无匹配端点" : endpoints);
+        String result = "## API 文档\n" + (endpoints.isEmpty() ? "无匹配端点" : endpoints);
+        log.info("API 文档生成完成，找到{}个端点", endpoints.isEmpty() ? 0 : endpoints.split("\n").length);
+        return result;
     }
 }
