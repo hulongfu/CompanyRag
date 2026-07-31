@@ -21,6 +21,7 @@ import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.ai.vectorstore.SearchRequest;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
@@ -33,7 +34,7 @@ import java.util.stream.Collectors;
 public class RagSearchServiceImpl implements RagSearchService {
 
     private final VectorStore vectorStore;
-    private final OpenAiChatModel chatModel;
+    private final ObjectProvider<OpenAiChatModel> chatModelProvider;
     private final CrossEncoderReranker reranker;
     private final RagCacheManager cacheManager;
     private final RagMetricsRecorder metricsRecorder;
@@ -75,7 +76,7 @@ public class RagSearchServiceImpl implements RagSearchService {
                 .map(c -> "[来源:" + c.getDocumentName() + "] " + c.getContent())
                 .collect(Collectors.joining("\n\n"));
         String prompt = promptTemplate.buildChatPrompt(query.getQuery(), context);
-        String answer = chatModel.call(prompt);
+        String answer = chatModelProvider.getObject().call(prompt);
         long llmMs = System.currentTimeMillis() - llmStart;
 
         // 5. 组装结果
@@ -155,9 +156,9 @@ public class RagSearchServiceImpl implements RagSearchService {
                 .collect(Collectors.joining("\n\n"));
         String prompt = promptTemplate.buildChatPrompt(query.getQuery(), context);
 
-        // 流式调用LLM（受熔断限流保护）
+        // 流式调用 LLM（受熔断限流保护）
         long llmStart = System.currentTimeMillis();
-        Flux<String> llmStream = chatModel.stream(prompt)
+        Flux<String> llmStream = chatModelProvider.getObject().stream(prompt)
                 .doOnComplete(() -> {
                     long llmMs = System.currentTimeMillis() - llmStart;
                     log.debug("流式回答LLM调用完成 | 耗时={}ms", llmMs);
