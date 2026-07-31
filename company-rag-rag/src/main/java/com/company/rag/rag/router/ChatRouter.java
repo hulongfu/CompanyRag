@@ -1,12 +1,14 @@
 package com.company.rag.rag.router;
 
 import com.company.rag.agent.service.RagAgentService;
+import com.company.rag.agent.service.AgentResult;
 import com.company.rag.rag.model.RagQuery;
 import com.company.rag.rag.model.RagResult;
 import com.company.rag.rag.response.ChatMetrics;
 import com.company.rag.rag.response.ChatRequest;
 import com.company.rag.rag.response.DebugInfo;
 import com.company.rag.rag.service.RagSearchService;
+import com.company.rag.rag.service.RagSessionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.model.ChatModel;
@@ -35,6 +37,7 @@ public class ChatRouter {
     private final RagSearchService ragSearchService;
     private final RagAgentService ragAgentService;
     private final ChatModel chatModel;
+    private final RagSessionService ragSessionService;
 
     /**
      * 统一路由入口
@@ -174,14 +177,28 @@ public class ChatRouter {
      * @return 聊天响应
      */
     private com.company.rag.rag.response.ChatResponse processAgent(ChatRequest request, IntentType intent, String routePath) {
+        long startTime = System.currentTimeMillis();
+        
         try {
             log.info("处理 {} 意图 | query={}", intent.name(), request.getQuery());
 
-            // 构建工具上下文
-            String toolContext = buildToolContext(request);
-
             // 调用 Agent 服务
-            String agentAnswer = ragAgentService.process(request.getQuery(), toolContext);
+            com.company.rag.agent.service.AgentResult agentResult = ragAgentService.process(request.getQuery());
+            String agentAnswer = agentResult.getAnswer();
+            String toolContext = agentResult.getToolContext();
+
+            // 保存对话记录（如果有 sessionId）
+            if (request.getSessionId() != null && request.getTenantId() != null) {
+                try {
+                    Long userId = request.getUserId() != null ? request.getUserId() : 1L;
+                    ragSessionService.saveConversation(
+                            request.getTenantId(), request.getSessionId(), userId,
+                            request.getQuery(), agentAnswer, toolContext,
+                            0, 0, (int) (System.currentTimeMillis() - startTime));
+                } catch (Exception e) {
+                    log.warn("保存对话记录失败", e);
+                }
+            }
 
             // 如果 Agent 返回了有效回答
             if (agentAnswer != null && !agentAnswer.trim().isEmpty()) {

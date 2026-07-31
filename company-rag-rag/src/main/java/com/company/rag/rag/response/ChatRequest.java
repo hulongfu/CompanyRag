@@ -30,6 +30,11 @@ public class ChatRequest {
     private Long tenantId;
 
     /**
+     * 用户 ID
+     */
+    private Long userId;
+
+    /**
      * 返回结果数量（默认 10）
      */
     private Integer topK = 10;
