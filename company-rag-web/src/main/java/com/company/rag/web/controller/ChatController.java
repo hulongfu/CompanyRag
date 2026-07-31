@@ -27,12 +27,12 @@ public class ChatController {
      * @return 聊天响应
      */
     @PostMapping("/chat")
-    public R<String> chat(@RequestBody ChatRequest request) {
+    public R<AgentResult> chat(@RequestBody ChatRequest request) {
         log.info("收到聊天请求：message={}", request.getMessage());
         
         AgentResult result = ragAgentService.process(request.getMessage());
         
-        return R.ok(result.getAnswer());
+        return R.ok(result);
     }
     
     /**
