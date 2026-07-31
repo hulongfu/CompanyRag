@@ -3,6 +3,7 @@ package com.company.rag.rag.retriever.impl;
 import com.company.rag.rag.model.RagResult;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.postgresql.util.PGobject;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
@@ -112,8 +113,19 @@ public class FullTextRetriever {
             cr.setContent((String) row.get("content"));
             cr.setKeywordScore(((Number) row.get("score")).doubleValue());
             
-            // 解析 metadata JSON 或使用字符串解析
-            String metadata = (String) row.get("metadata");
+            // 解析 metadata JSON：PostgreSQL 返回的是 PGobject，需要转换为 String
+            Object metadataObj = row.get("metadata");
+            String metadata;
+            if (metadataObj instanceof PGobject) {
+                try {
+                    metadata = ((PGobject) metadataObj).getValue();
+                } catch (Exception e) {
+                    log.warn("解析 metadata 失败：{}", e.getMessage());
+                    metadata = "{}";
+                }
+            } else {
+                metadata = metadataObj != null ? metadataObj.toString() : "{}";
+            }
             // TODO: 解析 metadata 提取 documentName, chunkIndex 等
             cr.setDocumentName("未知");
             
