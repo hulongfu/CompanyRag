@@ -8,8 +8,9 @@ import org.springframework.web.bind.annotation.*;
 import java.util.Map;
 
 /**
- * Agent工具调用接口
+ * @deprecated 使用 {@link ChatController} 替代
  */
+@Deprecated
 @RestController
 @RequestMapping("/api/agent")
 @RequiredArgsConstructor

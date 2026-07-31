@@ -10,8 +10,9 @@ import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Flux;
 
 /**
- * RAG检索接口
+ * @deprecated 使用 {@link ChatController#ragSearch(RagQuery, Long)} 替代
  */
+@Deprecated
 @RestController
 @RequestMapping("/api/rag")
 @RequiredArgsConstructor
