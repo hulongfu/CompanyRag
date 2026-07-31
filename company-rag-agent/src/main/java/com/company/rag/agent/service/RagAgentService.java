@@ -12,6 +12,7 @@ import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.stereotype.Service;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -40,24 +41,26 @@ public class RagAgentService {
             %s
 
             当用户的问题需要使用工具时，请在回答中标注 [USE_TOOL:工具名] 并说明理由。
+            如果需要调用 database_query 工具，请同时生成 SQL 语句，格式：[SQL:SELECT * FROM table WHERE condition]
             当不需要工具时，直接回答用户问题。
             回答要简洁专业。
             """;
 
     /**
-     * 处理Agent请求，自动选择工具
+     * 处理 Agent 请求，自动选择工具
      * @param userMessage 用户消息
-     * @param toolContext 上下文信息
-     * @return Agent响应
+     * @return Agent 处理结果（包含回答和工具上下文）
      */
-    public String process(String userMessage, String toolContext) {
+    public AgentResult process(String userMessage) {
+        long startTime = System.currentTimeMillis();
+        
         // 获取工具列表
         List<Map<String, Object>> tools = toolRegistry.listTools();
         String toolDescriptions = formatToolDescriptions(tools);
 
         String systemPrompt = String.format(AGENT_SYSTEM_PROMPT, toolDescriptions);
 
-        // 第一步：让LLM分析是否需要工具
+        // 第一步：让 LLM 分析是否需要工具
         String initialResponse = chatModel.call(
                 new Prompt(List.of(
                         new SystemMessage(systemPrompt),
@@ -65,40 +68,50 @@ public class RagAgentService {
                 ))
         ).getResult().getOutput().getText();
 
+        String answer;
+        String toolContext = null;
+
         // 检查是否需要调用工具
         if (initialResponse.contains("[USE_TOOL:")) {
             String toolName = extractToolName(initialResponse);
             if (toolName == null) {
-                log.warn("Agent检测到工具标记但解析失败，返回原始回答");
-                return initialResponse;
-            }
-            log.info("Agent决定调用工具: {}", toolName);
+                log.warn("Agent 检测到工具标记但解析失败，返回原始回答");
+                answer = initialResponse;
+                toolContext = "tool:parse-failed";
+            } else {
+                log.info("Agent 决定调用工具：{}", toolName);
 
-            try {
-                // 执行工具
-                String toolResult = toolRegistry.executeTool(toolName, Map.of("query", userMessage));
+                try {
+                    // 执行工具，根据工具类型传递不同的参数
+                    Map<String, Object> toolParams = buildToolParams(toolName, userMessage, initialResponse);
+                    String toolResult = toolRegistry.executeTool(toolName, toolParams);
+                    toolContext = "tool:" + toolName;
 
-                // 第二步：LLM基于工具结果生成最终回答
-                String enhancedQuery = String.format(
-                        "用户问题: %s\n\n工具[%s]返回结果:\n%s\n\n请基于以上工具结果回答用户问题。",
-                        userMessage, toolName, toolResult
-                );
+                    // 第二步：LLM 基于工具结果生成最终回答
+                    String enhancedQuery = String.format(
+                            "用户问题：%s\n\n工具 [%s] 返回结果:\n%s\n\n请基于以上工具结果回答用户问题。",
+                            userMessage, toolName, toolResult
+                    );
 
-                return chatModel.call(
-                        new Prompt(List.of(
-                                new SystemMessage(systemPrompt),
-                                new UserMessage(enhancedQuery)
-                        ))
-                ).getResult().getOutput().getText();
+                    answer = chatModel.call(
+                            new Prompt(List.of(
+                                    new SystemMessage(systemPrompt),
+                                    new UserMessage(enhancedQuery)
+                            ))
+                    ).getResult().getOutput().getText();
 
-            } catch (Exception e) {
-                log.error("Agent工具执行失败: {}", e.getMessage());
-                return "工具执行失败: " + e.getMessage();
+                } catch (Exception e) {
+                    log.error("Agent 工具执行失败：{}", e.getMessage());
+                    answer = "工具执行失败：" + e.getMessage();
+                    toolContext = "tool:" + toolName + ":error";
+                }
             }
         } else {
-            // 不需要工具，直接返回LLM的回答
-            return initialResponse;
+            // 不需要工具，直接返回 LLM 的回答
+            answer = initialResponse;
         }
+
+        return new AgentResult(answer, toolContext);
     }
 
     /**
@@ -138,7 +151,59 @@ public class RagAgentService {
         if (start > 9 && end > start) {
             return response.substring(start, end).trim();
         }
-        // 解析失败时仍需判断，但返回null让调用方处理
+        // 解析失败时仍需判断，但返回 null 让调用方处理
+        return null;
+    }
+
+    /**
+     * 根据工具类型构建参数
+     */
+    private Map<String, Object> buildToolParams(String toolName, String userMessage, String llmResponse) {
+        Map<String, Object> params = new HashMap<>();
+        
+        switch (toolName) {
+            case "database_query":
+                // 从 LLM 响应中提取 SQL
+                String sql = extractSqlFromResponse(llmResponse);
+                if (sql == null) {
+                    // 如果 LLM 没有生成 SQL，返回错误信息
+                    params.put("sql", null);
+                } else {
+                    params.put("sql", sql);
+                }
+                break;
+            case "code_search":
+                // 提取搜索关键词
+                params.put("keyword", userMessage);
+                break;
+            case "api_doc":
+                // 可选的过滤条件
+                params.put("filter", userMessage);
+                break;
+            default:
+                // 其他工具默认传递 query 参数
+                params.put("query", userMessage);
+        }
+        
+        return params;
+    }
+
+    /**
+     * 从 LLM 响应中提取 SQL 语句
+     * 期望格式：[SQL:SELECT * FROM table WHERE condition]
+     */
+    private String extractSqlFromResponse(String response) {
+        if (response == null || !response.contains("[SQL:")) {
+            return null;
+        }
+        
+        int start = response.indexOf("[SQL:") + 5;
+        int end = response.indexOf("]", start);
+        
+        if (end > start) {
+            return response.substring(start, end).trim();
+        }
+        
         return null;
     }
 }
