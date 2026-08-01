@@ -20,13 +20,6 @@ public class RagController {
 
     private final RagSearchService ragSearchService;
 
-    @PostMapping("/search")
-    public R<RagResult> search(@RequestBody RagQuery query,
-                                @RequestHeader(value = "X-User-Id", defaultValue = "1") Long userId) {
-        query.setUserId(userId);
-        return R.ok(ragSearchService.search(query));
-    }
-
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<String> stream(@RequestBody RagQuery query,
                                 @RequestHeader(value = "X-User-Id", defaultValue = "1") Long userId) {

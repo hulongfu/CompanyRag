@@ -81,7 +81,15 @@ public class RagSessionServiceImpl implements RagSessionService {
 
         if (meta == null) {
             log.warn("会话不存在，自动创建 | sessionId={}", sessionId);
+            // 使用用户问题作为标题创建会话
             createSession(tenantId, userId, query);
+        } else {
+            // 如果是首次聊天（消息数为 0），且当前标题为"新会话"，则更新为问题内容
+            if (meta.getMessageCount() == 0 && "新会话".equals(meta.getTitle())) {
+                meta.setTitle(query);
+                sessionMetaMapper.updateById(meta);
+                log.info("更新会话标题为首次提问 | sessionId={} title={}", sessionId, query);
+            }
         }
 
         // 保存对话记录
