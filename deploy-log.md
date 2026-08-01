@@ -3,24 +3,24 @@
 - commit_type:            Task
 - task_id:                0000
 - task_name:              untitled
-- commit_hash:            850161725796ccea8b313c6930600bd1ea35a72f
+- commit_hash:            {placeholder}
 - branch:                 main
 - remote:                 gitee
 - staged_files:
-  - company-rag-agent/pom.xml
-  - company-rag-agent/src/main/java/com/company/rag/agent/tool/AgentTool.java
-  - company-rag-agent/src/main/java/com/company/rag/agent/tool/ApiDocTool.java
-  - company-rag-agent/src/main/java/com/company/rag/agent/tool/CodeSearchTool.java
-  - company-rag-agent/src/main/java/com/company/rag/agent/tool/DatabaseQueryTool.java
-  - company-rag-agent/src/test/java/com/company/rag/agent/tool/ApiDocToolTest.java
-  - company-rag-bootstrap/src/main/resources/application-dev.yml
-  - company-rag-rag/src/test/java/com/company/rag/rag/retriever/impl/FullTextRetrieverBuildTsQueryTest.java
+  - company-rag-web/src/main/java/com/company/rag/web/controller/ChatController.java
+  - company-rag-web/src/main/java/com/company/rag/web/controller/RagController.java
+  - company-rag-rag/src/main/java/com/company/rag/rag/service/impl/RagSessionServiceImpl.java
+  - company-rag-rag/src/test/java/com/company/rag/rag/service/RagSessionServiceTest.java
+  - company-rag-rag/src/test/java/com/company/rag/rag/tools/KnowledgeBaseToolTest.java
+  - company-rag-rag/src/test/java/com/company/rag/agent/service/RagAgentServiceToolIntegrationTest.java
+  - company-rag-agent/src/test/java/com/company/rag/agent/service/RagAgentServiceToolIntegrationTest.java (deleted)
+  - company-rag-rag/src/test/java/com/company/rag/rag/router/ChatRouterTest.java (deleted)
   - deploy-log.md
-- commit_message:         Task:0000_untitled：修复 Agent-RAG 集成问题并优化工具配置
-- commit_command:         git commit -m "Task:0000_untitled：修复 Agent-RAG 集成问题并优化工具配置"
+- commit_message:         Task:0000_untitled：fix ChatController missing session save and routing conflicts
+- commit_command:         git commit -m "Task:0000_untitled：fix ChatController missing session save and routing conflicts"
 - commit_exit_code:       0
 - push_command:           git push gitee main
 - push_exit_code:         0
 - remote_head_check_command: git ls-remote gitee main
-- remote_head:            850161725796ccea8b313c6930600bd1ea35a72f (gitee)
+- remote_head:            {placeholder}
 - result:                 推送成功，Gitee 远端 HEAD 与本地提交哈希一致
