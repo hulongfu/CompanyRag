@@ -3,7 +3,7 @@
 - commit_type:            Task
 - task_id:                0000
 - task_name:              untitled
-- commit_hash:            {placeholder}
+- commit_hash:            312ec565fd768757ce258320ecc206b060f6e6fb
 - branch:                 main
 - remote:                 gitee
 - staged_files:
@@ -22,5 +22,5 @@
 - push_command:           git push gitee main
 - push_exit_code:         0
 - remote_head_check_command: git ls-remote gitee main
-- remote_head:            {placeholder}
+- remote_head:            312ec565fd768757ce258320ecc206b060f6e6fb (gitee)
 - result:                 推送成功，Gitee 远端 HEAD 与本地提交哈希一致
