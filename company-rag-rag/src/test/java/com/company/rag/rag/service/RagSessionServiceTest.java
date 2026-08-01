@@ -136,6 +136,60 @@ class RagSessionServiceTest {
     }
 
     @Test
+    void testSaveConversation_shouldUpdateTitleWhenFirstMessageWithTitleNewSession() {
+        // Given: 创建一个标题为"新会话"的会话，消息数为 0
+        RagSessionMeta existingMeta = createDefaultMeta();
+        existingMeta.setTitle("新会话");
+        existingMeta.setMessageCount(0);
+        when(sessionMetaMapper.selectOne(any())).thenReturn(existingMeta);
+
+        // When: 保存第一次对话
+        sessionService.saveConversation(TENANT_ID, SESSION_ID, USER_ID,
+                "如何申请测试环境？", "回答内容", "context",
+                10, 20, 100);
+
+        // Then: 验证会话标题被更新为问题内容
+        verify(sessionMetaMapper).updateById(metaCaptor.capture());
+        RagSessionMeta updatedMeta = metaCaptor.getValue();
+        assertEquals("如何申请测试环境？", updatedMeta.getTitle());
+        assertEquals(0, updatedMeta.getMessageCount()); // 此时还未调用 updateSessionMetaAsync
+    }
+
+    @Test
+    void testSaveConversation_shouldNotUpdateTitleWhenNotFirstMessage() {
+        // Given: 创建一个已有消息的会话
+        RagSessionMeta existingMeta = createDefaultMeta();
+        existingMeta.setTitle("旧标题");
+        existingMeta.setMessageCount(5);
+        when(sessionMetaMapper.selectOne(any())).thenReturn(existingMeta);
+
+        // When: 保存对话
+        sessionService.saveConversation(TENANT_ID, SESSION_ID, USER_ID,
+                "新问题", "回答内容", "context",
+                10, 20, 100);
+
+        // Then: 验证标题不会被更新
+        verify(sessionMetaMapper, never()).updateById(any(RagSessionMeta.class));
+    }
+
+    @Test
+    void testSaveConversation_shouldNotUpdateTitleWhenTitleIsNotNewSession() {
+        // Given: 创建一个标题不是"新会话"的首次会话
+        RagSessionMeta existingMeta = createDefaultMeta();
+        existingMeta.setTitle("自定义标题");
+        existingMeta.setMessageCount(0);
+        when(sessionMetaMapper.selectOne(any())).thenReturn(existingMeta);
+
+        // When: 保存对话
+        sessionService.saveConversation(TENANT_ID, SESSION_ID, USER_ID,
+                "新问题", "回答内容", "context",
+                10, 20, 100);
+
+        // Then: 验证标题不会被更新（保留用户自定义的标题）
+        verify(sessionMetaMapper, never()).updateById(any(RagSessionMeta.class));
+    }
+
+    @Test
     void testGetSessionList() {
         String keyword = "测试";
         List<String> tags = Arrays.asList("tag1", "tag2");

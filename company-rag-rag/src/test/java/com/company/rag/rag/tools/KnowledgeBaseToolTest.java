@@ -1,7 +1,6 @@
 package com.company.rag.rag.tools;
 
 import com.company.rag.common.tool.ToolCallRecorder;
-import com.company.rag.rag.model.KnowledgeBaseResult;
 import com.company.rag.rag.model.RagQuery;
 import com.company.rag.rag.model.RagResult;
 import com.company.rag.rag.service.RagSearchService;
@@ -15,8 +14,11 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.when;
 
+/**
+ * KnowledgeBaseTool 单元测试
+ */
 @ExtendWith(MockitoExtension.class)
 class KnowledgeBaseToolTest {
     
@@ -35,7 +37,7 @@ class KnowledgeBaseToolTest {
         String emptyQuestion = "";
         
         // When
-        KnowledgeBaseResult result = knowledgeBaseTool.searchKnowledgeBase(emptyQuestion, null);
+        var result = knowledgeBaseTool.searchKnowledgeBase(emptyQuestion, null);
         
         // Then
         assertFalse(result.isSuccess());
@@ -52,7 +54,7 @@ class KnowledgeBaseToolTest {
         when(ragSearchService.search(any(RagQuery.class))).thenReturn(emptyResult);
         
         // When
-        KnowledgeBaseResult result = knowledgeBaseTool.searchKnowledgeBase(question, 5);
+        var result = knowledgeBaseTool.searchKnowledgeBase(question, 5);
         
         // Then
         assertFalse(result.isSuccess());
@@ -77,7 +79,7 @@ class KnowledgeBaseToolTest {
         when(ragSearchService.search(any(RagQuery.class))).thenReturn(result);
         
         // When
-        KnowledgeBaseResult response = knowledgeBaseTool.searchKnowledgeBase(question, 5);
+        var response = knowledgeBaseTool.searchKnowledgeBase(question, 5);
         
         // Then
         assertTrue(response.isSuccess());
@@ -94,7 +96,7 @@ class KnowledgeBaseToolTest {
                 .thenThrow(new RuntimeException("数据库连接失败"));
         
         // When
-        KnowledgeBaseResult result = knowledgeBaseTool.searchKnowledgeBase(question, null);
+        var result = knowledgeBaseTool.searchKnowledgeBase(question, null);
         
         // Then
         assertFalse(result.isSuccess());
