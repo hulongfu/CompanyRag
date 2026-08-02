@@ -19,9 +19,6 @@
         <h1>📚 CompanyRag</h1>
         <div class="subtitle">企业知识库智能检索系统</div>
         <el-form :model="form" label-position="top">
-            <el-form-item label="租户编码">
-                <el-input v-model="form.tenantCode" placeholder="请输入租户编码" />
-            </el-form-item>
             <el-form-item label="用户名">
                 <el-input v-model="form.username" placeholder="请输入用户名" />
             </el-form-item>
@@ -40,10 +37,38 @@
 const { createApp, ref } = Vue;
 createApp({
     setup() {
-        const form = ref({ tenantCode: 'default', username: 'admin', password: 'admin123' });
+        const form = ref({ username: 'admin', password: 'admin123' });
         function handleLogin() {
-            ElementPlus.ElMessage.success('登录成功（演示模式）');
-            window.location.href = '/index';
+            // 调用登录 API
+            fetch('/api/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    username: form.value.username,
+                    password: form.value.password
+                })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.code === 200) {
+                    // 存储 Token 到 localStorage
+                    localStorage.setItem('token', data.data.token);
+                    localStorage.setItem('refreshToken', data.data.refreshToken);
+                    localStorage.setItem('userInfo', JSON.stringify({
+                        userId: data.data.userId,
+                        tenantId: data.data.tenantId,
+                        role: data.data.role,
+                        displayName: data.data.displayName
+                    }));
+                    ElementPlus.ElMessage.success('登录成功');
+                    window.location.href = '/index';
+                } else {
+                    ElementPlus.ElMessage.error(data.message || '登录失败');
+                }
+            })
+            .catch(err => {
+                ElementPlus.ElMessage.error('登录失败：' + err.message);
+            });
         }
         return { form, handleLogin };
     }
