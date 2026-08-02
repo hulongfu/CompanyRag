@@ -65,6 +65,11 @@ public class SecurityConfig {
                 .requestMatchers(new AntPathRequestMatcher("/api/auth/**", HttpMethod.POST.name())).permitAll()
                 .requestMatchers(new AntPathRequestMatcher("/api/auth/**", HttpMethod.GET.name())).permitAll()
                 
+                // 放行登录页面和首页
+                .requestMatchers(new AntPathRequestMatcher("/")).permitAll()
+                .requestMatchers(new AntPathRequestMatcher("/login")).permitAll()
+                .requestMatchers(new AntPathRequestMatcher("/index")).permitAll()
+                
                 // 放行静态资源
                 .requestMatchers(new AntPathRequestMatcher("/static/**")).permitAll()
                 .requestMatchers(new AntPathRequestMatcher("/public/**")).permitAll()
