@@ -2,6 +2,7 @@ package com.company.rag.tenant.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.company.rag.common.exception.BizException;
+import com.company.rag.common.security.SecurityUser;
 import com.company.rag.tenant.mapper.TenantMapper;
 import com.company.rag.tenant.mapper.UserMapper;
 import com.company.rag.tenant.model.Tenant;
@@ -285,5 +286,46 @@ public class TenantServiceImpl implements TenantService {
 
         userMapper.insert(adminUser);
         log.info("为租户 [{}] 创建默认管理员用户：admin", tenant.getTenantCode());
+    }
+
+    @Override
+    public SecurityUser loadSecurityUserByUsername(String username) {
+        User user = userMapper.findByUsername(username);
+        if (user == null) {
+            throw BizException.unauthorized("用户名或密码错误");
+        }
+        if (user.getStatus() == null || user.getStatus() != 1) {
+            throw BizException.unauthorized("账户已被禁用");
+        }
+        return new SecurityUser(
+                user.getId(),
+                user.getTenantId(),
+                user.getUsername(),
+                user.getPassword(),
+                user.getRole(),
+                user.getStatus() == 1
+        );
+    }
+
+    @Override
+    public SecurityUser loadSecurityUserById(Long userId) {
+        User user = userMapper.selectById(userId);
+        if (user == null) {
+            throw BizException.unauthorized("用户不存在");
+        }
+        return new SecurityUser(
+                user.getId(),
+                user.getTenantId(),
+                user.getUsername(),
+                user.getPassword(),
+                user.getRole(),
+                user.getStatus() == 1
+        );
+    }
+
+    @Override
+    public void recordAuditLog(String actionType, String targetType, String targetId, String detail) {
+        // TODO: 审计日志表创建后再实现，先留空
+        log.info("审计日志：action={}, target={}, id={}, detail={}", actionType, targetType, targetId, detail);
     }
 }
