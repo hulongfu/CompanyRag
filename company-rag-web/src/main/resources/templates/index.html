@@ -368,6 +368,30 @@ createApp({
         const uploadUrl = '/api/document/upload';
         const uploadHeaders = { 'X-Tenant-Id': '1' };
 
+        // 统一的 API 请求包装函数，处理 401 认证失败
+        async function apiRequest(url, options = {}) {
+            try {
+                const res = await fetch(url, options);
+                // 如果是 401，说明未认证或 Token 过期，跳转到登录页
+                if (res.status === 401) {
+                    ElementPlus.ElMessage.error('登录已过期，请重新登录');
+                    window.location.href = '/login';
+                    return null;
+                }
+                const json = await res.json();
+                // 如果响应体中 code 为 401，也跳转到登录页
+                if (json && json.code === 401) {
+                    ElementPlus.ElMessage.error('登录已过期，请重新登录');
+                    window.location.href = '/login';
+                    return null;
+                }
+                return json;
+            } catch(e) {
+                console.error('API 请求失败', e);
+                throw e;
+            }
+        }
+
         function formatSize(bytes) {
             if (!bytes) return '0B';
             const units = ['B', 'KB', 'MB', 'GB'];
@@ -386,9 +410,8 @@ createApp({
 
         async function loadDocuments() {
             try {
-                const res = await fetch('/api/document/list?tenantId=' + tenantId.value);
-                const json = await res.json();
-                if (json.code === 200) documents.value = json.data || [];
+                const json = await apiRequest('/api/document/list?tenantId=' + tenantId.value);
+                if (json && json.code === 200) documents.value = json.data || [];
             } catch(e) { console.error('加载文档失败', e); }
         }
 
@@ -407,19 +430,18 @@ createApp({
                 return;
             }
             try {
-                const res = await fetch('/api/document/' + doc.id, {
+                const json = await apiRequest('/api/document/' + doc.id, {
                     method: 'DELETE',
                     headers: { 'X-Tenant-Id': tenantId.value }
                 });
-                const json = await res.json();
-                if (json.code === 200) {
+                if (json && json.code === 200) {
                     ElementPlus.ElMessage.success('文档已删除');
                     // 如果删除的是当前选中的文档，取消选中
                     if (selectedDocId.value === doc.id) {
                         selectedDocId.value = null;
                     }
                     loadDocuments();
-                } else {
+                } else if (json) {
                     ElementPlus.ElMessage.error('删除失败：' + (json.msg || ''));
                 }
             } catch(e) {
@@ -436,11 +458,10 @@ createApp({
                 return;
             }
             try {
-                const res = await fetch('/api/session/' + sessionId, {
+                const json = await apiRequest('/api/session/' + sessionId, {
                     headers: { 'X-Tenant-Id': tenantId.value }
                 });
-                const json = await res.json();
-                if (json.code === 200 && json.data) {
+                if (json && json.code === 200 && json.data) {
                     const history = [];
                     for (const item of json.data) {
                         history.push({ role: 'user', content: item.query });
@@ -459,11 +480,10 @@ createApp({
 
         async function loadSessions() {
             try {
-                const res = await fetch('/api/session/list', {
+                const json = await apiRequest('/api/session/list', {
                     headers: { 'X-Tenant-Id': tenantId.value }
                 });
-                const json = await res.json();
-                if (json.code === 200) {
+                if (json && json.code === 200) {
                     // 后端返回的是 Page 对象，包含 records 字段
                     sessions.value = (json.data && json.data.records) || [];
                     // 如果有会话，默认选中第一个并加载其消息
@@ -477,13 +497,12 @@ createApp({
 
         async function createNewSession() {
             try {
-                const res = await fetch('/api/session', {
+                const json = await apiRequest('/api/session', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'X-Tenant-Id': tenantId.value },
                     body: JSON.stringify({ title: '新会话' })
                 });
-                const json = await res.json();
-                if (json.code === 200) {
+                if (json && json.code === 200) {
                     const session = json.data;
                     sessions.value.unshift(session);
                     currentSessionId.value = session.sessionId;
@@ -505,12 +524,11 @@ createApp({
 
         async function deleteSession(session) {
             try {
-                const res = await fetch('/api/session/' + session.sessionId, {
+                const json = await apiRequest('/api/session/' + session.sessionId, {
                     method: 'DELETE',
                     headers: { 'X-Tenant-Id': tenantId.value }
                 });
-                const json = await res.json();
-                if (json.code === 200) {
+                if (json && json.code === 200) {
                     sessions.value = sessions.value.filter(s => s.sessionId !== session.sessionId);
                     delete sessionMessagesMap.value[session.sessionId];
                     if (currentSessionId.value === session.sessionId) {
@@ -522,7 +540,7 @@ createApp({
                         }
                     }
                     ElementPlus.ElMessage.success('会话已删除');
-                } else {
+                } else if (json) {
                     ElementPlus.ElMessage.error('删除失败：' + (json.msg || ''));
                 }
             } catch(e) {
@@ -550,13 +568,12 @@ createApp({
             // 如果没有当前会话，自动创建一个新会话
             if (!currentSessionId.value) {
                 try {
-                    const res = await fetch('/api/session', {
+                    const json = await apiRequest('/api/session', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', 'X-Tenant-Id': tenantId.value },
                         body: JSON.stringify({ title: text.length > 20 ? text.substring(0, 20) + '...' : text })
                     });
-                    const json = await res.json();
-                    if (json.code === 200) {
+                    if (json && json.code === 200) {
                         const session = json.data;
                         sessions.value.unshift(session);
                         currentSessionId.value = session.sessionId;
@@ -573,7 +590,7 @@ createApp({
             scrollToBottom();
 
             try {
-                const res = await fetch('/api/chat', {
+                const json = await apiRequest('/api/chat', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'X-Tenant-Id': tenantId.value },
                     body: JSON.stringify({
@@ -586,8 +603,7 @@ createApp({
                         includeDebug: false
                     })
                 });
-                const json = await res.json();
-                if (json.code === 200 && json.data) {
+                if (json && json.code === 200 && json.data) {
                     const data = json.data;
                     messages.value.push({
                         role: 'assistant',
@@ -598,6 +614,15 @@ createApp({
                         metrics.value.totalRequests++;
                         metrics.value.avgLatency = data.metrics.totalMs || 0;
                     }
+                } else if (json) {
+                    messages.value.push({ role: 'assistant', content: '查询失败：' + (json.msg || '未知错误') });
+                }
+            } catch(e) {
+                messages.value.push({ role: 'assistant', content: '网络错误，请检查后端服务是否启动' });
+            }
+            isLoading.value = false;
+            scrollToBottom();
+        }
                 } else {
                     messages.value.push({ role: 'assistant', content: '查询失败: ' + (json.msg || '未知错误') });
                 }
@@ -645,11 +670,10 @@ createApp({
         async function loadTenants() {
             loadingTenants.value = true;
             try {
-                const res = await fetch('/api/tenant/list');
-                const json = await res.json();
-                if (json.code === 200) {
+                const json = await apiRequest('/api/tenant/list');
+                if (json && json.code === 200) {
                     tenants.value = json.data || [];
-                } else {
+                } else if (json) {
                     ElementPlus.ElMessage.error('加载租户列表失败：' + (json.msg || ''));
                 }
             } catch(e) {
@@ -668,17 +692,16 @@ createApp({
             
             creating.value = true;
             try {
-                const res = await fetch('/api/tenant', {
+                const json = await apiRequest('/api/tenant', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(tenantForm.value)
                 });
-                const json = await res.json();
-                if (json.code === 200) {
+                if (json && json.code === 200) {
                     ElementPlus.ElMessage.success('租户创建成功！Schema: ' + json.data.schemaName);
                     resetForm();
                     loadTenants();
-                } else {
+                } else if (json) {
                     ElementPlus.ElMessage.error('创建租户失败：' + (json.msg || ''));
                 }
             } catch(e) {
@@ -737,11 +760,10 @@ createApp({
             }
 
             try {
-                const res = await fetch('/api/tenant/' + tenant.id, {
+                const json = await apiRequest('/api/tenant/' + tenant.id, {
                     method: 'DELETE'
                 });
-                const json = await res.json();
-                if (json.code === 200) {
+                if (json && json.code === 200) {
                     ElementPlus.ElMessage.success('租户已删除');
                     if (tenantId.value === tenant.id.toString()) {
                         tenantId.value = tenants.value.length > 0 ? tenants.value[0].id.toString() : '1';
@@ -750,7 +772,7 @@ createApp({
                         messages.value = [];
                     }
                     loadTenants();
-                } else {
+                } else if (json) {
                     ElementPlus.ElMessage.error('删除失败：' + (json.msg || ''));
                 }
             } catch(e) {
@@ -760,6 +782,14 @@ createApp({
         }
 
         onMounted(() => {
+            // 检查是否已登录（从 localStorage 检查 Token）
+            const token = localStorage.getItem('token');
+            if (!token) {
+                // 未登录，跳转到登录页，并带上 redirect 参数
+                window.location.href = '/login?redirect=' + encodeURIComponent(window.location.pathname);
+                return;
+            }
+            // 已登录，加载数据
             loadDocuments();
             loadSessions();
             loadTenants();
