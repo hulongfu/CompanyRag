@@ -1,5 +1,6 @@
 package com.company.rag.web.controller;
 
+import com.company.rag.common.annotation.AuditLog;
 import com.company.rag.common.model.R;
 import com.company.rag.document.entity.Document;
 import com.company.rag.document.service.DocumentParseService;
@@ -42,6 +43,7 @@ public class DocumentController {
     }
 
     @DeleteMapping("/{id}")
+    @AuditLog(actionType = "DELETE_DOCUMENT", targetType = "document", targetId = "#id", detail = "'删除文档：ID=' + #id")
     public R<Void> delete(@PathVariable Long id) {
         Long tenantId = TenantContext.getTenantId();
         if (tenantId == null) {

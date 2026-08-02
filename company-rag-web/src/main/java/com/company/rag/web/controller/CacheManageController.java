@@ -1,5 +1,6 @@
 package com.company.rag.web.controller;
 
+import com.company.rag.common.annotation.AuditLog;
 import com.company.rag.common.model.R;
 import com.company.rag.rag.cache.RagCacheManager;
 import lombok.RequiredArgsConstructor;
@@ -19,6 +20,7 @@ public class CacheManageController {
      * 清空指定租户的缓存
      */
     @PostMapping("/clear")
+    @AuditLog(actionType = "CLEAR_CACHE", targetType = "cache", detail = "'清空租户缓存：tenantId=' + #tenantId")
     public R<Void> clearByTenant(@RequestParam Long tenantId) {
         cacheManager.invalidateByTenant(tenantId);
         return R.ok();
@@ -28,6 +30,7 @@ public class CacheManageController {
      * 清空所有 RAG 缓存
      */
     @PostMapping("/clearAll")
+    @AuditLog(actionType = "CLEAR_ALL_CACHE", targetType = "cache", detail = "'清空所有缓存'")
     public R<Void> clearAll() {
         cacheManager.clearAll();
         return R.ok();
