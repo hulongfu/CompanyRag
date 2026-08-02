@@ -8,6 +8,7 @@ import com.company.rag.rag.service.RagSearchService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Component;
 
 import java.util.LinkedHashMap;
@@ -47,6 +48,7 @@ public class KnowledgeBaseTool {
             - API 文档 -> 使用 api_doc
             """
     )
+    @Cacheable(cacheNames = "ragResults", key = "#question + ':' + #topK")
     public KnowledgeBaseResult searchKnowledgeBase(
             @ToolParam(description = "用户自然语言问题，例如：怎么申请测试环境？") String question,
             @ToolParam(description = "返回文档片段数量上限，默认 5", required = false) Integer topK) {
