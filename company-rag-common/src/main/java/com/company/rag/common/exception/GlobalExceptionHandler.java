@@ -4,6 +4,8 @@ import com.company.rag.common.model.R;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -55,13 +57,31 @@ public class GlobalExceptionHandler {
     }
 
     /**
-     * 非法参数异常
+     * 非法参数异常处理
      */
     @ExceptionHandler(IllegalArgumentException.class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     public R<Void> handleIllegalArgumentException(IllegalArgumentException e, HttpServletRequest request) {
-        log.warn("非法参数: path={} | msg={}", request.getRequestURI(), e.getMessage());
+        log.warn("非法参数：path={} | msg={}", request.getRequestURI(), e.getMessage());
         return R.fail(400, e.getMessage());
+    }
+
+    /**
+     * 处理 Spring Security 认证异常（401）
+     */
+    @ExceptionHandler(AuthenticationException.class)
+    @ResponseStatus(HttpStatus.UNAUTHORIZED)
+    public R<Void> handleAuthenticationException(AuthenticationException e) {
+        return R.fail(401, "认证失败：" + e.getMessage());
+    }
+
+    /**
+     * 处理 Spring Security 授权异常（403）
+     */
+    @ExceptionHandler(AccessDeniedException.class)
+    @ResponseStatus(HttpStatus.FORBIDDEN)
+    public R<Void> handleAccessDeniedException(AccessDeniedException e) {
+        return R.fail(403, "权限不足：" + e.getMessage());
     }
 
     /**
