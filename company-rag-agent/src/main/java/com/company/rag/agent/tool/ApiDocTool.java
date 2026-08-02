@@ -62,7 +62,20 @@ public class ApiDocTool implements AgentTool {
      * @param filter 过滤关键字（可选）
      * @return API 文档 Markdown 字符串
      */
-    @Tool(name = "api_doc", description = "扫描 Spring MVC 端点生成 API 文档，获取当前系统的 REST 接口信息。")
+    @Tool(
+        name = "api_doc",
+        description = """
+            扫描 Spring MVC 端点生成 API 文档，返回当前系统的 REST 接口信息。
+            支持按关键字过滤端点。
+            
+            适用场景：
+            - 查看系统有哪些 REST 接口、接口的请求方法和路径
+            - 例如："生成 API 文档"、"查看用户相关的接口"、"有哪些 GET 接口？"
+            
+            不适用场景：
+            - 接口的详细业务逻辑 -> 使用 code_search 搜索对应 Controller
+            """
+    )
     public String generateApiDoc(
             @ToolParam(description = "端点名称过滤关键字（可选）", required = false) String filter) {
         log.info("生成 API 文档，filter={}", filter);

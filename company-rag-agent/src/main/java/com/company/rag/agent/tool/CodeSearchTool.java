@@ -80,7 +80,20 @@ public class CodeSearchTool implements AgentTool {
      * @param fileExtension 文件扩展名过滤（如 .java），可选
      * @return 搜索结果
      */
-    @Tool(name = "code_search", description = "在项目源码目录中搜索代码片段，支持按关键词和文件类型过滤。")
+    @Tool(
+        name = "code_search",
+        description = """
+            在项目源码目录中搜索代码片段，支持按关键词和文件类型过滤。
+            自动排除 target/ 和 .git/ 目录。
+            
+            适用场景：
+            - 搜索函数定义、类定义、注释、配置
+            - 例如："搜索 PaymentService 类"、"查找所有 @RestController 注解"、"搜索日志相关的配置"
+            
+            不适用场景：
+            - 文档/README 查询 -> 使用 searchKnowledgeBase
+            """
+    )
     public String searchCode(
             @ToolParam(description = "搜索关键词", required = true) String keyword,
             @ToolParam(description = "文件扩展名过滤（如 .java），可选", required = false) String fileExtension) {
