@@ -150,13 +150,61 @@ java -jar company-rag-bootstrap/target/company-rag-bootstrap-1.0.0-SNAPSHOT.jar
 
 | 地址 | 说明 |
 |------|------|
-| http://localhost:8080 | 知识库首页 |
+| http://localhost:8080 | 知识库首页（需登录） |
 | http://localhost:8080/login | 登录页 |
-| http://localhost:8080/admin | 管理后台 |
+| http://localhost:8080/admin | 管理后台（需 admin 权限） |
 | http://localhost:9090 | Prometheus |
 | http://localhost:3000 | Grafana (admin/admin) |
 
-### 5. Docker Compose 完整部署
+### 5. 登录认证
+
+系统使用 JWT 无状态认证，所有 API 请求需要在 Header 中携带 Token。
+
+**登录获取 Token：**
+```bash
+POST http://localhost:8080/api/auth/login
+Content-Type: application/json
+
+{
+  "username": "admin",
+  "password": "admin123"
+}
+```
+
+**响应：**
+```json
+{
+  "code": 200,
+  "msg": "success",
+  "data": {
+    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "expireIn": 7200000,
+    "userId": 1,
+    "tenantId": 1,
+    "role": "admin",
+    "displayName": "admin"
+  }
+}
+```
+
+**使用 Token 访问 API：**
+```bash
+GET http://localhost:8080/api/document/list
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+```
+
+**刷新 Token（Token 过期前）：**
+```bash
+POST http://localhost:8080/api/auth/refresh
+Content-Type: application/json
+
+{
+  "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+}
+```
+
+### 6. Docker Compose 完整部署
 
 ```bash
 export DASHSCOPE_API_KEY=sk-your-api-key
@@ -383,6 +431,15 @@ LLM 判断用户问题涉及**企业内部知识**（文档、手册、规范、
 
 ```
 ## API 文档
+n### 认证说明
+
+**所有 API 请求需要在 Header 中携带 JWT Token：**
+```
+Authorization: Bearer <your-token>
+```
+
+Token 通过登录接口 `/api/auth/login` 获取，有效期 2 小时。过期后使用刷新令牌 `/api/auth/refresh` 刷新。
+
   [POST] [/api/document/upload] -> DocumentController.upload()
   [POST] [/api/rag/search] -> ChatController.ragSearch()
   [POST] [/api/chat] -> ChatController.chat()
