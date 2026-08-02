@@ -56,12 +56,13 @@ public class KnowledgeBaseTool {
         if (topK != null) {
             args.put("topK", topK);
         }
-        recorder.recordStart("searchKnowledgeBase", args);
+        String traceId = recorder.getTraceId();
+        long startTime = recorder.recordStart(traceId, "searchKnowledgeBase", args);
         
         try {
             // 参数校验
             if (question == null || question.trim().isEmpty()) {
-                recorder.recordEnd("searchKnowledgeBase", "failed");
+                recorder.recordEnd(traceId, "searchKnowledgeBase", startTime, "failed");
                 return KnowledgeBaseResult.failed("问题不能为空");
             }
             
@@ -76,16 +77,16 @@ public class KnowledgeBaseTool {
             KnowledgeBaseResult response = convertToKnowledgeBaseResult(result);
             
             if (response.isSuccess()) {
-                recorder.recordEnd("searchKnowledgeBase", "success");
+                recorder.recordEnd(traceId, "searchKnowledgeBase", startTime, "success");
             } else {
-                recorder.recordEnd("searchKnowledgeBase", "failed");
+                recorder.recordEnd(traceId, "searchKnowledgeBase", startTime, "failed");
             }
             
             return response;
             
         } catch (Exception e) {
             log.error("知识库工具调用失败：question={}, err={}", question, e.getMessage());
-            recorder.recordEnd("searchKnowledgeBase", "failed");
+            recorder.recordEnd(traceId, "searchKnowledgeBase", startTime, "failed", e.getMessage());
             return KnowledgeBaseResult.failed("工具调用失败：" + e.getMessage());
         }
     }
