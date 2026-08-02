@@ -75,7 +75,20 @@ public class DatabaseQueryTool implements AgentTool {
      * @param limit 返回行数限制（默认 100）
      * @return 查询结果
      */
-    @Tool(name = "database_query", description = "查询企业业务数据库，获取订单、用户、产品等业务数据。仅支持 SELECT 查询。")
+    @Tool(
+        name = "database_query",
+        description = """
+            查询企业业务数据库，仅支持 SELECT 查询，返回表格格式结果。
+            自动限制最多返回 100 行，禁止 DDL/DML 操作。
+            
+            适用场景：
+            - 查询用户、订单、产品等业务数据
+            - 例如："查询最近 7 天注册的用户"、"本月订单总数是多少？"、"库存低于 10 的产品有哪些？"
+            
+            不适用场景：
+            - 知识库文档查询 -> 使用 searchKnowledgeBase
+            """
+    )
     public String queryDatabase(
             @ToolParam(description = "SQL 查询语句（仅支持 SELECT）", required = true) String sql,
             @ToolParam(description = "返回行数限制（默认 100）", required = false) Integer limit) {

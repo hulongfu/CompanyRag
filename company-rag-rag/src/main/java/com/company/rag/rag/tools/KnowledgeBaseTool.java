@@ -34,9 +34,18 @@ public class KnowledgeBaseTool {
     
     @Tool(
         name = "searchKnowledgeBase",
-        description = "在企业知识库文档中检索信息，包括 Markdown（.md）、PDF、Word（.docx）、TXT 文件。"
-                    + "适用于查询 README、设计文档、使用手册、FAQ、流程规范、项目说明等。"
-                    + "不搜索源代码文件（.java/.ts/.py 等）。"
+        description = """
+            在企业知识库文档中检索信息，包括 Markdown（.md）、PDF、Word（.docx）、TXT 文件。
+            
+            适用场景：
+            - 查询 README、设计文档、使用手册、FAQ、流程规范、项目说明
+            - 例如："怎么申请测试环境？"、"公司请假流程是什么？"、"项目架构是怎样的？"
+            
+            不适用场景（请调用其他工具）：
+            - 代码检索 -> 使用 code_search
+            - 数据库查询 -> 使用 database_query
+            - API 文档 -> 使用 api_doc
+            """
     )
     public KnowledgeBaseResult searchKnowledgeBase(
             @ToolParam(description = "用户自然语言问题，例如：怎么申请测试环境？") String question,
