@@ -8,6 +8,7 @@ import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.List;
@@ -17,16 +18,25 @@ import java.util.stream.Stream;
 /**
  * MCP 工具 - 代码检索
  * 在项目源码目录中搜索代码片段
+ * <p>
+ * 支持 Maven 多模块项目结构，自动搜索各模块的 src/main 和 src/test 目录。
+ * 排除 target/ 编译输出目录，避免搜索 class 和打包文件。
  */
 @Slf4j
 @Component
 public class CodeSearchTool implements AgentTool {
 
-    /** 源码根目录，可通过配置覆盖（Docker 容器中可能不同） */
-    private final String srcBase;
+    /** 项目根目录，默认使用 user.dir（当前工作目录） */
+    private final Path projectRoot;
 
-    public CodeSearchTool(@Value("${app.code-search.src-base:./src}") String srcBase) {
-        this.srcBase = srcBase;
+    public CodeSearchTool(@Value("${app.code-search.src-base:#{null}}") String srcBase) {
+        // 如果配置了 srcBase，优先使用；否则使用 user.dir
+        if (srcBase != null && !srcBase.isBlank()) {
+            this.projectRoot = Paths.get(srcBase).toAbsolutePath().normalize();
+        } else {
+            this.projectRoot = Paths.get(System.getProperty("user.dir")).normalize();
+        }
+        log.info("代码搜索根目录：{}", this.projectRoot);
     }
 
     @Override
@@ -82,19 +92,29 @@ public class CodeSearchTool implements AgentTool {
         log.info("代码搜索：keyword={}, ext={}", keyword, fileExtension);
         
         StringBuilder result = new StringBuilder();
-        try (Stream<java.nio.file.Path> paths = Files.walk(Paths.get(srcBase))) {
+        try (Stream<Path> paths = Files.walk(projectRoot)) {
             paths.filter(Files::isRegularFile)
+                    // 排除 target/ 目录（编译输出）
+                    .filter(p -> !p.toString().contains("\\target\\") && !p.toString().contains("/target/"))
+                    // 排除 .git 目录
+                    .filter(p -> !p.toString().contains("\\.git\\") && !p.toString().contains("/.git/"))
+                    // 按文件扩展名过滤
                     .filter(p -> fileExtension == null || p.toString().endsWith(fileExtension))
                     .forEach(p -> {
                         try (Stream<String> lines = Files.lines(p)) {
                             lines.filter(line -> line.toLowerCase().contains(keyword.toLowerCase()))
                                     .findFirst()
-                                    .ifPresent(line -> result.append(p).append(": ").append(line.trim()).append("\n"));
+                                    .ifPresent(line -> {
+                                        // 转相对路径，使结果更简洁
+                                        String relativePath = projectRoot.relativize(p).toString();
+                                        result.append(relativePath).append(": ").append(line.trim()).append("\n");
+                                    });
                         } catch (IOException e) {
-                            // skip
+                            // skip 不可读文件
                         }
                     });
         } catch (IOException e) {
+            log.error("代码搜索失败，目录不可读：{}", projectRoot, e);
             return "代码搜索失败：" + e.getMessage();
         }
         
