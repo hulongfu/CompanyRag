@@ -324,6 +324,18 @@
     </div>
 </div>
 
+<!-- 在 Vue 加载前检查登录状态 -->
+<script>
+(function() {
+    // 立即检查 localStorage 中的 Token
+    var token = localStorage.getItem('token');
+    if (!token) {
+        // 未登录，跳转到登录页，并带上 redirect 参数
+        window.location.href = '/login?redirect=' + encodeURIComponent(window.location.pathname);
+    }
+})();
+</script>
+
 <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
 <script src="https://unpkg.com/element-plus@2.4.4/dist/index.full.min.js"></script>
 <script src="https://unpkg.com/@element-plus/icons-vue"></script>
@@ -782,13 +794,6 @@ createApp({
         }
 
         onMounted(() => {
-            // 检查是否已登录（从 localStorage 检查 Token）
-            const token = localStorage.getItem('token');
-            if (!token) {
-                // 未登录，跳转到登录页，并带上 redirect 参数
-                window.location.href = '/login?redirect=' + encodeURIComponent(window.location.pathname);
-                return;
-            }
             // 已登录，加载数据
             loadDocuments();
             loadSessions();
