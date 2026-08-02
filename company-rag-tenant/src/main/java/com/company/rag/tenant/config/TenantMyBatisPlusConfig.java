@@ -41,7 +41,9 @@ public class TenantMyBatisPlusConfig {
             @Override
             public boolean ignoreTable(String tableName) {
                 // sys_tenant 表忽略租户隔离
-                return "sys_tenant".equalsIgnoreCase(tableName);
+                // sys_user 表忽略租户隔离（用户登录时需要跨租户查询）
+                return "sys_tenant".equalsIgnoreCase(tableName) 
+                    || "sys_user".equalsIgnoreCase(tableName);
             }
         }));
 
