@@ -2,6 +2,7 @@ package com.company.rag.tenant.service;
 
 import com.company.rag.common.security.SecurityUser;
 import com.company.rag.tenant.mapper.UserMapper;
+import com.company.rag.tenant.mapper.UserTenantRelMapper;
 import com.company.rag.tenant.model.User;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -9,6 +10,8 @@ import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Service;
+
+import java.util.List;
 
 /**
  * 用户详情服务实现
@@ -21,6 +24,7 @@ import org.springframework.stereotype.Service;
 public class CustomUserDetailsService implements UserDetailsService {
 
     private final UserMapper userMapper;
+    private final UserTenantRelMapper userTenantRelMapper;
 
     @Override
     public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
@@ -38,11 +42,23 @@ public class CustomUserDetailsService implements UserDetailsService {
             throw new UsernameNotFoundException("用户已禁用：" + username);
         }
         
-        log.info("用户加载成功：{}, tenantId={}, role={}", username, user.getTenantId(), user.getRole());
+        // 查询用户关联的租户列表
+        List<Long> tenantIds = userTenantRelMapper.findTenantIdsByUserId(user.getId());
+        if (tenantIds == null || tenantIds.isEmpty()) {
+            log.warn("用户没有关联任何租户：{}", username);
+            throw new UsernameNotFoundException("用户没有关联任何租户：" + username);
+        }
+        
+        // 默认租户为列表第一个
+        Long defaultTenantId = tenantIds.get(0);
+        
+        log.info("用户加载成功：{}, defaultTenantId={}, tenantIds={}, role={}", 
+                username, defaultTenantId, tenantIds, user.getRole());
         
         return new SecurityUser(
                 user.getId(),
-                user.getTenantId(),
+                defaultTenantId,
+                tenantIds,
                 user.getUsername(),
                 user.getPassword(),
                 user.getRole() != null ? user.getRole() : "user",

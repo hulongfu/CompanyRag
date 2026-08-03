@@ -5,8 +5,10 @@ import com.company.rag.common.exception.BizException;
 import com.company.rag.common.security.SecurityUser;
 import com.company.rag.tenant.mapper.TenantMapper;
 import com.company.rag.tenant.mapper.UserMapper;
+import com.company.rag.tenant.mapper.UserTenantRelMapper;
 import com.company.rag.tenant.model.Tenant;
 import com.company.rag.tenant.model.User;
+import com.company.rag.tenant.model.UserTenantRel;
 import com.company.rag.tenant.service.TenantService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -23,6 +25,7 @@ public class TenantServiceImpl implements TenantService {
 
     private final TenantMapper tenantMapper;
     private final UserMapper userMapper;
+    private final UserTenantRelMapper userTenantRelMapper;
     private final JdbcTemplate jdbcTemplate;
 
     @Override
@@ -186,8 +189,11 @@ public class TenantServiceImpl implements TenantService {
 
     @Override
     public List<User> getUsersByTenant(Long tenantId) {
-        return userMapper.selectList(
-                new LambdaQueryWrapper<User>().eq(User::getTenantId, tenantId));
+        List<Long> userIds = userTenantRelMapper.findUserIdsByTenantId(tenantId);
+        if (userIds == null || userIds.isEmpty()) {
+            return List.of();
+        }
+        return userMapper.selectBatchIds(userIds);
     }
 
     @Override
@@ -252,10 +258,10 @@ public class TenantServiceImpl implements TenantService {
             jdbcTemplate.execute("DROP SCHEMA IF EXISTS " + schemaName + " CASCADE");
             log.info("已删除租户 [{}] 的 Schema: {}", tenant.getTenantCode(), schemaName);
 
-            // 3. 先删除关联用户（外键约束：sys_user.tenant_id 引用 sys_tenant.id）
-            // 使用 JdbcTemplate 绕过 MyBatis-Plus 多租户拦截器，避免自动追加 tenant_id = null
-            int deletedUsers = jdbcTemplate.update("DELETE FROM sys_user WHERE tenant_id = ?", tenantId);
-            log.info("已删除租户 [{}] 的关联用户，共 {} 条", tenant.getTenantCode(), deletedUsers);
+            // 3. 删除用户-租户关联记录
+            // 使用 JdbcTemplate 绕过 MyBatis-Plus 多租户拦截器
+            int deletedRels = jdbcTemplate.update("DELETE FROM sys_user_tenant_rel WHERE tenant_id = ?", tenantId);
+            log.info("已删除租户 [{}] 的用户关联记录，共 {} 条", tenant.getTenantCode(), deletedRels);
 
             // 4. 删除租户记录
             tenantMapper.deleteById(tenantId);
@@ -275,7 +281,6 @@ public class TenantServiceImpl implements TenantService {
      */
     private void createDefaultAdminUser(Tenant tenant) {
         User adminUser = new User();
-        adminUser.setTenantId(tenant.getId());
         adminUser.setUsername("admin");
         // BCrypt 加密默认密码 admin123
         // 使用静态 BCrypt 密码：$2a$10$N.ZOn9G6/YLFixAOPMg/h.z7pCu6v2XyFDtC4q.jeeGm/TEZyj3C6
@@ -286,6 +291,13 @@ public class TenantServiceImpl implements TenantService {
 
         userMapper.insert(adminUser);
         log.info("为租户 [{}] 创建默认管理员用户：admin", tenant.getTenantCode());
+
+        // 插入用户-租户关联记录
+        UserTenantRel rel = new UserTenantRel();
+        rel.setUserId(adminUser.getId());
+        rel.setTenantId(tenant.getId());
+        userTenantRelMapper.insert(rel);
+        log.info("为租户 [{}] 管理员用户建立关联记录", tenant.getTenantCode());
     }
 
     @Override
@@ -297,9 +309,15 @@ public class TenantServiceImpl implements TenantService {
         if (user.getStatus() == null || user.getStatus() != 1) {
             throw BizException.unauthorized("账户已被禁用");
         }
+        List<Long> tenantIds = userTenantRelMapper.findTenantIdsByUserId(user.getId());
+        if (tenantIds == null || tenantIds.isEmpty()) {
+            throw BizException.unauthorized("用户没有关联任何租户");
+        }
+        Long defaultTenantId = tenantIds.get(0);
         return new SecurityUser(
                 user.getId(),
-                user.getTenantId(),
+                defaultTenantId,
+                tenantIds,
                 user.getUsername(),
                 user.getPassword(),
                 user.getRole(),
@@ -313,9 +331,15 @@ public class TenantServiceImpl implements TenantService {
         if (user == null) {
             throw BizException.unauthorized("用户不存在");
         }
+        List<Long> tenantIds = userTenantRelMapper.findTenantIdsByUserId(userId);
+        if (tenantIds == null || tenantIds.isEmpty()) {
+            throw BizException.unauthorized("用户没有关联任何租户");
+        }
+        Long defaultTenantId = tenantIds.get(0);
         return new SecurityUser(
                 user.getId(),
-                user.getTenantId(),
+                defaultTenantId,
+                tenantIds,
                 user.getUsername(),
                 user.getPassword(),
                 user.getRole(),
