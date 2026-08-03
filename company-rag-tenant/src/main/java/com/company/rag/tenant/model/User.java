@@ -6,14 +6,13 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 /**
- * 用户（多租户共享表，通过tenant_id隔离）
+ * 用户实体（用户 - 租户关系通过 sys_user_tenant_rel 关联表维护）
  */
 @Data
 @TableName("sys_user")
 public class User {
     @TableId(type = IdType.AUTO)
     private Long id;
-    private Long tenantId;
     private String username;
     private String password;
     private String displayName;
