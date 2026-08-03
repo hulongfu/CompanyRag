@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 
 import javax.crypto.SecretKey;
 import java.util.Date;
+import java.util.List;
 
 @Slf4j
 @Component
@@ -17,13 +18,14 @@ public class JwtTokenProvider {
 
     private final JwtProperties jwtProperties;
 
-    public String generateAccessToken(Long userId, Long tenantId, String role) {
+    public String generateAccessToken(Long userId, String username, List<Long> tenantIds, String role) {
         Date now = new Date();
         Date expiryDate = new Date(now.getTime() + jwtProperties.getAccessTokenExpiration());
 
         return Jwts.builder()
                 .subject(String.valueOf(userId))
-                .claim("tenantId", tenantId)
+                .claim("username", username)
+                .claim("tenantIds", tenantIds)
                 .claim("role", role)
                 .issuedAt(now)
                 .expiration(expiryDate)
@@ -49,6 +51,21 @@ public class JwtTokenProvider {
         return Long.valueOf(claims.getSubject());
     }
 
+    public String getUsernameFromToken(String token) {
+        Claims claims = parseToken(token);
+        return claims.get("username", String.class);
+    }
+
+    @SuppressWarnings("unchecked")
+    public List<Long> getTenantIdsFromToken(String token) {
+        Claims claims = parseToken(token);
+        return claims.get("tenantIds", List.class);
+    }
+
+    /**
+     * @deprecated 使用 getTenantIdsFromToken 替代
+     */
+    @Deprecated
     public Long getTenantIdFromToken(String token) {
         Claims claims = parseToken(token);
         return claims.get("tenantId", Long.class);

@@ -23,6 +23,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
+
 /**
  * 认证控制器
  * 
@@ -62,27 +64,31 @@ public class AuthController {
             // 2. 获取用户信息
             SecurityUser securityUser = (SecurityUser) authentication.getPrincipal();
             Long userId = securityUser.getUserId();
-            Long tenantId = securityUser.getTenantId();
+            List<Long> tenantIds = securityUser.getTenantIds();
             String role = securityUser.getRole();
 
-            // 3. 生成 Access Token 和 Refresh Token
-            String accessToken = jwtTokenProvider.generateAccessToken(userId, tenantId, role);
+            // 3. 确定当前租户 ID（默认选第一个）
+            Long currentTenantId = tenantIds != null && !tenantIds.isEmpty() ? tenantIds.get(0) : null;
+
+            // 4. 生成 Access Token 和 Refresh Token
+            String accessToken = jwtTokenProvider.generateAccessToken(userId, securityUser.getUsername(), tenantIds, role);
             String refreshToken = jwtTokenProvider.generateRefreshToken(userId);
 
-            // 4. 记录审计日志
+            // 5. 记录审计日志
             tenantService.recordAuditLog("LOGIN", "USER", String.valueOf(userId), 
                     "用户登录成功：" + request.getUsername());
 
-            log.info("用户登录成功：{}, userId={}, tenantId={}, role={}", 
-                    request.getUsername(), userId, tenantId, role);
+            log.info("用户登录成功：{}, userId={}, currentTenantId={}, role={}", 
+                    request.getUsername(), userId, currentTenantId, role);
 
-            // 5. 返回认证响应
+            // 6. 返回认证响应
             AuthResponse response = AuthResponse.builder()
                     .token(accessToken)
                     .refreshToken(refreshToken)
                     .expireIn(jwtProperties.getAccessTokenExpiration())
                     .userId(userId)
-                    .tenantId(tenantId)
+                    .tenantIds(tenantIds)
+                    .currentTenantId(currentTenantId)
                     .role(role)
                     .displayName(securityUser.getUsername())
                     .build();
@@ -124,22 +130,28 @@ public class AuthController {
                 return R.fail(404, "用户不存在");
             }
 
-            // 4. 生成新的 Access Token
+            // 4. 获取租户信息
+            List<Long> tenantIds = securityUser.getTenantIds();
+            Long currentTenantId = tenantIds != null && !tenantIds.isEmpty() ? tenantIds.get(0) : null;
+
+            // 5. 生成新的 Access Token
             String newAccessToken = jwtTokenProvider.generateAccessToken(
                     securityUser.getUserId(),
-                    securityUser.getTenantId(),
+                    securityUser.getUsername(),
+                    tenantIds,
                     securityUser.getRole()
             );
 
-            log.info("刷新令牌成功：userId={}", userId);
+            log.info("刷新令牌成功：userId={}, currentTenantId={}", userId, currentTenantId);
 
-            // 5. 返回新的认证响应
+            // 6. 返回新的认证响应
             AuthResponse response = AuthResponse.builder()
                     .token(newAccessToken)
                     .refreshToken(refreshToken)  // 返回原来的 Refresh Token
                     .expireIn(jwtProperties.getAccessTokenExpiration())
                     .userId(securityUser.getUserId())
-                    .tenantId(securityUser.getTenantId())
+                    .tenantIds(tenantIds)
+                    .currentTenantId(currentTenantId)
                     .role(securityUser.getRole())
                     .displayName(securityUser.getUsername())
                     .build();
