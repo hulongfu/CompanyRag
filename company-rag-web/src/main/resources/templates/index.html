@@ -106,6 +106,7 @@
             <button class="hdr-btn" @click="handleLogout" title="退出登录">🚪 登出</button>
             <button class="hdr-btn" :class="{ active: currentTab === 'chat' }" @click="currentTab = 'chat'">💬 对话</button>
             <button class="hdr-btn" :class="{ active: currentTab === 'tenant' }" @click="currentTab = 'tenant'">🏢 租户</button>
+            <button class="hdr-btn" v-if="role === 'admin'" :class="{ active: currentTab === 'user' }" @click="currentTab = 'user'">👤 用户</button>
             <button class="hdr-btn" @click="showUpload = true">📤 上传文件</button>
             <button class="hdr-btn" :class="{ active: showMetrics }" @click="showMetrics = !showMetrics">📊 实时指标</button>
             <button class="hdr-btn" @click="showAdvanced = !showAdvanced" title="高级设置">⚙️ 设置</button>
@@ -220,6 +221,169 @@
             </el-card>
         </div>
         
+        <!-- 用户管理区域 -->
+        <div v-if="currentTab === 'user'" class="tenant-management">
+            <h2 style="margin-bottom: 20px; color: #303133;">👤 用户管理</h2>
+            
+            <!-- 筛选区 -->
+            <el-card style="margin-bottom: 20px;">
+                <template #header>
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-weight: 600;">筛选条件</span>
+                        <el-button size="small" @click="clearUserFilters">清空筛选</el-button>
+                    </div>
+                </template>
+                <el-form :inline="true" :model="userFilters">
+                    <el-form-item label="角色">
+                        <el-select v-model="userFilters.role" placeholder="全部角色" clearable size="small">
+                            <el-option label="管理员" value="admin" />
+                            <el-option label="普通用户" value="user" />
+                            <el-option label="访客" value="viewer" />
+                        </el-select>
+                    </el-form-item>
+                    <el-form-item label="租户">
+                        <el-select v-model="userFilters.tenantId" placeholder="全部租户" clearable size="small">
+                            <el-option v-for="t in tenants" :key="t.id" :label="t.tenantName" :value="t.id" />
+                        </el-select>
+                    </el-form-item>
+                    <el-form-item label="状态">
+                        <el-select v-model="userFilters.status" placeholder="全部状态" clearable size="small">
+                            <el-option label="启用" :value="1" />
+                            <el-option label="禁用" :value="0" />
+                        </el-select>
+                    </el-form-item>
+                    <el-form-item label="用户名">
+                        <el-input v-model="userFilters.username" placeholder="模糊搜索" 
+                                 size="small" clearable style="width: 150px;" />
+                    </el-form-item>
+                    <el-form-item>
+                        <el-button type="primary" size="small" @click="loadUsers">查询</el-button>
+                    </el-form-item>
+                </el-form>
+            </el-card>
+            
+            <!-- 创建用户表单 -->
+            <el-card style="margin-bottom: 20px;">
+                <template #header>
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-weight: 600;">创建用户</span>
+                    </div>
+                </template>
+                <el-form :model="userForm" label-width="100px" class="user-form">
+                    <el-row :gutter="20">
+                        <el-col :span="12">
+                            <el-form-item label="用户名" required>
+                                <el-input v-model="userForm.username" placeholder="登录用户名" style="width: 100%;"></el-input>
+                            </el-form-item>
+                        </el-col>
+                        <el-col :span="12">
+                            <el-form-item label="密码" required>
+                                <el-input v-model="userForm.password" type="password" placeholder="初始密码" 
+                                         style="width: 100%;"></el-input>
+                            </el-form-item>
+                        </el-col>
+                    </el-row>
+                    <el-row :gutter="20">
+                        <el-col :span="12">
+                            <el-form-item label="显示名" required>
+                                <el-input v-model="userForm.displayName" placeholder="用户昵称" style="width: 100%;"></el-input>
+                            </el-form-item>
+                        </el-col>
+                        <el-col :span="12">
+                            <el-form-item label="邮箱">
+                                <el-input v-model="userForm.email" type="email" placeholder="可选" style="width: 100%;"></el-input>
+                            </el-form-item>
+                        </el-col>
+                    </el-row>
+                    <el-row :gutter="20">
+                        <el-col :span="12">
+                            <el-form-item label="角色" required>
+                                <el-select v-model="userForm.role" style="width: 100%;" size="small">
+                                    <el-option label="管理员" value="admin" />
+                                    <el-option label="普通用户" value="user" />
+                                    <el-option label="访客" value="viewer" />
+                                </el-select>
+                            </el-form-item>
+                        </el-col>
+                        <el-col :span="12">
+                            <el-form-item label="关联租户" required>
+                                <el-select v-model="userForm.tenantIds" multiple collapse-tags collapse-tags-tooltip
+                                          placeholder="请选择租户" style="width: 100%;" size="small">
+                                    <el-option v-for="t in tenants" :key="t.id" :label="t.tenantName" :value="t.id" />
+                                </el-select>
+                            </el-form-item>
+                        </el-col>
+                    </el-row>
+                    <el-form-item>
+                        <el-button type="primary" @click="createUser" :loading="creatingUser">创建用户</el-button>
+                        <el-button @click="resetUserForm">重置</el-button>
+                    </el-form-item>
+                </el-form>
+            </el-card>
+            
+            <!-- 用户列表 -->
+            <el-card>
+                <template #header>
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-weight: 600;">用户列表</span>
+                        <el-button size="small" @click="loadUsers">🔄 刷新</el-button>
+                    </div>
+                </template>
+                <div v-loading="loadingUsers" style="position: relative;">
+                    <table class="native-tenant-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 60px;">ID</th>
+                                <th style="width: 120px;">用户名</th>
+                                <th style="width: 120px;">显示名</th>
+                                <th style="width: 180px;">邮箱</th>
+                                <th style="width: 80px;">角色</th>
+                                <th style="width: 180px;">关联租户</th>
+                                <th style="width: 60px;">状态</th>
+                                <th style="width: 150px;">创建时间</th>
+                                <th style="width: 100px;">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="user in users" :key="user.id">
+                                <td>{{ user.id }}</td>
+                                <td>{{ user.username }}</td>
+                                <td>{{ user.displayName }}</td>
+                                <td>{{ user.email || '-' }}</td>
+                                <td>
+                                    <el-tag :type="user.role === 'admin' ? 'danger' : user.role === 'user' ? 'primary' : 'info'" 
+                                           size="small">
+                                        {{ user.role === 'admin' ? '管理员' : user.role === 'user' ? '普通用户' : '访客' }}
+                                    </el-tag>
+                                </td>
+                                <td>
+                                    <span v-if="user.tenantNames && user.tenantNames.length > 0">
+                                        {{ user.tenantNames.join(', ') }}
+                                    </span>
+                                    <span v-else style="color: #999;">-</span>
+                                </td>
+                                <td>
+                                    <span :style="{ padding: '2px 8px', borderRadius: '4px', fontSize: '12px', 
+                                                 backgroundColor: user.status === 1 ? '#f0f9ff' : '#fef0f0', 
+                                                 color: user.status === 1 ? '#67c23a' : '#f56c6c' }">
+                                        {{ user.status === 1 ? '启用' : '禁用' }}
+                                    </span>
+                                </td>
+                                <td style="font-size: 12px; color: #909399;">{{ user.createTime || '-' }}</td>
+                                <td>
+                                    <button class="table-btn" @click="editUser(user)">编辑</button>
+                                    <button class="table-btn" style="color:#f56c6c;" @click="deleteUser(user)">删除</button>
+                                </td>
+                            </tr>
+                            <tr v-if="users.length === 0">
+                                <td colspan="9" style="text-align: center; padding: 40px; color: #909399;">暂无数据</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </el-card>
+        </div>
+        
         <!-- 聊天和文档区域 -->
         <div v-else class="chat-layout">
         <aside class="sidebar">
@@ -319,6 +483,41 @@
 
     <!-- 指标面板 -->
     <div :class="['metrics-panel', { show: showMetrics }]">
+
+<!-- 编辑用户对话框 -->
+<el-dialog v-model="showEditDialog" title="编辑用户" width="500px">
+    <el-form :model="userForm" label-width="100px">
+        <el-form-item label="用户名">
+            <el-input v-model="userForm.username" disabled></el-input>
+        </el-form-item>
+        <el-form-item label="密码">
+            <el-input v-model="userForm.password" type="password" 
+                     placeholder="留空表示不修改密码"></el-input>
+        </el-form-item>
+        <el-form-item label="显示名" required>
+            <el-input v-model="userForm.displayName"></el-input>
+        </el-form-item>
+        <el-form-item label="邮箱">
+            <el-input v-model="userForm.email" type="email"></el-input>
+        </el-form-item>
+        <el-form-item label="角色" required>
+            <el-select v-model="userForm.role" style="width: 100%;">
+                <el-option label="管理员" value="admin" />
+                <el-option label="普通用户" value="user" />
+                <el-option label="访客" value="viewer" />
+            </el-select>
+        </el-form-item>
+        <el-form-item label="关联租户" required>
+            <el-select v-model="userForm.tenantIds" multiple placeholder="请选择租户" style="width: 100%;">
+                <el-option v-for="t in tenants" :key="t.id" :label="t.tenantName" :value="t.id" />
+            </el-select>
+        </el-form-item>
+    </el-form>
+    <template #footer>
+        <el-button @click="showEditDialog = false">取消</el-button>
+        <el-button type="primary" @click="updateUser" :loading="creatingUser">保存</el-button>
+    </template>
+</el-dialog>
         <div style="font-weight:600;margin-bottom:8px;font-size:13px;">📊 实时指标</div>
         <div>请求数: {{ metrics.totalRequests }}</div>
         <div>缓存命中: {{ metrics.cacheHits }}</div>
@@ -372,7 +571,7 @@ createApp({
         const sessionMessagesMap = ref({}); // 按 sessionId 缓存消息
 
         // 租户管理相关
-        const currentTab = ref('chat'); // 'chat' or 'tenant'
+        const currentTab = ref('chat'); // 'chat' or 'tenant' or 'user'
         const tenants = ref([]);
         const loadingTenants = ref(false);
         const creating = ref(false);
@@ -381,6 +580,27 @@ createApp({
             tenantName: '',
             contactName: '',
             contactPhone: ''
+        });
+
+        // 用户管理相关
+        const users = ref([]);
+        const loadingUsers = ref(false);
+        const creatingUser = ref(false);
+        const editingUserId = ref(null);
+        const showEditDialog = ref(false);
+        const userForm = ref({
+            username: '',
+            password: '',
+            displayName: '',
+            email: '',
+            role: 'user',
+            tenantIds: []
+        });
+        const userFilters = ref({
+            role: '',
+            tenantId: '',
+            status: '',
+            username: ''
         });
 
         const uploadUrl = '/api/document/upload';
@@ -812,6 +1032,153 @@ createApp({
             }
         }
 
+        // ========== 用户管理相关函数 ==========
+        
+        async function loadUsers() {
+            loadingUsers.value = true;
+            try {
+                const params = new URLSearchParams();
+                if (userFilters.value.role) params.append('role', userFilters.value.role);
+                if (userFilters.value.tenantId) params.append('tenantId', userFilters.value.tenantId);
+                if (userFilters.value.status) params.append('status', userFilters.value.status);
+                if (userFilters.value.username) params.append('username', userFilters.value.username);
+                
+                const json = await apiRequest('/api/user/list?' + params.toString());
+                if (json && json.code === 200) {
+                    users.value = json.data || [];
+                } else if (json) {
+                    ElementPlus.ElMessage.error('加载用户列表失败：' + (json.msg || ''));
+                }
+            } catch(e) {
+                console.error('加载用户列表失败', e);
+                ElementPlus.ElMessage.error('加载用户列表失败：' + e.message);
+            } finally {
+                loadingUsers.value = false;
+            }
+        }
+        
+        async function createUser() {
+            if (!userForm.value.username || !userForm.value.password || 
+                !userForm.value.displayName || !userForm.value.role || 
+                !userForm.value.tenantIds || userForm.value.tenantIds.length === 0) {
+                ElementPlus.ElMessage.warning('请填写必填项，并至少选择一个租户');
+                return;
+            }
+            
+            creatingUser.value = true;
+            try {
+                const json = await apiRequest('/api/user', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(userForm.value)
+                });
+                if (json && json.code === 200) {
+                    ElementPlus.ElMessage.success('用户创建成功');
+                    resetUserForm();
+                    loadUsers();
+                } else if (json) {
+                    ElementPlus.ElMessage.error('创建用户失败：' + (json.msg || ''));
+                }
+            } catch(e) {
+                console.error('创建用户失败', e);
+                ElementPlus.ElMessage.error('创建用户失败：' + e.message);
+            } finally {
+                creatingUser.value = false;
+            }
+        }
+        
+        async function updateUser() {
+            if (!editingUserId.value) return;
+            
+            if (!userForm.value.displayName || !userForm.value.role || 
+                !userForm.value.tenantIds || userForm.value.tenantIds.length === 0) {
+                ElementPlus.ElMessage.warning('请填写必填项，并至少选择一个租户');
+                return;
+            }
+            
+            creatingUser.value = true;
+            try {
+                const json = await apiRequest('/api/user/' + editingUserId.value, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(userForm.value)
+                });
+                if (json && json.code === 200) {
+                    ElementPlus.ElMessage.success('用户更新成功');
+                    showEditDialog.value = false;
+                    loadUsers();
+                } else if (json) {
+                    ElementPlus.ElMessage.error('更新用户失败：' + (json.msg || ''));
+                }
+            } catch(e) {
+                console.error('更新用户失败', e);
+                ElementPlus.ElMessage.error('更新用户失败：' + e.message);
+            } finally {
+                creatingUser.value = false;
+            }
+        }
+        
+        async function editUser(user) {
+            editingUserId.value = user.id;
+            userForm.value = {
+                username: user.username,
+                password: '', // 留空表示不修改
+                displayName: user.displayName,
+                email: user.email,
+                role: user.role,
+                tenantIds: [...(user.tenantIds || [])]
+            };
+            showEditDialog.value = true;
+        }
+        
+        async function deleteUser(user) {
+            try {
+                await ElementPlus.ElMessageBox.confirm(
+                    `确定要删除用户「${user.displayName}」（${user.username}）吗？`,
+                    '删除确认',
+                    { confirmButtonText: '确定删除', cancelButtonText: '取消', type: 'warning' }
+                );
+            } catch {
+                return;
+            }
+            
+            try {
+                const json = await apiRequest('/api/user/' + user.id, {
+                    method: 'DELETE'
+                });
+                if (json && json.code === 200) {
+                    ElementPlus.ElMessage.success('用户已删除');
+                    loadUsers();
+                } else if (json) {
+                    ElementPlus.ElMessage.error('删除失败：' + (json.msg || ''));
+                }
+            } catch(e) {
+                console.error('删除用户失败', e);
+                ElementPlus.ElMessage.error('删除用户失败：' + e.message);
+            }
+        }
+        
+        function resetUserForm() {
+            userForm.value = {
+                username: '',
+                password: '',
+                displayName: '',
+                email: '',
+                role: 'user',
+                tenantIds: []
+            };
+        }
+        
+        function clearUserFilters() {
+            userFilters.value = {
+                role: '',
+                tenantId: '',
+                status: '',
+                username: ''
+            };
+            loadUsers();
+        }
+        
         async function handleLogout() {
             try {
                 await apiRequest('/api/auth/logout', { method: 'POST' });
@@ -834,6 +1201,10 @@ createApp({
             loadDocuments();
             loadSessions();
             loadTenants();
+            // 如果是管理员，预加载用户列表
+            if (role.value === 'admin') {
+                loadUsers();
+            }
         });
 
         return {
@@ -847,6 +1218,9 @@ createApp({
             // 租户管理
             currentTab, tenants, loadingTenants, creating, tenantForm,
             loadTenants, createTenant, resetForm, viewTenantDetail, selectTenant, deleteTenant,
+            // 用户管理
+            users, loadingUsers, creatingUser, editingUserId, showEditDialog, userForm, userFilters,
+            loadUsers, createUser, updateUser, editUser, deleteUser, resetUserForm, clearUserFilters,
             // 高级模式
             chatMode, showAdvanced,
             // 认证
