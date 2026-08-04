@@ -132,8 +132,8 @@ UPDATE public.sys_tenant SET schema_name = 'tenant_default' WHERE tenant_code = 
 
 -- 默认密码: admin123 (BCrypt加密)
 INSERT INTO public.sys_user (tenant_id, username, password, display_name, role)
-VALUES (1, 'admin', '$2a$10$N.ZOn9G6/YLFixAOPMg/h.z7pCu6v2XyFDtC4q.jeeGm/TEZyj3C6', '管理员', 'admin')
-ON CONFLICT DO NOTHING;
+VALUES (1, 'admin', '$2a$10$TOcenEkJxTYAwu6fFcnzDuULyUwDKl1nEbY601V9qRiqZ7o0EAbbO', '管理员', 'admin')
+ON CONFLICT (tenant_id, username) DO UPDATE SET password = '$2a$10$TOcenEkJxTYAwu6fFcnzDuULyUwDKl1nEbY601V9qRiqZ7o0EAbbO';
 
 -- ========== RLS辅助函数（用于所有Schema） ==========
 CREATE OR REPLACE FUNCTION set_tenant_id(p_tenant_id BIGINT) RETURNS VOID AS $$
