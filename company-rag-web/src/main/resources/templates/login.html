@@ -54,12 +54,11 @@ createApp({
                     // 存储 Token 到 localStorage
                     localStorage.setItem('token', data.data.token);
                     localStorage.setItem('refreshToken', data.data.refreshToken);
-                    localStorage.setItem('userInfo', JSON.stringify({
-                        userId: data.data.userId,
-                        tenantId: data.data.tenantId,
-                        role: data.data.role,
-                        displayName: data.data.displayName
-                    }));
+                    localStorage.setItem('tenantIds', JSON.stringify(data.data.tenantIds));
+                    localStorage.setItem('currentTenantId', data.data.currentTenantId);
+                    localStorage.setItem('userId', data.data.userId);
+                    localStorage.setItem('role', data.data.role);
+                    localStorage.setItem('displayName', data.data.displayName || data.data.userId);
                     ElementPlus.ElMessage.success('登录成功');
                     // 重定向回原来的页面（如果有 redirect 参数），否则跳转到首页
                     const urlParams = new URLSearchParams(window.location.search);

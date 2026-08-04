@@ -100,7 +100,10 @@
             CompanyRag 企业知识库
         </h1>
         <div class="header-actions">
-            <el-tag size="small" type="success" v-if="tenantId">租户：{{ tenantId }}</el-tag>
+            <el-tag size="small" type="success" v-if="currentTenantId">租户：{{ currentTenantId }}</el-tag>
+            <el-tag size="small" type="info" v-if="displayName">{{ displayName }}</el-tag>
+            <el-tag size="small" :type="role === 'admin' ? 'danger' : 'primary'" v-if="role">{{ role }}</el-tag>
+            <button class="hdr-btn" @click="handleLogout" title="退出登录">🚪 登出</button>
             <button class="hdr-btn" :class="{ active: currentTab === 'chat' }" @click="currentTab = 'chat'">💬 对话</button>
             <button class="hdr-btn" :class="{ active: currentTab === 'tenant' }" @click="currentTab = 'tenant'">🏢 租户</button>
             <button class="hdr-btn" @click="showUpload = true">📤 上传文件</button>
@@ -352,7 +355,10 @@ createApp({
         const showUpload = ref(false);
         const showMetrics = ref(false);
         const splitStrategy = ref('SEMANTIC_CHUNK');
-        const tenantId = ref('1');
+        // 从 localStorage 读取用户信息
+        const currentTenantId = ref(localStorage.getItem('currentTenantId') || '1');
+        const role = ref(localStorage.getItem('role') || 'user');
+        const displayName = ref(localStorage.getItem('displayName') || '');
         const chatContainer = ref(null);
         const metrics = ref({ totalRequests: 0, cacheHits: 0, avgLatency: 0, totalTokens: 0 });
         
@@ -378,11 +384,33 @@ createApp({
         });
 
         const uploadUrl = '/api/document/upload';
-        const uploadHeaders = { 'X-Tenant-Id': '1' };
+        let uploadHeaders = getAuthHeaders();
 
-        // 统一的 API 请求包装函数，处理 401 认证失败
+        // 获取当前认证请求头
+        function getAuthHeaders() {
+            var token = localStorage.getItem('token');
+            var headers = {
+                'X-Tenant-Id': currentTenantId.value
+            };
+            if (token) {
+                headers['Authorization'] = 'Bearer ' + token;
+            }
+            return headers;
+        }
+
+        // 统一的 API 请求包装函数，自动添加认证头和租户ID，处理 401 认证失败
         async function apiRequest(url, options = {}) {
             try {
+                // 自动添加认证头
+                if (!options.headers) options.headers = {};
+                if (!options.headers['X-Tenant-Id']) {
+                    options.headers['X-Tenant-Id'] = currentTenantId.value;
+                }
+                var token = localStorage.getItem('token');
+                if (token && !options.headers['Authorization']) {
+                    options.headers['Authorization'] = 'Bearer ' + token;
+                }
+
                 const res = await fetch(url, options);
                 // 如果是 401，说明未认证或 Token 过期，跳转到登录页
                 if (res.status === 401) {
@@ -422,7 +450,7 @@ createApp({
 
         async function loadDocuments() {
             try {
-                const json = await apiRequest('/api/document/list?tenantId=' + tenantId.value);
+                const json = await apiRequest('/api/document/list?tenantId=' + currentTenantId.value);
                 if (json && json.code === 200) documents.value = json.data || [];
             } catch(e) { console.error('加载文档失败', e); }
         }
@@ -444,7 +472,7 @@ createApp({
             try {
                 const json = await apiRequest('/api/document/' + doc.id, {
                     method: 'DELETE',
-                    headers: { 'X-Tenant-Id': tenantId.value }
+                    headers: { 'X-Tenant-Id': currentTenantId.value }
                 });
                 if (json && json.code === 200) {
                     ElementPlus.ElMessage.success('文档已删除');
@@ -471,7 +499,7 @@ createApp({
             }
             try {
                 const json = await apiRequest('/api/session/' + sessionId, {
-                    headers: { 'X-Tenant-Id': tenantId.value }
+                    headers: { 'X-Tenant-Id': currentTenantId.value }
                 });
                 if (json && json.code === 200 && json.data) {
                     const history = [];
@@ -493,7 +521,7 @@ createApp({
         async function loadSessions() {
             try {
                 const json = await apiRequest('/api/session/list', {
-                    headers: { 'X-Tenant-Id': tenantId.value }
+                    headers: { 'X-Tenant-Id': currentTenantId.value }
                 });
                 if (json && json.code === 200) {
                     // 后端返回的是 Page 对象，包含 records 字段
@@ -511,7 +539,7 @@ createApp({
             try {
                 const json = await apiRequest('/api/session', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-Tenant-Id': tenantId.value },
+                    headers: { 'Content-Type': 'application/json', 'X-Tenant-Id': currentTenantId.value },
                     body: JSON.stringify({ title: '新会话' })
                 });
                 if (json && json.code === 200) {
@@ -538,7 +566,7 @@ createApp({
             try {
                 const json = await apiRequest('/api/session/' + session.sessionId, {
                     method: 'DELETE',
-                    headers: { 'X-Tenant-Id': tenantId.value }
+                    headers: { 'X-Tenant-Id': currentTenantId.value }
                 });
                 if (json && json.code === 200) {
                     sessions.value = sessions.value.filter(s => s.sessionId !== session.sessionId);
@@ -582,7 +610,7 @@ createApp({
                 try {
                     const json = await apiRequest('/api/session', {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'X-Tenant-Id': tenantId.value },
+                        headers: { 'Content-Type': 'application/json', 'X-Tenant-Id': currentTenantId.value },
                         body: JSON.stringify({ title: text.length > 20 ? text.substring(0, 20) + '...' : text })
                     });
                     if (json && json.code === 200) {
@@ -604,11 +632,11 @@ createApp({
             try {
                 const json = await apiRequest('/api/chat', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-Tenant-Id': tenantId.value },
+                    headers: { 'Content-Type': 'application/json', 'X-Tenant-Id': currentTenantId.value },
                     body: JSON.stringify({
                         query: text,
                         sessionId: currentSessionId.value,
-                        tenantId: parseInt(tenantId.value),
+                        tenantId: parseInt(currentTenantId.value),
                         topK: 10,
                         enableRerank: true,
                         mode: chatMode.value === 'auto' ? undefined : chatMode.value,
@@ -628,15 +656,6 @@ createApp({
                     }
                 } else if (json) {
                     messages.value.push({ role: 'assistant', content: '查询失败：' + (json.msg || '未知错误') });
-                }
-            } catch(e) {
-                messages.value.push({ role: 'assistant', content: '网络错误，请检查后端服务是否启动' });
-            }
-            isLoading.value = false;
-            scrollToBottom();
-        }
-                } else {
-                    messages.value.push({ role: 'assistant', content: '查询失败: ' + (json.msg || '未知错误') });
                 }
             } catch(e) {
                 messages.value.push({ role: 'assistant', content: '网络错误，请检查后端服务是否启动' });
@@ -750,7 +769,7 @@ createApp({
         }
         
         function selectTenant(row) {
-            tenantId.value = row.id.toString();
+            currentTenantId.value = row.id.toString();
             uploadHeaders['X-Tenant-Id'] = row.id.toString();
             ElementPlus.ElMessage.success('已选择租户：' + row.tenantName);
             currentTab.value = 'chat';
@@ -777,9 +796,9 @@ createApp({
                 });
                 if (json && json.code === 200) {
                     ElementPlus.ElMessage.success('租户已删除');
-                    if (tenantId.value === tenant.id.toString()) {
-                        tenantId.value = tenants.value.length > 0 ? tenants.value[0].id.toString() : '1';
-                        uploadHeaders['X-Tenant-Id'] = tenantId.value;
+                    if (currentTenantId.value === tenant.id.toString()) {
+                        currentTenantId.value = tenants.value.length > 0 ? tenants.value[0].id.toString() : '1';
+                        uploadHeaders['X-Tenant-Id'] = currentTenantId.value;
                         currentSessionId.value = null;
                         messages.value = [];
                     }
@@ -793,6 +812,23 @@ createApp({
             }
         }
 
+        async function handleLogout() {
+            try {
+                await apiRequest('/api/auth/logout', { method: 'POST' });
+            } catch(e) {
+                console.warn('登出请求失败', e);
+            }
+            // 清除本地存储
+            localStorage.removeItem('token');
+            localStorage.removeItem('refreshToken');
+            localStorage.removeItem('userId');
+            localStorage.removeItem('tenantIds');
+            localStorage.removeItem('currentTenantId');
+            localStorage.removeItem('role');
+            localStorage.removeItem('displayName');
+            window.location.href = '/login';
+        }
+
         onMounted(() => {
             // 已登录，加载数据
             loadDocuments();
@@ -802,7 +838,7 @@ createApp({
 
         return {
             messages, userInput, isLoading, documents, selectedDocId,
-            showUpload, showMetrics, splitStrategy, tenantId, chatContainer,
+            showUpload, showMetrics, splitStrategy, currentTenantId, role, displayName, chatContainer,
             metrics, uploadUrl, uploadHeaders, formatSize, renderMarkdown,
             sendMessage, loadDocuments, beforeUpload, onUploadSuccess,
             deleteDocument,
@@ -812,7 +848,9 @@ createApp({
             currentTab, tenants, loadingTenants, creating, tenantForm,
             loadTenants, createTenant, resetForm, viewTenantDetail, selectTenant, deleteTenant,
             // 高级模式
-            chatMode, showAdvanced
+            chatMode, showAdvanced,
+            // 认证
+            handleLogout
         };
     }
 }).use(ElementPlus).mount('#app');
