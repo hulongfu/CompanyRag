@@ -50,9 +50,11 @@
 ## 核心特性
 
 ### 📐 多租户架构
-- **Schema隔离**：每个租户独立Schema，数据物理隔离
-- **行级安全**：MyBatis-Plus 租户拦截器自动追加 `tenant_id` 条件
+- **用户 - 租户关联表**：`sys_user` 在 `public` schema，通过 `sys_user_tenant_rel` 关联多租户（多对多）
+- **Schema 隔离**：每个租户独立 Schema，数据物理隔离
+- **行级安全**：MyBatis-Plus 租户拦截器自动追加租户条件
 - **权限控制**：支持 admin / user / viewer 三种角色
+- **租户切换**：前端管理 `currentTenantId`，API 调用通过 `X-Tenant-Id` 头传递，后端验证 JWT 中的 `tenantIds`
 
 ### 🔄 RAG全链路
 1. **文档解析**：Apache Tika 自动识别 PDF/DOCX/TXT/MD/HTML
@@ -181,7 +183,8 @@ Content-Type: application/json
     "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
     "expireIn": 7200000,
     "userId": 1,
-    "tenantId": 1,
+    "tenantIds": [1, 2],
+    "currentTenantId": 1,
     "role": "admin",
     "displayName": "admin"
   }
