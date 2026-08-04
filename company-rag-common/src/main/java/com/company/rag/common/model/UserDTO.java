@@ -1,4 +1,4 @@
-package com.company.rag.web.model;
+package com.company.rag.common.model;
 
 import lombok.Data;
 import jakarta.validation.constraints.Email;
