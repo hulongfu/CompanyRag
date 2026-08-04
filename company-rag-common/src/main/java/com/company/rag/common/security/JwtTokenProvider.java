@@ -8,6 +8,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import javax.crypto.SecretKey;
+import java.util.Collections;
 import java.util.Date;
 import java.util.List;
 
@@ -18,6 +19,9 @@ public class JwtTokenProvider {
 
     private final JwtProperties jwtProperties;
 
+    /**
+     * 生成 Access Token（携带 userId、username、tenantIds、role）
+     */
     public String generateAccessToken(Long userId, String username, List<Long> tenantIds, String role) {
         Date now = new Date();
         Date expiryDate = new Date(now.getTime() + jwtProperties.getAccessTokenExpiration());
@@ -25,7 +29,7 @@ public class JwtTokenProvider {
         return Jwts.builder()
                 .subject(String.valueOf(userId))
                 .claim("username", username)
-                .claim("tenantIds", tenantIds)
+                .claim("tenantIds", tenantIds != null ? tenantIds : Collections.emptyList())
                 .claim("role", role)
                 .issuedAt(now)
                 .expiration(expiryDate)
@@ -51,19 +55,32 @@ public class JwtTokenProvider {
         return Long.valueOf(claims.getSubject());
     }
 
+    /**
+     * 从 Token 中获取用户名
+     */
     public String getUsernameFromToken(String token) {
         Claims claims = parseToken(token);
         return claims.get("username", String.class);
     }
 
+    /**
+     * 从 Token 中获取可访问的租户 ID 列表
+     */
     @SuppressWarnings("unchecked")
     public List<Long> getTenantIdsFromToken(String token) {
         Claims claims = parseToken(token);
-        return claims.get("tenantIds", List.class);
+        Object obj = claims.get("tenantIds");
+        if (obj instanceof List) {
+            List<?> rawList = (List<?>) obj;
+            return rawList.stream()
+                    .map(v -> v instanceof Number ? ((Number) v).longValue() : Long.valueOf(v.toString()))
+                    .toList();
+        }
+        return Collections.emptyList();
     }
 
     /**
-     * @deprecated 使用 getTenantIdsFromToken 替代
+     * @deprecated 新架构不再使用，保留用于向后兼容
      */
     @Deprecated
     public Long getTenantIdFromToken(String token) {
