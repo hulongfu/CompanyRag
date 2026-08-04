@@ -2,6 +2,9 @@
 -- 执行数据库：company_rag (public schema)
 
 -- 1. 修改 sys_user 表（移除 tenant_id 字段）
+--  先删除依赖该列的 RLS 策略
+DROP POLICY tenant_isolation_user ON public.sys_user;
+--  再删除列
 ALTER TABLE sys_user DROP COLUMN IF EXISTS tenant_id;
 
 -- 2. 创建用户 - 租户关联表
