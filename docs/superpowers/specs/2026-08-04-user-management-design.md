@@ -307,15 +307,73 @@ Content-Type: application/json
 @PreAuthorize("hasRole('ADMIN')")  // 类级别限制
 public class UserController {
     
+    private final UserService userService;
+    
+    public UserController(UserService userService) {
+        this.userService = userService;
+    }
+    
+    /**
+     * 1. 创建用户
+     */
     @PostMapping
     @AuditLog(actionType = "CREATE_USER", targetType = "user", 
               detail = "'创建用户：' + #request.username")
-    public R<UserDTO.UserResponse> create(...) { }
+    public R<UserDTO.UserResponse> create(@RequestBody @Validated UserDTO.CreateRequest request) {
+        UserDTO.UserResponse response = userService.createUser(request);
+        return R.ok(response);
+    }
     
+    /**
+     * 2. 查询用户列表 (支持筛选)
+     */
+    @GetMapping("/list")
+    public R<List<UserDTO.UserResponse>> list(
+            @RequestParam(required = false) String role,
+            @RequestParam(required = false) Long tenantId,
+            @RequestParam(required = false) Integer status,
+            @RequestParam(required = false) String username) {
+        List<UserDTO.UserResponse> users = userService.queryUserList(role, tenantId, status, username);
+        return R.ok(users);
+    }
+    
+    /**
+     * 3. 查询用户详情
+     */
+    @GetMapping("/{id}")
+    public R<UserDTO.UserDetailResponse> getById(@PathVariable Long id) {
+        UserDTO.UserDetailResponse user = userService.getUserById(id);
+        if (user == null) {
+            return R.fail(404, "用户不存在");
+        }
+        return R.ok(user);
+    }
+    
+    /**
+     * 4. 更新用户
+     */
+    @PutMapping("/{id}")
+    @AuditLog(actionType = "UPDATE_USER", targetType = "user", 
+              targetId = "#id", detail = "'更新用户：ID=' + #id")
+    public R<UserDTO.UserResponse> update(@PathVariable Long id, 
+                                          @RequestBody @Validated UserDTO.UpdateRequest request) {
+        UserDTO.UserResponse response = userService.updateUser(id, request);
+        return R.ok(response);
+    }
+    
+    /**
+     * 5. 删除用户
+     */
     @DeleteMapping("/{id}")
     @AuditLog(actionType = "DELETE_USER", targetType = "user", 
               targetId = "#id", detail = "'删除用户：ID=' + #id")
-    public R<Boolean> delete(@PathVariable Long id) { }
+    public R<Boolean> delete(@PathVariable Long id) {
+        boolean success = userService.deleteUser(id);
+        if (!success) {
+            return R.fail(404, "用户不存在");
+        }
+        return R.ok(true);
+    }
 }
 ```
 
