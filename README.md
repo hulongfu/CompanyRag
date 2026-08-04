@@ -162,6 +162,22 @@ java -jar company-rag-bootstrap/target/company-rag-bootstrap-1.0.0-SNAPSHOT.jar
 
 系统使用 JWT 无状态认证，所有 API 请求需要在 Header 中携带 Token。
 
+#### 5.1 前端登录流程（推荐）
+
+1. **访问登录页**：浏览器打开 `http://localhost:8080/login`
+2. **输入凭据**：填写用户名和密码，点击登录
+3. **自动存储**：登录成功后，前端自动将以下信息存储到 `localStorage`：
+   - `token`：JWT Token（用于 API 认证）
+   - `refreshToken`：刷新令牌（Token 过期后刷新）
+   - `userId`：用户 ID
+   - `tenantIds`：用户可访问的租户 ID 列表（数组）
+   - `currentTenantId`：当前选中的租户 ID
+   - `role`：用户角色（`admin` / `user` / `viewer`）
+   - `displayName`：用户显示名称
+4. **自动跳转**：登录成功后自动跳转到首页 `/`
+
+#### 5.2 后端 API 登录（备用）
+
 **登录获取 Token：**
 ```bash
 POST http://localhost:8080/api/auth/login
@@ -191,13 +207,36 @@ Content-Type: application/json
 }
 ```
 
-**使用 Token 访问 API：**
+#### 5.3 使用 Token 访问 API
+
+**手动调用 API 时，需要在请求头中添加：**
 ```bash
 GET http://localhost:8080/api/document/list
 Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+X-Tenant-Id: 1
 ```
 
-**刷新 Token（Token 过期前）：**
+**说明：**
+- `Authorization`：JWT Token，前端从 `localStorage` 自动读取并添加
+- `X-Tenant-Id`：当前租户 ID，后端会验证是否在 Token 的 `tenantIds` 列表中
+
+#### 5.4 租户切换
+
+1. **进入租户管理**：点击首页顶部"🏢 租户"按钮
+2. **选择租户**：在租户列表中点击"选择"按钮
+3. **自动更新**：前端自动更新 `localStorage` 中的 `currentTenantId`，后续 API 调用使用新租户 ID
+
+**权限控制：**
+- 用户只能选择其 `tenantIds` 列表中的租户
+- 非 `admin` 角色用户不可见"创建租户"和"删除租户"按钮
+
+#### 5.5 Token 刷新和过期处理
+
+**自动刷新（前端）：**
+- Token 有效期 2 小时（7200 秒）
+- 前端检测到 401 错误时，自动跳转到登录页
+
+**手动刷新（API）：**
 ```bash
 POST http://localhost:8080/api/auth/refresh
 Content-Type: application/json
@@ -205,6 +244,19 @@ Content-Type: application/json
 {
   "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
 }
+```
+
+#### 5.6 登出
+
+**前端登出：**
+- 点击首页顶部"🚪 登出"按钮
+- 自动清除 `localStorage` 中的所有认证信息
+- 跳转到登录页
+
+**后端 API：**
+```bash
+POST http://localhost:8080/api/auth/logout
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 ```
 
 ### 6. Docker Compose 完整部署
