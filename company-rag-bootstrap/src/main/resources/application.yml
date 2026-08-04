@@ -44,6 +44,12 @@ spring:
       password: ${REDIS_PASSWORD:}
       database: 0
 
+# JWT 配置
+jwt:
+  secret: ${JWT_SECRET:}
+  access-token-expiration: 7200000
+  refresh-token-expiration: 604800000
+
 # SpringDoc OpenAPI 配置
 springdoc:
   api-docs:
