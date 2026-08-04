@@ -37,6 +37,9 @@ public class CustomUserDetailsService implements UserDetailsService {
             throw new UsernameNotFoundException("用户不存在：" + username);
         }
         
+        log.debug("用户信息：username={}, password={}, role={}, status={}", 
+                user.getUsername(), user.getPassword(), user.getRole(), user.getStatus());
+        
         // 检查用户状态（1=启用，0=禁用）
         if (user.getStatus() != null && user.getStatus() != 1) {
             log.warn("用户已禁用：{}", username);
@@ -53,10 +56,8 @@ public class CustomUserDetailsService implements UserDetailsService {
         // 默认租户取第一个
         Long defaultTenantId = tenantIds.get(0);
         
-        log.info("用户加载成功：{}, tenantIds={}, defaultTenantId={}, role={}", 
-                username, tenantIds, defaultTenantId, user.getRole());
-        
-        return new SecurityUser(
+        // 创建 SecurityUser
+        SecurityUser securityUser = new SecurityUser(
                 user.getId(),
                 defaultTenantId,
                 tenantIds,
@@ -65,5 +66,11 @@ public class CustomUserDetailsService implements UserDetailsService {
                 user.getRole() != null ? user.getRole() : "user",
                 user.getStatus() == null || user.getStatus() == 1
         );
+        
+        log.info("用户加载成功：{}, tenantIds={}, defaultTenantId={}, role={}, passwordLength={}", 
+                username, tenantIds, defaultTenantId, user.getRole(), 
+                securityUser.getPassword() != null ? securityUser.getPassword().length() : "null");
+        
+        return securityUser;
     }
 }

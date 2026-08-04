@@ -20,11 +20,10 @@ class JwtTokenProviderTest {
 
     @Test
     void generateAccessToken_shouldReturnValidToken() {
-        String token = tokenProvider.generateAccessToken(1L, 1L, "admin");
+        String token = tokenProvider.generateAccessToken(1L, "test-user", java.util.List.of(1L, 2L), "admin");
         assertNotNull(token);
         assertTrue(tokenProvider.validateToken(token));
         assertEquals(1L, tokenProvider.getUserIdFromToken(token));
-        assertEquals(1L, tokenProvider.getTenantIdFromToken(token));
         assertEquals("admin", tokenProvider.getRoleFromToken(token));
     }
 
@@ -48,7 +47,7 @@ class JwtTokenProviderTest {
         shortExp.setAccessTokenExpiration(1L);
         JwtTokenProvider shortProvider = new JwtTokenProvider(shortExp);
 
-        String token = shortProvider.generateAccessToken(1L, 1L, "admin");
+        String token = shortProvider.generateAccessToken(1L, "test-user", java.util.List.of(1L), "admin");
         Thread.sleep(10);
         assertFalse(shortProvider.validateToken(token));
     }

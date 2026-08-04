@@ -92,7 +92,7 @@ public class AuthController {
             return R.ok(response);
 
         } catch (Exception e) {
-            log.warn("用户登录失败：{}, 原因：{}", request.getUsername(), e.getMessage());
+            log.warn("用户登录失败：{}, 原因：{}", request.getUsername(), e.getMessage(), e);
             return R.fail(401, "用户名或密码错误");
         }
     }
@@ -205,5 +205,6 @@ public class AuthController {
     @lombok.Data
     public static class RefreshTokenRequest {
         private String refreshToken;
+
     }
 }
