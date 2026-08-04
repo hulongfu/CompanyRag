@@ -17,6 +17,7 @@ import java.util.List;
  * 用户详情服务实现
  * 
  * 用于 Spring Security 认证时加载用户信息
+ * 登录后查询用户关联的租户列表，支持多租户切换
  */
 @Slf4j
 @Service
@@ -49,11 +50,11 @@ public class CustomUserDetailsService implements UserDetailsService {
             throw new UsernameNotFoundException("用户没有关联任何租户：" + username);
         }
         
-        // 默认租户为列表第一个
+        // 默认租户取第一个
         Long defaultTenantId = tenantIds.get(0);
         
-        log.info("用户加载成功：{}, defaultTenantId={}, tenantIds={}, role={}", 
-                username, defaultTenantId, tenantIds, user.getRole());
+        log.info("用户加载成功：{}, tenantIds={}, defaultTenantId={}, role={}", 
+                username, tenantIds, defaultTenantId, user.getRole());
         
         return new SecurityUser(
                 user.getId(),
