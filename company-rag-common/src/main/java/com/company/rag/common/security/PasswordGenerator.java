@@ -8,6 +8,17 @@ import org.springframework.security.crypto.password.PasswordEncoder;
  */
 public class PasswordGenerator {
     
+    private static final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
+    
+    /**
+     * 编码密码
+     * @param rawPassword 原始密码
+     * @return 编码后的密码
+     */
+    public static String encode(String rawPassword) {
+        return passwordEncoder.encode(rawPassword);
+    }
+    
     public static void main(String[] args) {
         PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
         
