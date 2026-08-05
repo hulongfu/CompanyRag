@@ -18,7 +18,6 @@ import java.util.List;
 @Slf4j
 @RestController
 @RequestMapping("/api/user")
-@PreAuthorize("hasRole('ADMIN')")
 @RequiredArgsConstructor
 public class UserController {
     
@@ -28,6 +27,7 @@ public class UserController {
      * 1. 创建用户
      */
     @PostMapping
+    @PreAuthorize("hasRole('ADMIN')")
     @AuditLog(actionType = "CREATE_USER", targetType = "user", 
               detail = "'创建用户：' + #request.username")
     public R<UserDTO.UserResponse> create(@RequestBody @Validated UserDTO.CreateRequest request) {
@@ -86,6 +86,7 @@ public class UserController {
      * 4. 更新用户
      */
     @PutMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     @AuditLog(actionType = "UPDATE_USER", targetType = "user", 
               targetId = "#id", detail = "'更新用户：ID=' + #id")
     public R<UserDTO.UserResponse> update(@PathVariable Long id, 
@@ -107,6 +108,7 @@ public class UserController {
      * 5. 删除用户
      */
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     @AuditLog(actionType = "DELETE_USER", targetType = "user", 
               targetId = "#id", detail = "'删除用户：ID=' + #id")
     public R<Boolean> delete(@PathVariable Long id) {
