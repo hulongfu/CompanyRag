@@ -6,6 +6,7 @@ import com.company.rag.tenant.model.Tenant;
 import com.company.rag.tenant.model.dto.TenantDTO;
 import com.company.rag.tenant.service.TenantService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
@@ -14,6 +15,7 @@ import java.util.List;
 /**
  * 租户管理接口
  */
+@PreAuthorize("hasRole('ADMIN')")
 @RestController
 @RequestMapping("/api/tenant")
 @RequiredArgsConstructor
