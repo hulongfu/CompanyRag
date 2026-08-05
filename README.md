@@ -94,6 +94,15 @@
 - 混合保存策略：首次实时落库，后续异步批量更新；多租户 RLS 行级安全
 - 实现路径：Superpowers 工作流（设计稿 + 实现计划 + 代码），REST API 见 `/api/session`
 
+### 👤 用户管理（管理员专属）
+- **多租户关联**：用户可以关联多个租户（通过 `sys_user_tenant_rel` 表多对多关联）
+- **角色权限**：支持 admin（管理员）/ user（普通用户）/ viewer（访客）三种角色
+- **CRUD 操作**：仅管理员可访问用户管理界面，支持创建/查询/编辑/删除用户
+- **级联删除**：删除用户时自动清理 `sys_user_tenant_rel` 关联数据
+- **密码加密**：使用 BCrypt 强哈希存储，支持创建时设置初始密码、编辑时可选修改
+- **筛选查询**：支持按角色/租户/状态/用户名模糊搜索
+- **实现路径**：Superpowers 工作流，REST API 见 `/api/user`
+
 ## 技术栈
 
 | 组件 | 技术选型 |
@@ -347,6 +356,50 @@ Content-Type: application/json
 X-Tenant-Id: 1
 {"title": "新标题", "tags": ["tag1"]}
 ```
+
+### 用户管理（仅管理员）
+```bash
+# 创建用户
+POST /api/user
+Content-Type: application/json
+X-Tenant-Id: 1
+{
+  "username": "newuser",
+  "password": "initial123",
+  "displayName": "新用户",
+  "email": "user@example.com",
+  "role": "user",
+  "tenantIds": [1, 2]
+}
+
+# 查询用户列表（支持筛选）
+GET /api/user/list?role=user&tenantId=1&status=1&username=test
+X-Tenant-Id: 1
+
+# 查询用户详情
+GET /api/user/{userId}
+X-Tenant-Id: 1
+
+# 更新用户
+PUT /api/user/{userId}
+Content-Type: application/json
+X-Tenant-Id: 1
+{
+  "displayName": "更新后的名称",
+  "email": "new@example.com",
+  "role": "admin",
+  "tenantIds": [1],
+  "password": "" // 留空表示不修改密码
+}
+
+# 删除用户（级联删除关联表数据）
+DELETE /api/user/{userId}
+X-Tenant-Id: 1
+```
+
+**权限控制：**
+- 所有用户管理 API 需要 `admin` 角色权限（后端 `@PreAuthorize("hasRole('ADMIN')")`）
+- 前端仅管理员可见"👤 用户"导航按钮
 
 ## Agent 工具详解
 
