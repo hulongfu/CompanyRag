@@ -105,7 +105,7 @@
             <el-tag size="small" :type="role === 'admin' ? 'danger' : 'primary'" v-if="role">{{ role }}</el-tag>
             <button class="hdr-btn" @click="handleLogout" title="退出登录">🚪 登出</button>
             <button class="hdr-btn" :class="{ active: currentTab === 'chat' }" @click="currentTab = 'chat'">💬 对话</button>
-            <button class="hdr-btn" :class="{ active: currentTab === 'tenant' }" @click="currentTab = 'tenant'">🏢 租户</button>
+            <button class="hdr-btn" v-if="role === 'admin'" :class="{ active: currentTab === 'tenant' }" @click="currentTab = 'tenant'">🏢 租户</button>
             <button class="hdr-btn" v-if="role === 'admin'" :class="{ active: currentTab === 'user' }" @click="currentTab = 'user'">👤 用户</button>
             <button class="hdr-btn" @click="showUpload = true">📤 上传文件</button>
             <button class="hdr-btn" :class="{ active: showMetrics }" @click="showMetrics = !showMetrics">📊 实时指标</button>
