@@ -34,7 +34,9 @@ public class SecurityUser implements UserDetails {
         this.username = username;
         this.password = password;
         this.role = role;
-        this.authorities = List.of(new SimpleGrantedAuthority("ROLE_" + role));
+        // 将角色转换为大写，符合 Spring Security 的 hasRole() 表达式约定
+        // 例如：数据库存储 "admin" → 转换为 "ROLE_ADMIN"
+        this.authorities = List.of(new SimpleGrantedAuthority("ROLE_" + role.toUpperCase()));
         this.enabled = enabled;
     }
 

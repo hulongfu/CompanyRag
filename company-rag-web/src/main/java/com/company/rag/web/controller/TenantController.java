@@ -15,7 +15,6 @@ import java.util.List;
 /**
  * 租户管理接口
  */
-@PreAuthorize("hasRole('ADMIN')")
 @RestController
 @RequestMapping("/api/tenant")
 @RequiredArgsConstructor
@@ -27,6 +26,7 @@ public class TenantController {
      * 创建租户（自动初始化 Schema 和默认管理员用户）
      */
     @PostMapping
+    @PreAuthorize("hasRole('ADMIN')")
     @AuditLog(actionType = "CREATE_TENANT", targetType = "tenant", detail = "'创建租户：' + #request.tenantCode")
     public R<TenantDTO.TenantResponse> create(@RequestBody @Validated TenantDTO.CreateRequest request) {
         try {
@@ -107,6 +107,7 @@ public class TenantController {
      * 删除租户（级联删除 Schema 和所有数据）
      */
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     @AuditLog(actionType = "DELETE_TENANT", targetType = "tenant", targetId = "#id", detail = "'删除租户：ID=' + #id")
     public R<Boolean> delete(@PathVariable Long id) {
         try {
