@@ -13,6 +13,8 @@ import com.company.rag.tenant.service.TenantService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -234,6 +236,39 @@ public class TenantServiceImpl implements TenantService {
     @Override
     public List<Tenant> getAllTenants() {
         return tenantMapper.selectList(new LambdaQueryWrapper<Tenant>().orderByDesc(Tenant::getCreateTime));
+    }
+
+    @Override
+    public List<Tenant> getTenantsByCurrentUser() {
+        // 1. 获取当前登录用户
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || !(authentication.getPrincipal() instanceof SecurityUser)) {
+            log.warn("当前用户未认证");
+            return List.of();
+        }
+        
+        SecurityUser securityUser = (SecurityUser) authentication.getPrincipal();
+        String role = securityUser.getRole();
+        
+        // 2. 如果是 admin 用户，返回所有租户
+        if ("admin".equals(role)) {
+            log.info("admin 用户查看所有租户");
+            return getAllTenants();
+        }
+        
+        // 3. 普通用户只能看到其关联的租户
+        List<Long> tenantIds = securityUser.getTenantIds();
+        if (tenantIds == null || tenantIds.isEmpty()) {
+            log.warn("用户没有关联任何租户：userId={}", securityUser.getUserId());
+            return List.of();
+        }
+        
+        log.info("普通用户查看关联的租户：userId={}, tenantIds={}", securityUser.getUserId(), tenantIds);
+        return tenantMapper.selectList(
+            new LambdaQueryWrapper<Tenant>()
+                .in(Tenant::getId, tenantIds)
+                .orderByDesc(Tenant::getCreateTime)
+        );
     }
 
     @Override

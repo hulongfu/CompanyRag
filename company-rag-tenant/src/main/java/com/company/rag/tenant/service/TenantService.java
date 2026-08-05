@@ -32,6 +32,13 @@ public interface TenantService {
     java.util.List<Tenant> getAllTenants();
 
     /**
+     * 根据当前登录用户获取租户列表
+     * - admin 用户可以看到所有租户
+     * - 普通用户只能看到其关联的租户
+     */
+    java.util.List<Tenant> getTenantsByCurrentUser();
+
+    /**
      * 删除租户及其 Schema（级联删除所有数据）
      * @param tenantId 租户 ID
      * @return 是否删除成功

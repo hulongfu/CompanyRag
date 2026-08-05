@@ -58,10 +58,13 @@ public class TenantController {
 
     /**
      * 查询租户列表
+     * - 普通用户只能看到其关联的租户
+     * - admin 用户可以看到所有租户
      */
     @GetMapping("/list")
     public R<List<TenantDTO.TenantResponse>> list() {
-        List<Tenant> tenants = tenantService.getAllTenants();
+        // 根据当前登录用户获取租户列表（自动区分 admin 和普通用户）
+        List<Tenant> tenants = tenantService.getTenantsByCurrentUser();
         List<TenantDTO.TenantResponse> responses = tenants.stream().map(t -> {
             TenantDTO.TenantResponse response = new TenantDTO.TenantResponse();
             response.setId(t.getId());
