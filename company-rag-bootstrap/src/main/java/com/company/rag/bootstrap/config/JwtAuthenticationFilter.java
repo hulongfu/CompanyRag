@@ -83,7 +83,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 log.debug("JWT 认证成功：userId={}, currentTenantId={}, role={}", userId, currentTenantId, role);
             } catch (Exception e) {
                 log.warn("JWT 认证处理异常：{}", e.getMessage());
-                SecurityContextHolder.clearContext();
+                // 不清除 SecurityContext，让后续的@PreAuthorize 处理权限拒绝
+                // SecurityContextHolder.clearContext();
             }
         }
 
