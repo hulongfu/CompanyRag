@@ -3,6 +3,7 @@ package com.company.rag.common.model;
 import lombok.Data;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.Size;
 import java.util.List;
 
@@ -36,7 +37,7 @@ public class UserDTO {
         @NotBlank(message = "角色不能为空")
         private String role;  // admin, user, viewer
         
-        @NotBlank(message = "至少选择一个租户")
+        @NotEmpty(message = "至少选择一个租户")
         private List<Long> tenantIds;
     }
     
@@ -61,7 +62,7 @@ public class UserDTO {
         @NotBlank(message = "角色不能为空")
         private String role;  // admin, user, viewer
         
-        @NotBlank(message = "至少选择一个租户")
+        @NotEmpty(message = "至少选择一个租户")
         private List<Long> tenantIds;
     }
     

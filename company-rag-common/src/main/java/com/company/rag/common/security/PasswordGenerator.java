@@ -33,3 +33,4 @@ public class PasswordGenerator {
         System.out.println("UPDATE sys_user SET password = '" + encodedPassword + "' WHERE username = 'admin';");
     }
 }
+
