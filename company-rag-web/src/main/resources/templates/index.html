@@ -107,7 +107,7 @@
             <button class="hdr-btn" :class="{ active: currentTab === 'chat' }" @click="currentTab = 'chat'">💬 对话</button>
             <button class="hdr-btn" :class="{ active: currentTab === 'tenant' }" @click="currentTab = 'tenant'">🏢 租户</button>
             <button class="hdr-btn" v-if="role === 'admin'" :class="{ active: currentTab === 'user' }" @click="currentTab = 'user'">👤 用户</button>
-            <button class="hdr-btn" @click="showUpload = true">📤 上传文件</button>
+            <button class="hdr-btn" v-if="role !== 'viewer'" @click="showUpload = true">📤 上传文件</button>
             <button class="hdr-btn" :class="{ active: showMetrics }" @click="showMetrics = !showMetrics">📊 实时指标</button>
             <button class="hdr-btn" @click="showAdvanced = !showAdvanced" title="高级设置">⚙️ 设置</button>
         </div>
@@ -430,7 +430,7 @@
                     <el-tag size="small" :type="doc.status === 2 ? 'success' : 'warning'" style="height:20px;line-height:18px;font-size:10px;">
                         {{ doc.status === 2 ? '已完成' : '处理中' }}
                     </el-tag>
-                    <span class="doc-delete" @click.stop="deleteDocument(doc)" title="删除文档">✕</span>
+                    <span v-if="role !== 'viewer'" class="doc-delete" @click.stop="deleteDocument(doc)" title="删除文档">✕</span>
                 </div>
             </div>
         </aside>
