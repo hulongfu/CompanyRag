@@ -6,6 +6,7 @@ import com.company.rag.document.entity.Document;
 import com.company.rag.document.service.DocumentParseService;
 import com.company.rag.tenant.context.TenantContext;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -21,7 +22,11 @@ public class DocumentController {
 
     private final DocumentParseService documentParseService;
 
+    /**
+     * 上传文档（admin 和 user 可操作，viewer 不可）
+     */
     @PostMapping("/upload")
+    @PreAuthorize("hasAnyRole('ADMIN', 'USER')")
     public R<Document> upload(@RequestParam("file") MultipartFile file) {
         // 从租户上下文获取租户 ID（由 TenantInterceptor 设置）
         Long tenantId = TenantContext.getTenantId();
@@ -42,7 +47,11 @@ public class DocumentController {
         return R.ok(documentParseService.listDocuments(tenantId));
     }
 
+    /**
+     * 删除文档（admin 和 user 可操作，viewer 不可）
+     */
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasAnyRole('ADMIN', 'USER')")
     @AuditLog(actionType = "DELETE_DOCUMENT", targetType = "document", targetId = "#id", detail = "'删除文档：ID=' + #id")
     public R<Void> delete(@PathVariable Long id) {
         Long tenantId = TenantContext.getTenantId();
