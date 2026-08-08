@@ -4,7 +4,6 @@ import com.company.rag.rag.fusion.RankNormalizer;
 import com.company.rag.rag.fusion.ResultFilter;
 import com.company.rag.rag.fusion.ResultFuser;
 import com.company.rag.rag.model.*;
-import com.company.rag.rag.rerank.CrossEncoderReranker;
 import com.company.rag.rag.retriever.impl.FullTextRetriever;
 import com.company.rag.rag.retriever.impl.FuzzyRetriever;
 import com.company.rag.rag.retriever.impl.VectorRetriever;
@@ -30,7 +29,6 @@ public class MultiRetrieveServiceImpl implements MultiRetrieveService {
     private final RankNormalizer normalizer;
     private final ResultFuser fuser;
     private final ResultFilter filter;
-    private final CrossEncoderReranker reranker;
     
     @Override
     public List<RagResult.ChunkResult> retrieve(RagQuery query) {
@@ -77,20 +75,11 @@ public class MultiRetrieveServiceImpl implements MultiRetrieveService {
         List<FusedResult> filtered = filter.filter(fused, fusionTopK, query.getScoreThreshold());
         log.info("筛选完成 | 剩余数量={}", filtered.size());
         
-        // 5. Rerank 精排
-        List<RagResult.ChunkResult> reranked;
-        if (query.getEnableRerank() && !filtered.isEmpty()) {
-            // FusedResult 是 ChunkResult 的子类，可以直接转换
-            List<RagResult.ChunkResult> candidates = new java.util.ArrayList<>(filtered);
-            reranked = reranker.rerank(query.getQuery(), candidates, query.getRerankTopK());
-            log.info("Rerank 完成 | 最终数量={}", reranked.size());
-        } else {
-            reranked = new java.util.ArrayList<>(filtered);
-            log.info("跳过 Rerank | 直接返回融合结果");
-        }
+        // 5. 返回融合结果（Rerank 由上层服务控制）
+        List<RagResult.ChunkResult> reranked = new java.util.ArrayList<>(filtered);
         
         long elapsed = System.currentTimeMillis() - start;
-        log.info("多路检索完成 | 总耗时={}ms", elapsed);
+        log.info("多路检索完成 | 总耗时={}ms | enableRerank={}", elapsed, query.getEnableRerank());
         
         return reranked;
     }
