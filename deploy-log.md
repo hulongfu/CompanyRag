@@ -1,5 +1,26 @@
 ## Git Push
 
+### 2026-08-08: 修复重排序重复调用
+
+- commit_type:            BugFix
+- task_id:                0001
+- task_name:              修复重排序重复调用
+- commit_hash:            c4d95e78b217130d43427221027c0ceb40035951
+- branch:                 main
+- remote:                 gitee
+- staged_files:
+  - company-rag-rag/src/main/java/com/company/rag/rag/service/impl/MultiRetrieveServiceImpl.java
+- commit_message:         BugFix:0001_修复重排序重复调用：remove duplicate rerank call in MultiRetrieveService
+- commit_command:         git commit -m "BugFix:0001_修复重排序重复调用：remove duplicate rerank call in MultiRetrieveService"
+- commit_exit_code:       0
+- push_command:           git push gitee main
+- push_exit_code:         0
+- remote_head_check_command: git ls-remote gitee main
+- remote_head:            c4d95e78b217130d43427221027c0ceb40035951
+- result:                 推送成功，远端 HEAD 与本地提交哈希一致
+
+---
+
 ### 2026-08-08: Swagger UI 路径匹配修复
 
 - commit_type:            BugFix
