@@ -217,8 +217,14 @@ public class RagSearchServiceImpl implements RagSearchService {
     }
 
     private String buildCacheKey(RagQuery query) {
-        // 使用租户ID + 查询文本作为缓存键，避免hashCode()冲突
+        // 使用租户 ID + 查询文本 + 检索参数作为缓存键，避免不同参数组合错误命中缓存
+        // 格式：company:rag:vector:{tenantId}:{query}:{topK}:{strategy}:{rerank}
+        String normalizedQuery = query.getQuery().trim().toLowerCase();
+        String strategy = query.getRetrievalStrategy() != null ? query.getRetrievalStrategy() : "HYBRID";
+        int topK = query.getTopK() != null ? query.getTopK() : 10;
+        boolean enableRerank = query.getEnableRerank() != null && query.getEnableRerank();
+        
         return RagConstant.CACHE_DOC_VECTOR + query.getTenantId() + ":" + 
-               query.getQuery().trim().toLowerCase();
+               normalizedQuery + ":" + topK + ":" + strategy + ":" + (enableRerank ? "1" : "0");
     }
 }
