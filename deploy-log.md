@@ -21,6 +21,29 @@
 
 ---
 
+### 2026-08-08: 修复缓存 Key 缺少参数维度
+
+- commit_type:            BugFix
+- task_id:                0001
+- task_name:              修复缓存 Key 缺少参数维度
+- commit_hash:            f34d40b55b18f263eb679cbba4d47d4fc4c7ada7
+- branch:                 main
+- remote:                 gitee
+- staged_files:
+  - company-rag-rag/src/main/java/com/company/rag/rag/cache/RagCacheManager.java
+  - company-rag-rag/src/main/java/com/company/rag/rag/service/impl/RagSearchServiceImpl.java
+  - company-rag-rag/src/test/java/com/company/rag/rag/cache/RagCacheManagerTest.java
+- commit_message:         BugFix:0001_修复缓存 Key 缺少参数维度：add topK/strategy/rerank to cache key and remove unused invalidateByDocument
+- commit_command:         git commit -m "BugFix:0001_修复缓存 Key 缺少参数维度：add topK/strategy/rerank to cache key and remove unused invalidateByDocument"
+- commit_exit_code:       0
+- push_command:           git push gitee main
+- push_exit_code:         0
+- remote_head_check_command: git ls-remote gitee main
+- remote_head:            f34d40b55b18f263eb679cbba4d47d4fc4c7ada7
+- result:                 推送成功，远端 HEAD 与本地提交哈希一致
+
+---
+
 ### 2026-08-08: Swagger UI 路径匹配修复
 
 - commit_type:            BugFix
