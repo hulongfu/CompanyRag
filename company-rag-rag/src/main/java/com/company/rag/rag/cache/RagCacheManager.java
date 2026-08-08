@@ -11,12 +11,13 @@ import org.springframework.stereotype.Component;
 import java.util.concurrent.TimeUnit;
 
 /**
- * RAG缓存管理器
- * 基于Redis Redisson的RMapCache实现
+ * RAG 缓存管理器
+ * 基于 Redis Redisson 的 RMapCache 实现
  * 缓存策略：
- * - 相同问题的检索结果缓存5分钟（TTL）
- * - 文档向量变更时主动失效相关缓存
- * - 热点问题自动延长TTL
+ * - 缓存 Key：tenantId:query:topK:strategy:rerank（避免不同参数组合错误命中）
+ * - 相同查询和参数的检索结果缓存 5 分钟（TTL）
+ * - 文档变更时通过租户级事件主动失效缓存
+ * - 热点问题自动延长 TTL 至 30 分钟
  */
 @Slf4j
 @Component
@@ -65,31 +66,8 @@ public class RagCacheManager {
     }
 
     /**
-     * 失效指定文档的所有缓存
-     * 使用Redis SCAN模式匹配删除，避免全量遍历
-     */
-    public void invalidateByDocument(Long documentId) {
-        String pattern = "*doc_" + documentId + "*";
-        RMapCache<String, RagResult> cache = getCache();
-
-        try {
-            // 使用SCAN迭代删除匹配的key，避免阻塞Redis
-            int deletedCount = 0;
-            for (String key : cache.keySet()) {
-                if (key.contains("doc_" + documentId)) {
-                    cache.remove(key);
-                    deletedCount++;
-                }
-            }
-
-            log.info("失效文档缓存成功 | documentId={} | deletedCount={}", documentId, deletedCount);
-        } catch (Exception e) {
-            log.error("失效文档缓存失败 | documentId={} | error={}", documentId, e.getMessage());
-        }
-    }
-
-    /**
      * 失效指定租户的所有缓存
+     * 使用租户级全量失效，因为检索结果通常跨多个文档
      */
     public void invalidateByTenant(Long tenantId) {
         RMapCache<String, RagResult> cache = getCache();
