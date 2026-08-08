@@ -99,10 +99,26 @@ public class FullTextRetriever {
     /**
      * 转义 tsquery 特殊字符
      * PostgreSQL tsquery 特殊字符：& | ! ( ) : * ' " \
+     * 
+     * 注意：如果输入包含空格，会分割成多个词并用 & 连接
      */
     private String escapeTsQuery(String term) {
-        // 移除可能导致语法错误的特殊字符
-        return term.replaceAll("[&|!()::*'\"\\\\]", " ").trim();
+        // 按空格分割成多个词（支持短语查询）
+        String[] words = term.trim().split("\\s+");
+        List<String> escapedWords = new ArrayList<>();
+        
+        for (String word : words) {
+            if (!word.isEmpty()) {
+                // 移除可能导致语法错误的特殊字符
+                String escaped = word.replaceAll("[&|!()::*'\"\\\\]", " ").trim();
+                if (!escaped.isEmpty()) {
+                    escapedWords.add(escaped);
+                }
+            }
+        }
+        
+        // 用 & 连接所有词
+        return String.join(" & ", escapedWords);
     }
     
     private List<RagResult.ChunkResult> convertToChunkResults(List<Map<String, Object>> rows) {
