@@ -32,11 +32,11 @@ class RagCacheManagerTest {
 
     @Test
     void invalidateByTenant_shouldRemoveMatchingKeys() {
-        // Given — 租户 1 和租户 2 的缓存 key
+        // Given — 租户 1 和租户 2 的缓存 key（新格式：tenantId:query:topK:strategy:rerank）
         String prefix = RagConstant.CACHE_DOC_VECTOR;
-        String key1 = prefix + "1:test query";
-        String key2 = prefix + "1:another query";
-        String key3 = prefix + "2:other tenant query";
+        String key1 = prefix + "1:test query:10:HYBRID:1";
+        String key2 = prefix + "1:another query:10:HYBRID:0";
+        String key3 = prefix + "2:other tenant query:10:HYBRID:1";
         when(redissonClient.getMapCache(eq(prefix + "search"))).thenReturn(cache);
         when(cache.keySet()).thenReturn(Set.of(key1, key2, key3));
 
