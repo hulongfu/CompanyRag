@@ -10,7 +10,7 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 /**
  * Web MVC 配置
- * 注册租户拦截器，实现请求级别的租户上下文注入和Schema切换
+ * 注册租户拦截器，实现请求级别的租户上下文注入和 Schema 切换
  */
 @Configuration
 @RequiredArgsConstructor
@@ -23,6 +23,6 @@ public class WebMvcConfig implements WebMvcConfigurer {
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(new TenantInterceptor(tenantContextHelper, tenantMapper))
                 .addPathPatterns("/**")
-                .excludePathPatterns("/login", "/css/**", "/js/**", "/favicon.ico", "/static/**", "/assets/**", "/webjars/**");
+                .excludePathPatterns("/login", "/css/**", "/js/**", "/favicon.ico", "/static/**", "/assets/**", "/webjars/**", "/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**", "/api-docs", "/actuator/**");
     }
 }
