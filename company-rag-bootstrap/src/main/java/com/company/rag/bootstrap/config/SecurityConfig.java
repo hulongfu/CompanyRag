@@ -79,11 +79,14 @@ public class SecurityConfig {
                 .requestMatchers(new AntPathRequestMatcher("/*.html")).permitAll()
                 .requestMatchers(new AntPathRequestMatcher("/*.ico")).permitAll()
                 
-                // 放行 Swagger 文档
-                .requestMatchers(new AntPathRequestMatcher("/swagger-ui/**")).permitAll()
-                .requestMatchers(new AntPathRequestMatcher("/v3/api-docs/**")).permitAll()
-                .requestMatchers(new AntPathRequestMatcher("/swagger-resources/**")).permitAll()
-                .requestMatchers(new AntPathRequestMatcher("/webjars/**")).permitAll()
+                // 放行 Swagger UI 和 API 文档
+                .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**", "/swagger-resources/**", "/webjars/**").permitAll()
+                
+                // 放行测试端点
+                .requestMatchers("/test/**").permitAll()
+                
+                // 放行错误页面（Swagger 内部资源 404 时会转发到 /error）
+                .requestMatchers("/error").permitAll()
                 
                 // 放行健康检查和监控端点
                 .requestMatchers(new AntPathRequestMatcher("/actuator/**")).permitAll()
@@ -98,7 +101,7 @@ public class SecurityConfig {
             .exceptionHandling(exception -> exception
                 // 401 未认证
                 .authenticationEntryPoint((request, response, authException) -> {
-                    log.warn("认证失败：{}", authException.getMessage());
+                    log.warn("认证失败：URI={}, Method={}, Message={}", request.getRequestURI(), request.getMethod(), authException.getMessage());
                     response.setStatus(401);
                     response.setContentType("application/json;charset=UTF-8");
                     response.getWriter().write("{\"code\":401,\"message\":\"未认证或 Token 无效\"}");
