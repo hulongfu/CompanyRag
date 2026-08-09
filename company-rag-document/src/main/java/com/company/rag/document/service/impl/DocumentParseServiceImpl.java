@@ -2,6 +2,7 @@ package com.company.rag.document.service.impl;
 
 import com.company.rag.common.event.DocumentEvent;
 import com.company.rag.common.event.DocumentEventType;
+import com.company.rag.common.exception.BizException;
 import com.company.rag.document.entity.Document;
 import com.company.rag.document.entity.DocumentChunk;
 import com.company.rag.document.mapper.DocumentChunkMapper;
@@ -9,6 +10,7 @@ import com.company.rag.document.mapper.DocumentMapper;
 import com.company.rag.document.service.DocumentParseService;
 import com.company.rag.document.splitter.DocumentSplitter;
 import com.company.rag.document.splitter.SplitStrategy;
+import com.company.rag.tenant.context.TenantSqlHelper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.tika.Tika;
@@ -161,9 +163,14 @@ public class DocumentParseServiceImpl implements DocumentParseService {
     @Transactional(rollbackFor = Exception.class)
     public void deleteDocument(Long id, Long tenantId) {
         // 1. 删除向量数据（vector_store 表的 metadata 中存了 documentId）
-        String sql = "DELETE FROM vector_store WHERE metadata->>'documentId' = ?";
-        int deletedVectors = jdbcTemplate.update(sql, String.valueOf(id));
-        log.info("删除向量数据 | documentId={} | count={}", id, deletedVectors);
+        // 使用 TenantSqlHelper 拼接 schema，确保租户隔离
+        String schema = TenantSqlHelper.requireSchema();
+        String table = TenantSqlHelper.getQualifiedTableName(schema, "vector_store");
+        
+        // 双保险：schema 限定 + tenantId 过滤，防止误删其他租户数据
+        String sql = "DELETE FROM " + table + " WHERE metadata->>'documentId' = ? AND metadata->>'tenantId' = ?";
+        int deletedVectors = jdbcTemplate.update(sql, String.valueOf(id), String.valueOf(tenantId));
+        log.info("删除向量数据 | documentId={} | tenantId={} | count={}", id, tenantId, deletedVectors);
 
         // 2. 删除 chunk 记录
         int deletedChunks = chunkMapper.delete(

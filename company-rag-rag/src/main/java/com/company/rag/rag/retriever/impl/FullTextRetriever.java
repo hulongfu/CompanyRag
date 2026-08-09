@@ -1,6 +1,8 @@
 package com.company.rag.rag.retriever.impl;
 
+import com.company.rag.common.exception.BizException;
 import com.company.rag.rag.model.RagResult;
+import com.company.rag.tenant.context.TenantSqlHelper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.postgresql.util.PGobject;
@@ -28,16 +30,18 @@ public class FullTextRetriever {
      * @return 检索结果
      */
     public List<RagResult.ChunkResult> retrieve(String query, int topK) {
+        // 获取租户 schema 并拼接表名，确保租户隔离
+        String schema = TenantSqlHelper.requireSchema();
+        String table = TenantSqlHelper.getQualifiedTableName(schema, "vector_store");
+        
         String tsQuery = buildTsQuery(query);
         
-        String sql = """
-            SELECT id, content, metadata,
-                   ts_rank(content_tsv, to_tsquery('pg_catalog.simple', ?)) AS score
-            FROM vector_store
-            WHERE content_tsv @@ to_tsquery('pg_catalog.simple', ?)
-            ORDER BY score DESC
-            LIMIT ?
-        """;
+        String sql = "SELECT id, content, metadata, " +
+                "ts_rank(content_tsv, to_tsquery('pg_catalog.simple', ?)) AS score " +
+                "FROM " + table + " " +
+                "WHERE content_tsv @@ to_tsquery('pg_catalog.simple', ?) " +
+                "ORDER BY score DESC " +
+                "LIMIT ?";
         
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql, tsQuery, tsQuery, topK);
         return convertToChunkResults(rows);
