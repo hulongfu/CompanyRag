@@ -1,5 +1,32 @@
 ## Git Push
 
+### 2026-08-09: SQL 语法错误修复
+
+- commit_type:            BugFix
+- task_id:                0000
+- task_name:              SQL 语法错误修复
+- commit_hash:            7b164b2908f1384c8330b7ff5dc6166bcd629c31
+- branch:                 main
+- remote:                 gitee
+- staged_files:
+  - company-rag-rag/src/main/java/com/company/rag/rag/retriever/impl/FullTextRetriever.java
+  - company-rag-rag/src/main/java/com/company/rag/rag/retriever/impl/FuzzyRetriever.java
+  - company-rag-tenant/src/main/java/com/company/rag/tenant/context/TenantSqlHelper.java
+  - company-rag-tenant/src/test/java/com/company/rag/tenant/context/TenantSqlHelperTest.java
+  - company-rag-document/pom.xml
+  - company-rag-document/src/main/java/com/company/rag/document/service/impl/DocumentParseServiceImpl.java
+  - company-rag-document/src/test/java/com/company/rag/document/service/DocumentParseServiceImplEventTest.java
+- commit_message:         BugFix:0000_SQL 语法错误修复：修复 FullTextRetriever/FuzzyRetriever 的 SQL 拼接问题
+- commit_command:         git commit -m "BugFix:0000_SQL 语法错误修复：修复 FullTextRetriever/FuzzyRetriever 的 SQL 拼接问题"
+- commit_exit_code:       0
+- push_command:           git push gitee main
+- push_exit_code:         0
+- remote_head_check_command: git ls-remote gitee main
+- remote_head:            7b164b2908f1384c8330b7ff5dc6166bcd629c31
+- result:                 推送成功，远端 HEAD 与本地提交哈希一致
+
+---
+
 ### 2026-08-08: 修复重排序重复调用
 
 - commit_type:            BugFix
