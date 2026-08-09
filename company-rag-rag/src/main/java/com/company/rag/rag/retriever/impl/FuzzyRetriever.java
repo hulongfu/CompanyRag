@@ -1,6 +1,7 @@
 package com.company.rag.rag.retriever.impl;
 
 import com.company.rag.rag.model.RagResult;
+import com.company.rag.tenant.context.TenantSqlHelper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -27,14 +28,16 @@ public class FuzzyRetriever {
      * @return 检索结果
      */
     public List<RagResult.ChunkResult> retrieve(String query, int topK) {
-        String sql = """
-            SELECT id, content, metadata,
-                   similarity(content, ?) AS score
-            FROM vector_store
-            WHERE similarity(content, ?) > 0.1
-            ORDER BY score DESC
-            LIMIT ?
-        """;
+        // 获取租户 schema 并拼接表名，确保租户隔离
+        String schema = TenantSqlHelper.requireSchema();
+        String table = TenantSqlHelper.getQualifiedTableName(schema, "vector_store");
+        
+        String sql = "SELECT id, content, metadata, " +
+                "similarity(content, ?) AS score " +
+                "FROM " + table + " " +
+                "WHERE similarity(content, ?) > 0.1 " +
+                "ORDER BY score DESC " +
+                "LIMIT ?";
         
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql, query, query, topK);
         return convertToChunkResults(rows);

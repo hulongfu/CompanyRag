@@ -5,6 +5,8 @@ import com.company.rag.document.mapper.DocumentChunkMapper;
 import com.company.rag.document.mapper.DocumentMapper;
 import com.company.rag.document.service.impl.DocumentParseServiceImpl;
 import com.company.rag.document.splitter.DocumentSplitter;
+import com.company.rag.tenant.context.TenantContext;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -40,12 +42,21 @@ class DocumentParseServiceImplEventTest {
     @org.junit.jupiter.api.BeforeEach
     void setUp() {
         service = new DocumentParseServiceImpl(vectorStore, splitters, documentMapper, chunkMapper, jdbcTemplate, eventPublisher);
+        // 设置租户上下文，因为 deleteDocument 需要
+        TenantContext.setSchema("test_tenant");
+        TenantContext.setTenantId(1L);
+    }
+
+    @AfterEach
+    void tearDown() {
+        // 清理租户上下文，避免污染其他测试
+        TenantContext.clear();
     }
 
     @Test
     void deleteDocument_shouldPublishDeletedEvent() {
         // Given
-        when(jdbcTemplate.update(anyString(), anyString())).thenReturn(0);
+        when(jdbcTemplate.update(anyString(), anyString(), anyString())).thenReturn(0);
         when(chunkMapper.delete(any())).thenReturn(0);
         when(documentMapper.deleteById(anyLong())).thenReturn(0);
 
