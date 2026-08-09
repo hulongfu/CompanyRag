@@ -135,19 +135,47 @@ public class FullTextRetriever {
             
             // 解析 metadata JSON：PostgreSQL 返回的是 PGobject，需要转换为 String
             Object metadataObj = row.get("metadata");
-            String metadata;
+            String metadataJson = "{}";
             if (metadataObj instanceof PGobject) {
                 try {
-                    metadata = ((PGobject) metadataObj).getValue();
+                    metadataJson = ((PGobject) metadataObj).getValue();
                 } catch (Exception e) {
                     log.warn("解析 metadata 失败：{}", e.getMessage());
-                    metadata = "{}";
+                }
+            } else if (metadataObj != null) {
+                metadataJson = metadataObj.toString();
+            }
+            
+            // 从 metadata 中提取 documentName 和 chunkIndex
+            if (!"{}".equals(metadataJson)) {
+                try {
+                    // 使用 Jackson 解析 JSON（Spring Boot 默认集成）
+                    com.fasterxml.jackson.databind.JsonNode jsonNode = 
+                        new com.fasterxml.jackson.databind.ObjectMapper().readTree(metadataJson);
+                    
+                    // 提取 documentName
+                    if (jsonNode.has("documentName")) {
+                        cr.setDocumentName(jsonNode.get("documentName").asText());
+                    } else {
+                        cr.setDocumentName("未知");
+                    }
+                    
+                    // 提取 chunkIndex
+                    if (jsonNode.has("chunkIndex")) {
+                        cr.setChunkIndex(jsonNode.get("chunkIndex").asInt());
+                    }
+                    
+                    // 提取 documentId
+                    if (jsonNode.has("documentId")) {
+                        cr.setDocumentId(jsonNode.get("documentId").asLong());
+                    }
+                } catch (Exception e) {
+                    log.warn("解析 metadata JSON 失败：{}", e.getMessage());
+                    cr.setDocumentName("未知");
                 }
             } else {
-                metadata = metadataObj != null ? metadataObj.toString() : "{}";
+                cr.setDocumentName("未知");
             }
-            // TODO: 解析 metadata 提取 documentName, chunkIndex 等
-            cr.setDocumentName("未知");
             
             results.add(cr);
         }
