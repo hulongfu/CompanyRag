@@ -85,6 +85,11 @@ public class TenantServiceImpl implements TenantService {
                 metadata JSONB,
                 embedding vector(1024)
             );
+            -- 注意：vector_store 表仅依赖 Schema 隔离，不使用 RLS
+            // 原因：PgVectorStore 通过 TenantAwareJdbcTemplate 直连 JDBC，
+            // 不经过 MyBatis 拦截器设置 app.tenant_id，
+            // 强加 RLS 会导致 current_tenant_id()=0，所有向量 tenant_id=0，
+            // 造成跨租户数据泄露 + 旧数据不可见
             CREATE TABLE IF NOT EXISTS %s.rag_session (
                 id BIGSERIAL PRIMARY KEY,
                 session_id VARCHAR(128) NOT NULL,
@@ -160,29 +165,57 @@ public class TenantServiceImpl implements TenantService {
         jdbcTemplate.execute(initFullTextSearchSql);
         log.info("为租户 [{}] 初始化全文检索支持：content_tsv 列、GIN 索引、触发器、trgm 索引", schemaName);
 
-        // 5. 启用 RLS 并创建策略
+        // 5. 启用 RLS 并创建策略（移除 postgres 后门，增加 WITH CHECK + FORCE RLS）
+        // 注意：vector_store 表仅依赖 Schema 隔离，不使用 RLS（见第 82-90 行注释）
         String rlsSql = """
-            ALTER TABLE %s.rag_document ENABLE ROW LEVEL SECURITY;
-            ALTER TABLE %s.doc_chunk ENABLE ROW LEVEL SECURITY;
-            ALTER TABLE %s.rag_session ENABLE ROW LEVEL SECURITY;
-            ALTER TABLE %s.rag_session_meta ENABLE ROW LEVEL SECURITY;
-            DROP POLICY IF EXISTS tenant_isolation_document ON %s.rag_document;
-            CREATE POLICY tenant_isolation_document ON %s.rag_document
-                USING (tenant_id = current_tenant_id() OR current_user = 'postgres');
-            DROP POLICY IF EXISTS tenant_isolation_chunk ON %s.doc_chunk;
-            CREATE POLICY tenant_isolation_chunk ON %s.doc_chunk
-                USING (tenant_id = current_tenant_id() OR current_user = 'postgres');
-            DROP POLICY IF EXISTS tenant_isolation_session ON %s.rag_session;
-            CREATE POLICY tenant_isolation_session ON %s.rag_session
-                USING (tenant_id = current_tenant_id() OR current_user = 'postgres');
-            DROP POLICY IF EXISTS tenant_isolation_session_meta ON %s.rag_session_meta;
-            CREATE POLICY tenant_isolation_session_meta ON %s.rag_session_meta
-                USING (tenant_id = current_tenant_id() OR current_user = 'postgres');
-            """.formatted(schemaName, schemaName, schemaName, schemaName,
-                schemaName, schemaName, schemaName, schemaName, schemaName, schemaName, schemaName, schemaName);
+            ALTER TABLE %1$s.rag_document ENABLE ROW LEVEL SECURITY;
+            ALTER TABLE %1$s.rag_document FORCE ROW LEVEL SECURITY;
+            ALTER TABLE %1$s.doc_chunk ENABLE ROW LEVEL SECURITY;
+            ALTER TABLE %1$s.doc_chunk FORCE ROW LEVEL SECURITY;
+            -- vector_store 不使用 RLS，仅通过 Schema 隔离
+            ALTER TABLE %1$s.rag_session ENABLE ROW LEVEL SECURITY;
+            ALTER TABLE %1$s.rag_session FORCE ROW LEVEL SECURITY;
+            ALTER TABLE %1$s.rag_session_meta ENABLE ROW LEVEL SECURITY;
+            ALTER TABLE %1$s.rag_session_meta FORCE ROW LEVEL SECURITY;
+            DROP POLICY IF EXISTS tenant_isolation_document ON %1$s.rag_document;
+            CREATE POLICY tenant_isolation_document ON %1$s.rag_document
+                FOR ALL
+                TO company_rag_app
+                USING (tenant_id = current_tenant_id())
+                WITH CHECK (tenant_id = current_tenant_id());
+            DROP POLICY IF EXISTS tenant_isolation_chunk ON %1$s.doc_chunk;
+            CREATE POLICY tenant_isolation_chunk ON %1$s.doc_chunk
+                FOR ALL
+                TO company_rag_app
+                USING (tenant_id = current_tenant_id())
+                WITH CHECK (tenant_id = current_tenant_id());
+            DROP POLICY IF EXISTS tenant_isolation_session ON %1$s.rag_session;
+            CREATE POLICY tenant_isolation_session ON %1$s.rag_session
+                FOR ALL
+                TO company_rag_app
+                USING (tenant_id = current_tenant_id())
+                WITH CHECK (tenant_id = current_tenant_id());
+            DROP POLICY IF EXISTS tenant_isolation_session_meta ON %1$s.rag_session_meta;
+            CREATE POLICY tenant_isolation_session_meta ON %1$s.rag_session_meta
+                FOR ALL
+                TO company_rag_app
+                USING (tenant_id = current_tenant_id())
+                WITH CHECK (tenant_id = current_tenant_id());
+            """.formatted(schemaName);
         jdbcTemplate.execute(rlsSql);
 
-        // 5. 更新租户记录
+        // 6. 授予专用用户对该 schema 的权限（深度防御：数据库层隔离）
+        String grantSql = """
+            GRANT USAGE ON SCHEMA %1$s TO company_rag_app;
+            GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA %1$s TO company_rag_app;
+            GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA %1$s TO company_rag_app;
+            ALTER DEFAULT PRIVILEGES IN SCHEMA %1$s GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO company_rag_app;
+            ALTER DEFAULT PRIVILEGES IN SCHEMA %1$s GRANT USAGE, SELECT ON SEQUENCES TO company_rag_app;
+            """.formatted(schemaName);
+        jdbcTemplate.execute(grantSql);
+        log.info("已授予 company_rag_app 对 schema {} 的权限", schemaName);
+
+        // 7. 更新租户记录
         tenant.setSchemaName(schemaName);
         tenantMapper.updateById(tenant);
 

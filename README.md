@@ -52,9 +52,11 @@
 ### 📐 多租户架构
 - **用户 - 租户关联表**：`sys_user` 在 `public` schema，通过 `sys_user_tenant_rel` 关联多租户（多对多）
 - **Schema 隔离**：每个租户独立 Schema，数据物理隔离
-- **行级安全**：MyBatis-Plus 租户拦截器自动追加租户条件
+- **行级安全 (RLS)**：业务表（rag_document/doc_chunk/rag_session/rag_session_meta）使用 RLS 行级安全策略，通过 GUC `app.tenant_id` 控制访问
+- **向量存储**：`vector_store` 表仅通过 Schema 隔离（不启用 RLS，由 PgVectorStore 直连 JDBC）
 - **权限控制**：支持 admin / user / viewer 三种角色
 - **租户切换**：前端管理 `currentTenantId`，API 调用通过 `X-Tenant-Id` 头传递，后端验证 JWT 中的 `tenantIds`
+- **安全加固**：使用专用数据库用户 `company_rag_app`（非超级用户），移除 RLS 策略中的 `postgres` 后门
 
 ### 🔄 RAG全链路
 1. **文档解析**：Apache Tika 自动识别 PDF/DOCX/TXT/MD/HTML

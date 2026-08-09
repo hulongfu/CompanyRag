@@ -8,6 +8,11 @@
 
 **Tech Stack:** Spring Security 6 (Spring Boot 3.4 内置), jjwt 0.12.6, BCrypt (Spring Security 内置), Spring AOP, MyBatis-Plus
 
+> ⚠️ **注意**: 本文档记录的是安全与认证体系实现计划，多租户隔离安全实现细节请参考最新文档：
+> - [多租户隔离安全修复报告](../../security-fixes/2026-08-09-tenant-isolation-security-fix.md)
+> - [RLS 连接池修复报告](../../security-fixes/2026-08-09-rls-connection-pool-fix.md)
+> - [清理清单](../../security-fixes/2026-08-09-cleanup-checklist.md)
+
 ---
 
 ## 文件结构

@@ -32,14 +32,11 @@ public class TenantInterceptor implements HandlerInterceptor {
             Long tid = Long.valueOf(tenantId);
             TenantContext.setTenantId(tid);
 
-            // 从数据库获取租户的Schema名称，设置Schema隔离
+            // 从数据库获取租户的 Schema 名称，设置 Schema 隔离
             Tenant tenant = tenantMapper.selectById(tid);
             if (tenant != null && tenant.getSchemaName() != null) {
                 TenantContext.setSchema(tenant.getSchemaName());
-                tenantContextHelper.setTenantContext(tid, tenant.getSchemaName());
-            } else {
-                // 没有独立Schema时，至少设置RLS
-                tenantContextHelper.setCurrentTenant(tid);
+                // TenantContextHelper 已废弃，不再调用其 set 方法
             }
         }
         if (userId != null) {
@@ -52,13 +49,10 @@ public class TenantInterceptor implements HandlerInterceptor {
             if (paramTenantId != null) {
                 Long tid = Long.valueOf(paramTenantId);
                 TenantContext.setTenantId(tid);
-                // 同样查询租户Schema并切换，与请求头分支保持一致
+                // 同样查询租户 Schema 并设置，与请求头分支保持一致
                 Tenant tenant = tenantMapper.selectById(tid);
                 if (tenant != null && tenant.getSchemaName() != null) {
                     TenantContext.setSchema(tenant.getSchemaName());
-                    tenantContextHelper.setTenantContext(tid, tenant.getSchemaName());
-                } else {
-                    tenantContextHelper.setCurrentTenant(tid);
                 }
             }
         }
@@ -69,6 +63,6 @@ public class TenantInterceptor implements HandlerInterceptor {
     @Override
     public void afterCompletion(HttpServletRequest request, HttpServletResponse response, Object handler, Exception ex) {
         TenantContext.clear();
-        tenantContextHelper.resetSchema();
+        // TenantContextHelper 已废弃，不再调用其 reset 方法
     }
 }
