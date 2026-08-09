@@ -8,6 +8,10 @@
 
 **Tech Stack:** Spring Boot 3.4 + MyBatis-Plus 3.5.9 + PostgreSQL 16 + PGVector + Vue 3 + Element Plus
 
+> ⚠️ **注意**: 本文档记录的是功能实现计划，多租户隔离实现细节请参考最新文档：
+> - [多租户隔离安全修复报告](../../security-fixes/2026-08-09-tenant-isolation-security-fix.md)
+> - [RLS 连接池修复报告](../../security-fixes/2026-08-09-rls-connection-pool-fix.md)
+
 ---
 
 ## 文件结构

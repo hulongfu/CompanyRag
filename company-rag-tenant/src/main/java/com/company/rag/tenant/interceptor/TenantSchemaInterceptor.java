@@ -14,17 +14,11 @@ import java.sql.SQLException;
 import java.sql.Statement;
 
 /**
- * MyBatis-Plus 内拦截器 - 在执行 SQL 前自动设置 search_path
+ * MyBatis-Plus 内拦截器 - 在每条语句的"执行连接"上设置租户上下文。
  * <p>
- * 解决时序竞争问题：TenantInterceptor 通过 JdbcTemplate 设置 search_path 后，
- * MyBatis 可能从连接池获取到另一个未设置 search_path 的连接，导致查询租户 Schema 下的表失败。
- * <p>
- * 该拦截器在每次 MyBatis 查询/更新前，在 MyBatis 当前使用的连接上直接执行 SET search_path，
- * 确保 search_path 始终与当前租户 Schema 一致。
- * <p>
- * 与 TenantAwareJdbcTemplate 互补：
- * - TenantAwareJdbcTemplate：替换 SQL 中的 public. 前缀（用于 Spring AI PgVectorStore 等）
- * - TenantSchemaInterceptor：在 MyBatis 连接上设置 search_path（用于 MyBatis 查询）
+ * 同时负责：(1) search_path 路由到租户 schema；(2) RLS 所需的 app.tenant_id。
+ * 关键：使用 SET 而非 SET LOCAL，在每次查询前设置，确保作用在执行连接上。
+ * 注意：GUC 会在连接归还池后残留，因此依赖连接池的自动清理（HikariCP 默认会 reset）。
  */
 @Slf4j
 public class TenantSchemaInterceptor implements InnerInterceptor {
@@ -32,44 +26,40 @@ public class TenantSchemaInterceptor implements InnerInterceptor {
     @Override
     public void beforeQuery(Executor executor, MappedStatement ms, Object parameter,
                             RowBounds rowBounds, ResultHandler resultHandler, BoundSql boundSql) {
-        setSearchPath(executor);
+        applyTenantContext(executor);
     }
 
     @Override
     public void beforeUpdate(Executor executor, MappedStatement ms, Object parameter) {
-        setSearchPath(executor);
+        applyTenantContext(executor);
     }
 
-    /**
-     * 在当前 MyBatis 连接上设置 search_path
-     */
-    private void setSearchPath(Executor executor) {
+    /** 在执行连接上设置 search_path 与 RLS 租户标识（使用 SET，连接池会自动清理） */
+    private void applyTenantContext(Executor executor) {
         String schema = TenantContext.getSchema();
-        if (schema == null || schema.isBlank()) {
+        Long tenantId = TenantContext.getTenantId();
+        if (schema == null || schema.isBlank() || tenantId == null) {
             return;
         }
-
-        // 校验 Schema 名称合法性，防止 SQL 注入
         if (!schema.matches("^[a-zA-Z_][a-zA-Z0-9_]*$")) {
-            log.warn("非法 Schema 名称，跳过 search_path 设置：{}", schema);
+            log.warn("非法 Schema 名称，跳过租户上下文设置：{}", schema);
             return;
         }
-
-        Connection connection = null;
+        Connection connection;
         try {
-            // 从 Executor 获取当前连接
             connection = executor.getTransaction().getConnection();
         } catch (SQLException e) {
-            log.warn("获取 MyBatis 连接失败，跳过 search_path 设置", e);
+            log.warn("获取 MyBatis 连接失败，跳过租户上下文设置", e);
             return;
         }
-
         if (connection != null) {
             try (Statement stmt = connection.createStatement()) {
+                // 使用 SET：在当前连接上设置，连接归还池时由 HikariCP 自动 reset
                 stmt.execute("SET search_path TO " + schema + ", public");
-                log.trace("MyBatis 拦截器设置 search_path: {}", schema);
+                stmt.execute("SET app.tenant_id = " + tenantId);
+                log.trace("设置租户上下文：schema={}, tenantId={}", schema, tenantId);
             } catch (SQLException e) {
-                log.warn("设置 search_path 失败：{}", e.getMessage());
+                log.warn("设置租户上下文失败：{}", e.getMessage());
             }
         }
     }
