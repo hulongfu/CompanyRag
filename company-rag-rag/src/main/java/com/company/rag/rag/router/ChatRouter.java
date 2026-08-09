@@ -19,18 +19,16 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * 核心路由层
- * 统一路由入口，根据意图分发到不同处理器
- * 实现三级降级策略：
- * - P0: 核心处理失败 → 兜底回答
- * - P1: 意图识别失败 → 默认 DOCUMENT
- * - P1: RAG 失败 → 纯 LLM
- * - P1: Agent 失败 → RAG → LLM
- * - P2: 指标收集、会话保存、调试信息（失败不影响核心）
+ * 核心路由层（已过期，仅用于测试和向后兼容）
+ * 
+ * @deprecated 使用 {@link RagAgentService} 替代。
+ *             新架构将 RAG 能力抽象为 MCP 工具，由 LLM 自主决定调用哪个工具。
+ *             旧有的硬编码路由逻辑已被 Agent 编排模式替代。
  */
 @Slf4j
 @Component
 @RequiredArgsConstructor
+@Deprecated
 public class ChatRouter {
 
     private final IntentRecognizer intentRecognizer;
