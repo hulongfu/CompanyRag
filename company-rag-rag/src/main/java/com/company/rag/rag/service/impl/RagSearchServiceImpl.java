@@ -53,7 +53,7 @@ public class RagSearchServiceImpl implements RagSearchService {
         String cacheKey = buildCacheKey(query);
         RagResult cached = cacheManager.getSearchResult(cacheKey);
         if (cached != null) {
-            log.info("RAG缓存命中: key={}", cacheKey);
+            log.info("RAG 缓存命中：key={}", cacheKey);
             metricsRecorder.recordCacheHit();
             return cached;
         }
@@ -70,10 +70,13 @@ public class RagSearchServiceImpl implements RagSearchService {
         }
         long rerankMs = System.currentTimeMillis() - rerankStart;
 
-        // 4. 构建Prompt并调用LLM
+        // 4. 构建 Prompt 并调用 LLM
         long llmStart = System.currentTimeMillis();
         String context = chunks.stream()
-                .map(c -> "[来源:" + c.getDocumentName() + "] " + c.getContent())
+                .map(c -> {
+                    String name = c.getDocumentName() != null ? c.getDocumentName() : "未知";
+                    return "[来源:" + name + "] " + c.getContent();
+                })
                 .collect(Collectors.joining("\n\n"));
         String prompt = promptTemplate.buildChatPrompt(query.getQuery(), context);
         String answer = chatModelProvider.getObject().call(prompt);
@@ -84,7 +87,14 @@ public class RagSearchServiceImpl implements RagSearchService {
         result.setAnswer(answer);
         result.setChunks(chunks);
         result.setSessions(chunks.stream()
-                .map(c -> c.getDocumentName() + " (第" + c.getChunkIndex() + "段)")
+                .map(c -> {
+                    String name = c.getDocumentName() != null ? c.getDocumentName() : "未知";
+                    if (c.getChunkIndex() != null) {
+                        return name + " (第" + c.getChunkIndex() + "段)";
+                    } else {
+                        return name;
+                    }
+                })
                 .collect(Collectors.toList()));
 
         RagResult.Metrics metrics = new RagResult.Metrics();
@@ -116,10 +126,10 @@ public class RagSearchServiceImpl implements RagSearchService {
     }
 
     /**
-     * RAG搜索降级方法
+     * RAG 搜索降级方法
      */
     public RagResult searchFallback(RagQuery query, Throwable t) {
-        log.warn("RAG搜索降级 | 原因: {}", t.getMessage());
+        log.warn("RAG 搜索降级 | 原因：{}", t.getMessage());
         
         RagResult result = new RagResult();
         result.setAnswer("服务暂时繁忙，请稍后重试。");
@@ -137,7 +147,7 @@ public class RagSearchServiceImpl implements RagSearchService {
      * 检索降级方法
      */
     public List<RagResult.ChunkResult> retrieveFallback(RagQuery query, Throwable t) {
-        log.warn("RAG检索降级 | 原因: {}", t.getMessage());
+        log.warn("RAG 检索降级 | 原因：{}", t.getMessage());
         return Collections.emptyList();
     }
 
@@ -161,7 +171,7 @@ public class RagSearchServiceImpl implements RagSearchService {
         Flux<String> llmStream = chatModelProvider.getObject().stream(prompt)
                 .doOnComplete(() -> {
                     long llmMs = System.currentTimeMillis() - llmStart;
-                    log.debug("流式回答LLM调用完成 | 耗时={}ms", llmMs);
+                    log.debug("流式回答 LLM 调用完成 | 耗时={}ms", llmMs);
                     // 记录指标
                     RagResult.Metrics metrics = new RagResult.Metrics();
                     metrics.setTotalMs(System.currentTimeMillis() - start);
@@ -170,12 +180,12 @@ public class RagSearchServiceImpl implements RagSearchService {
                     result.setMetrics(metrics);
                     metricsRecorder.record(result);
                 })
-                .doOnError(e -> log.warn("流式回答LLM调用异常: {}", e.getMessage()));
+                .doOnError(e -> log.warn("流式回答 LLM 调用异常：{}", e.getMessage()));
 
-        // 使用timeout包装，防止LLM调用hang住（30秒超时）
+        // 使用 timeout 包装，防止 LLM 调用 hang 住（30 秒超时）
         return llmStream.timeout(java.time.Duration.ofSeconds(30))
                 .onErrorResume(e -> {
-                    log.warn("流式回答LLM调用超时或异常: {}", e.getMessage());
+                    log.warn("流式回答 LLM 调用超时或异常：{}", e.getMessage());
                     return Flux.just("服务暂时繁忙，请稍后重试。");
                 });
     }
@@ -184,7 +194,7 @@ public class RagSearchServiceImpl implements RagSearchService {
      * 流式回答降级方法
      */
     public Flux<String> streamFallback(RagQuery query, Throwable t) {
-        log.warn("流式回答降级 | 原因: {}", t.getMessage());
+        log.warn("流式回答降级 | 原因：{}", t.getMessage());
         return Flux.just("服务暂时繁忙，请稍后重试。");
     }
 

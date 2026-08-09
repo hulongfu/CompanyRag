@@ -50,7 +50,42 @@ public class FuzzyRetriever {
             cr.setChunkId(row.get("id") != null ? row.get("id").toString() : "");
             cr.setContent((String) row.get("content"));
             cr.setKeywordScore(((Number) row.get("score")).doubleValue());
-            cr.setDocumentName("未知");
+            
+            // 从 metadata 中提取 documentName 和 chunkIndex
+            Object metadataObj = row.get("metadata");
+            if (metadataObj instanceof org.postgresql.util.PGobject) {
+                try {
+                    String metadataJson = ((org.postgresql.util.PGobject) metadataObj).getValue();
+                    com.fasterxml.jackson.databind.JsonNode jsonNode = 
+                        new com.fasterxml.jackson.databind.ObjectMapper().readTree(metadataJson);
+                    
+                    // 提取 documentName
+                    if (jsonNode.has("documentName")) {
+                        cr.setDocumentName(jsonNode.get("documentName").asText());
+                    } else {
+                        cr.setDocumentName("未知");
+                    }
+                    
+                    // 提取 chunkIndex
+                    if (jsonNode.has("chunkIndex")) {
+                        cr.setChunkIndex(jsonNode.get("chunkIndex").asInt());
+                    }
+                    
+                    // 提取 documentId
+                    if (jsonNode.has("documentId")) {
+                        cr.setDocumentId(jsonNode.get("documentId").asLong());
+                    }
+                } catch (Exception e) {
+                    log.warn("解析 metadata JSON 失败：{}", e.getMessage());
+                    cr.setDocumentName("未知");
+                }
+            } else if (metadataObj != null) {
+                // 非 PGobject 情况（理论上不会发生，但做防御性处理）
+                cr.setDocumentName("未知");
+            } else {
+                cr.setDocumentName("未知");
+            }
+            
             results.add(cr);
         }
         return results;
