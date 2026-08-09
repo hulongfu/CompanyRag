@@ -1,5 +1,10 @@
 # 修复总结：rag_session_meta 表缺失及添加删除租户功能
 
+> ⚠️ **注意**: 本文档记录的是历史修复，多租户隔离安全实现细节请参考最新文档：
+> - [多租户隔离安全修复报告](./security-fixes/2026-08-09-tenant-isolation-security-fix.md)
+> - [RLS 连接池修复报告](./security-fixes/2026-08-09-rls-connection-pool-fix.md)
+> - [清理清单](./security-fixes/2026-08-09-cleanup-checklist.md)
+
 ## 问题描述
 
 ### 问题 1：rag_session_meta 表缺失

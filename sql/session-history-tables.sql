@@ -1,6 +1,14 @@
 -- ================================================
 -- 会话历史功能数据库迁移脚本
 -- ================================================
+-- ⚠️ 已废弃：会话表现在通过 TenantServiceImpl.createTenantSchema() 动态创建
+-- 此脚本仅用于参考，不要单独执行
+-- 
+-- 原因：
+-- 1. 无 schema 限定，单独执行会落到 public schema
+-- 2. 实际部署中，每个租户的 schema 中都会创建这些表
+-- 3. 动态创建确保新租户自动获得完整的表结构
+-- ================================================
 
 -- rag_session_meta 表（会话元信息）
 CREATE TABLE IF NOT EXISTS rag_session_meta (
@@ -24,12 +32,16 @@ CREATE INDEX IF NOT EXISTS idx_session_meta_deleted ON rag_session_meta(is_delet
 CREATE INDEX IF NOT EXISTS idx_session_meta_tags ON rag_session_meta USING GIN(tags);
 CREATE INDEX IF NOT EXISTS idx_session_meta_title_trgm ON rag_session_meta USING GIN(title gin_trgm_ops);
 
--- 行级安全策略
+-- 行级安全策略（移除 postgres 后门，增加 WITH CHECK + FORCE RLS）
 ALTER TABLE rag_session_meta ENABLE ROW LEVEL SECURITY;
+ALTER TABLE rag_session_meta FORCE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS tenant_isolation_session_meta ON rag_session_meta;
 CREATE POLICY tenant_isolation_session_meta ON rag_session_meta
-    USING (tenant_id = current_tenant_id() OR current_user = 'postgres');
+    FOR ALL
+    TO company_rag_app
+    USING (tenant_id = current_tenant_id())
+    WITH CHECK (tenant_id = current_tenant_id());
 
 -- rag_session 表（如果不存在则创建）
 CREATE TABLE IF NOT EXISTS rag_session (
@@ -50,9 +62,13 @@ CREATE TABLE IF NOT EXISTS rag_session (
 CREATE INDEX IF NOT EXISTS idx_session_session_id ON rag_session(session_id);
 CREATE INDEX IF NOT EXISTS idx_session_tenant_create ON rag_session(tenant_id, create_time DESC);
 
--- 行级安全策略（如果不存在）
+-- 行级安全策略（移除 postgres 后门，增加 WITH CHECK + FORCE RLS）
 ALTER TABLE rag_session ENABLE ROW LEVEL SECURITY;
+ALTER TABLE rag_session FORCE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS tenant_isolation_session ON rag_session;
 CREATE POLICY tenant_isolation_session ON rag_session
-    USING (tenant_id = current_tenant_id() OR current_user = 'postgres');
+    FOR ALL
+    TO company_rag_app
+    USING (tenant_id = current_tenant_id())
+    WITH CHECK (tenant_id = current_tenant_id());

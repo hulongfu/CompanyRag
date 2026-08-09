@@ -18,8 +18,8 @@ spring:
       enabled: false
   datasource:
     url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5433}/${POSTGRES_DB:company_rag}
-    username: ${POSTGRES_USER:postgres}
-    password: ${POSTGRES_PASSWORD:}
+    username: ${POSTGRES_USER:company_rag_app}
+    password: ${POSTGRES_PASSWORD:company_rag_app_password_change_me}
     driver-class-name: org.postgresql.Driver
     # 注意：不能设置 connection-init-sql，因为会在每次获取连接时重置 search_path
     # 租户 schema 切换由 TenantContextHelper 在请求拦截器中动态设置
