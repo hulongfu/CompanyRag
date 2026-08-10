@@ -37,7 +37,63 @@ public class CompanyRagApplication {
         );
         log.info(".env 文件加载完成，共加载 {} 个环境变量", dotenv.entries().size());
         
+        // 生产环境安全检查：验证关键环境变量是否已配置
+        validateProductionEnvironment();
+        
         SpringApplication.run(CompanyRagApplication.class, args);
+    }
+
+    /**
+     * 生产环境安全检查
+     * 验证关键环境变量是否已正确配置
+     */
+    private static void validateProductionEnvironment() {
+        log.info("开始生产环境安全检查...");
+        
+        // 检查 JWT_SECRET
+        String jwtSecret = System.getProperty("JWT_SECRET");
+        log.debug("DEBUG: JWT_SECRET 从 System.getProperty 读取到的值 = '{}'", jwtSecret);
+        log.debug("DEBUG: JWT_SECRET 是否为 null = {}", jwtSecret == null);
+        log.debug("DEBUG: JWT_SECRET 是否为空 = {}", jwtSecret != null && jwtSecret.trim().isEmpty());
+        log.debug("DEBUG: JWT_SECRET 是否等于默认值 = {}", "your_jwt_secret_key_here_must_be_strong_random_string".equals(jwtSecret));
+        if (jwtSecret == null || jwtSecret.trim().isEmpty() || 
+            "your_jwt_secret_key_here_must_be_strong_random_string".equals(jwtSecret)) {
+            log.error("========================================");
+            log.error("【安全警告】JWT_SECRET 未配置或使用默认值！");
+            log.error("生产环境必须设置强随机密钥，否则 Token 可被伪造。");
+            log.error("生成方法：openssl rand -base64 32");
+            log.error("========================================");
+            throw new IllegalStateException("JWT_SECRET 未配置或使用默认值，启动终止");
+        }
+        log.info("✓ JWT_SECRET 已配置");
+        
+        // 检查数据库密码
+        String dbPassword = System.getProperty("POSTGRES_PASSWORD");
+        if (dbPassword == null || dbPassword.trim().isEmpty() || 
+            "your_strong_database_password_here".equals(dbPassword) ||
+            "company_rag_app123456".equals(dbPassword)) {
+            log.warn("========================================");
+            log.warn("【安全警告】POSTGRES_PASSWORD 未配置或使用默认值！");
+            log.warn("生产环境必须设置强密码以保护数据库安全。");
+            log.warn("========================================");
+            // 注意：这里使用警告而非错误，允许开发环境使用默认值
+        } else {
+            log.info("✓ POSTGRES_PASSWORD 已配置");
+        }
+        
+        // 检查 API Key
+        String dashscopeKey = System.getProperty("DASHSCOPE_API_KEY");
+        if (dashscopeKey == null || dashscopeKey.trim().isEmpty() || 
+            "your_dashscope_api_key_here".equals(dashscopeKey)) {
+            log.warn("========================================");
+            log.warn("【配置警告】DASHSCOPE_API_KEY 未配置！");
+            log.warn("LLM 功能将无法使用，请配置有效的 API Key。");
+            log.warn("========================================");
+        } else {
+            log.info("✓ DASHSCOPE_API_KEY 已配置");
+        }
+        
+        log.info("生产环境安全检查完成");
     }
 
     /**
