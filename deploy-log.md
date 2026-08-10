@@ -1,5 +1,35 @@
 ## Git Push
 
+### 2026-08-10: 生产环境加固修复
+
+- commit_type:            Task
+- task_id:                0000
+- task_name:              untitled
+- commit_hash:            3affd08d8d1f6d716a0c350b073f89c0a8fe2447
+- branch:                 main
+- remote:                 gitee
+- staged_files:
+  - .env.example
+  - README.md
+  - company-rag-bootstrap/pom.xml
+  - company-rag-bootstrap/src/main/java/com/company/rag/bootstrap/CompanyRagApplication.java
+  - company-rag-bootstrap/src/main/java/com/company/rag/bootstrap/config/SecurityConfig.java
+  - company-rag-bootstrap/src/main/resources/application.yml
+  - company-rag-tenant/src/main/java/com/company/rag/tenant/service/impl/TenantServiceImpl.java
+  - docker-compose.yml
+  - company-rag-bootstrap/src/main/resources/logback-spring.xml
+  - company-rag-bootstrap/src/main/resources/db/migration/README.md
+- commit_message:         Task:0000_untitled：fix SQL comment syntax and add production hardening
+- commit_command:         git commit -m "Task:0000_untitled：fix SQL comment syntax and add production hardening"
+- commit_exit_code:       0
+- push_command:           git push gitee main
+- push_exit_code:         0
+- remote_head_check_command: git ls-remote gitee main
+- remote_head:            3affd08d8d1f6d716a0c350b073f89c0a8fe2447
+- result:                 推送成功，远端 HEAD 与本地提交哈希一致
+
+---
+
 ### 2026-08-10: RAG 检索优化修复
 
 - commit_type:            BugFix
