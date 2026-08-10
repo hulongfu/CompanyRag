@@ -30,8 +30,11 @@ public class ResultFuser {
         String query
     ) {
         double[] weights = determineWeights(query);
-        log.info("融合权重 | query={} | vector={:.2f}, fulltext={:.2f}, fuzzy={:.2f}",
-                query, weights[0], weights[1], weights[2]);
+        log.info("融合权重 | query={} | vector={}, fulltext={}, fuzzy={}",
+                query, 
+                String.format("%.2f", weights[0]),
+                String.format("%.2f", weights[1]),
+                String.format("%.2f", weights[2]));
         
         // 合并所有结果（按 chunkId 分组）
         Map<String, FusedResult> fusedMap = new LinkedHashMap<>();

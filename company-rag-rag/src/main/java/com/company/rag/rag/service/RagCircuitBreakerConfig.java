@@ -53,7 +53,7 @@ public class RagCircuitBreakerConfig {
 
     /**
      * 超时限制器配置
-     * - LLM调用超时30秒
+     * - LLM 调用超时 30 秒
      */
     @Bean
     public TimeLimiterRegistry timeLimiterRegistry() {
