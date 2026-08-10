@@ -23,6 +23,24 @@ spring:
     driver-class-name: org.postgresql.Driver
     # 注意：不能设置 connection-init-sql，因为会在每次获取连接时重置 search_path
     # 租户 schema 切换由 TenantContextHelper 在请求拦截器中动态设置
+    # HikariCP 连接池配置
+    hikari:
+      # 最小空闲连接数
+      minimum-idle: 5
+      # 最大连接数
+      maximum-pool-size: 20
+      # 连接超时时间（毫秒）
+      connection-timeout: 30000
+      # 空闲连接超时时间（毫秒）
+      idle-timeout: 600000
+      # 连接最大生命周期（毫秒）
+      max-lifetime: 1800000
+      # 连接测试查询
+      connection-test-query: SELECT 1
+      # 连接池名称
+      pool-name: CompanyRagHikariPool
+      # 是否启用 JMX
+      register-mbeans: true
   vectorstore:
     pgvector:
       index-type: HNSW
@@ -59,10 +77,37 @@ springdoc:
   show-actuator: false
   writer-with-default-pretty-printer: true
 
+# Flyway 数据库迁移配置
+flyway:
+  # 启用 Flyway
+  enabled: true
+  # 迁移脚本位置
+  locations: classpath:db/migration,filesystem:./sql/migrations
+  # 编码
+  encoding: UTF-8
+  # 是否允许无序迁移（开发环境允许，生产环境建议禁止）
+  out-of-order: false
+  # 迁移脚本前缀
+  prefix: V
+  # 迁移脚本后缀
+  suffix: .sql
+  # 迁移脚本分隔符
+  separator: ;
+  # 校验迁移脚本
+  validate-on-migrate: true
+  # 清洁模式（生产环境应禁用）
+  clean-disabled: true
+  # 基础线版本（如果已有数据库）
+  baseline-on-migrate: true
+  baseline-version: 0
+  # 是否自动调用 migrate
+  migrate-at-startup: true
+
 # MyBatis-Plus
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true
+    # 生产环境关闭 SQL 日志，减少性能开销
     log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
   global-config:
     db-config:
@@ -70,6 +115,8 @@ mybatis-plus:
       logic-delete-field: deleted
       logic-delete-value: 1
       logic-not-delete-value: 0
+  # 与 Flyway 集成：Flyway 先执行迁移，MyBatis-Plus 后初始化
+  dependency: org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration
 
 # Resilience4j
 resilience4j:
@@ -92,10 +139,22 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,prometheus,metrics
+        include: health,info,prometheus
+      base-path: /actuator
+    # 禁用敏感端点
+    jmx:
+      exposure:
+        exclude: "*"
+  endpoint:
+    health:
+      show-details: when-authorized
+      show-components: when-authorized
   metrics:
     tags:
       application: ${spring.application.name}
+  # 安全配置：敏感端点需要认证
+  security:
+    enabled: true
 
 # 日志
 logging:

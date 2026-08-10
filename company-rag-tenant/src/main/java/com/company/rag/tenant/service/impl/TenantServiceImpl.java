@@ -86,10 +86,10 @@ public class TenantServiceImpl implements TenantService {
                 embedding vector(1024)
             );
             -- 注意：vector_store 表仅依赖 Schema 隔离，不使用 RLS
-            // 原因：PgVectorStore 通过 TenantAwareJdbcTemplate 直连 JDBC，
-            // 不经过 MyBatis 拦截器设置 app.tenant_id，
-            // 强加 RLS 会导致 current_tenant_id()=0，所有向量 tenant_id=0，
-            // 造成跨租户数据泄露 + 旧数据不可见
+            -- 原因：PgVectorStore 通过 TenantAwareJdbcTemplate 直连 JDBC，
+            -- 不经过 MyBatis 拦截器设置 app.tenant_id，
+            -- 强加 RLS 会导致 current_tenant_id()=0，所有向量 tenant_id=0，
+            -- 造成跨租户数据泄露 + 旧数据不可见
             CREATE TABLE IF NOT EXISTS %s.rag_session (
                 id BIGSERIAL PRIMARY KEY,
                 session_id VARCHAR(128) NOT NULL,

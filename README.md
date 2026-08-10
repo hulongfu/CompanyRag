@@ -137,17 +137,36 @@ docker compose up -d postgres redis
 
 ### 2. 配置环境变量
 
-复制 `.env.example` 为 `.env` 并填入密钥。模型层为 OpenAI 兼容，Chat 与 Embedding 的供应商可独立配置：
+复制 `.env.example` 为 `.env` 并配置以下必需变量：
 
 ```bash
-# Windows (cmd)
-set DASHSCOPE_API_KEY=sk-your-api-key
-set SILICONFLOW_API_KEY=sk-your-siliconflow-key
+# 1. 复制模板
+copy .env.example .env    # Windows
+cp .env.example .env      # Linux/Mac
 
-# Linux/Mac
-export DASHSCOPE_API_KEY=sk-your-api-key
-export SILICONFLOW_API_KEY=sk-your-siliconflow-key
+# 2. 编辑 .env 文件，配置以下必需变量：
+
+# 【必须配置】JWT Token 密钥（生产环境必须设置强随机密钥）
+# 生成方法：openssl rand -base64 32
+JWT_SECRET=your_jwt_secret_key_here
+
+# 【必须配置】DashScope API Key（通义千问）
+DASHSCOPE_API_KEY=sk-your-api-key
+
+# 【可选】SiliconFlow API Key（用于 Embedding 和 Rerank）
+SILICONFLOW_API_KEY=sk-your-siliconflow-key
+
+# 【必须配置】数据库密码（生产环境必须设置强密码）
+POSTGRES_PASSWORD=your_strong_database_password
+
+# 【必须配置】Grafana 管理员密码（生产环境必须修改）
+GRAFANA_ADMIN_PASSWORD=your_grafana_admin_password
 ```
+
+**重要提示**：
+- `JWT_SECRET` 未配置或使用默认值会导致应用拒绝启动（安全保护机制）
+- 数据库密码、Grafana 密码在生产环境必须使用强密码
+- 所有密钥建议使用密码管理器生成和存储
 
 ### 3. 编译运行
 
