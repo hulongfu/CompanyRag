@@ -88,8 +88,10 @@ public class SecurityConfig {
                 // 放行错误页面（Swagger 内部资源 404 时会转发到 /error）
                 .requestMatchers("/error").permitAll()
                 
-                // 放行健康检查和监控端点
-                .requestMatchers(new AntPathRequestMatcher("/actuator/**")).permitAll()
+                // 放行健康检查和 Prometheus 端点（其他敏感端点需要认证）
+                .requestMatchers(new AntPathRequestMatcher("/actuator/health")).permitAll()
+                .requestMatchers(new AntPathRequestMatcher("/actuator/info")).permitAll()
+                .requestMatchers(new AntPathRequestMatcher("/actuator/prometheus")).permitAll()
                 .requestMatchers(new AntPathRequestMatcher("/health")).permitAll()
                 .requestMatchers(new AntPathRequestMatcher("/metrics")).permitAll()
                 
