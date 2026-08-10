@@ -3,9 +3,11 @@ package com.company.rag.rag.rerank;
 import com.company.rag.rag.config.RerankConfigProperties;
 import com.company.rag.rag.model.RerankResponse;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 
@@ -19,12 +21,20 @@ public class SiliconFlowRerankClient implements RerankModel {
     private final RerankConfigProperties config;
     private final RestClient restClient;
 
-    public SiliconFlowRerankClient(RerankConfigProperties config, RestClient.Builder restClientBuilder) {
+    public SiliconFlowRerankClient(RerankConfigProperties config) {
         this.config = config;
-        this.restClient = restClientBuilder
+        
+        // 配置 HTTP 超时（使用 Duration API）
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(Duration.ofSeconds(5));   // 连接超时 5 秒
+        factory.setReadTimeout(Duration.ofSeconds(10));     // 读取超时 10 秒
+        
+        // 自建 RestClient 实例，不依赖共享的 Builder，避免配置污染
+        this.restClient = RestClient.builder()
                 .baseUrl(config.getBaseUrl())
                 .defaultHeader("Authorization", "Bearer " + config.getApiKey())
                 .defaultHeader("Content-Type", "application/json")
+                .requestFactory(factory)
                 .build();
     }
 

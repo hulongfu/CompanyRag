@@ -5,7 +5,6 @@ import com.company.rag.rag.model.RerankResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
-import org.springframework.web.client.RestClient;
 
 import java.util.List;
 
@@ -22,7 +21,7 @@ class SiliconFlowRerankClientTest {
     @BeforeEach
     void setUp() {
         openMocks(this);
-        rerankClient = new SiliconFlowRerankClient(config, RestClient.builder());
+        rerankClient = new SiliconFlowRerankClient(config);
     }
 
     @Test

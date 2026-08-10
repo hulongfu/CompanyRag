@@ -71,7 +71,7 @@ public class MultiRetrieveServiceImpl implements MultiRetrieveService {
         log.info("融合完成 | 总数量={}", fused.size());
         
         // 4. 筛选
-        int fusionTopK = query.getFusionTopK() != null ? query.getFusionTopK() : 50;
+        int fusionTopK = query.getFusionTopK() != null ? query.getFusionTopK() : 30;  // 默认 30，控制 Rerank 候选数
         List<FusedResult> filtered = filter.filter(fused, fusionTopK, query.getScoreThreshold());
         log.info("筛选完成 | 剩余数量={}", filtered.size());
         

@@ -8,6 +8,7 @@ import com.company.rag.rag.model.RagResult;
 import com.company.rag.rag.observability.RagMetricsRecorder;
 import com.company.rag.rag.prompt.PromptTemplate;
 import com.company.rag.rag.rerank.CrossEncoderReranker;
+import com.company.rag.rag.fusion.ResultFilter;
 import com.company.rag.rag.retriever.impl.FullTextRetriever;
 import com.company.rag.rag.retriever.impl.VectorRetriever;
 import com.company.rag.rag.service.MultiRetrieveService;
@@ -36,6 +37,7 @@ public class RagSearchServiceImpl implements RagSearchService {
     private final VectorStore vectorStore;
     private final ObjectProvider<OpenAiChatModel> chatModelProvider;
     private final CrossEncoderReranker reranker;
+    private final ResultFilter resultFilter;
     private final RagCacheManager cacheManager;
     private final RagMetricsRecorder metricsRecorder;
     private final PromptTemplate promptTemplate;
@@ -68,6 +70,8 @@ public class RagSearchServiceImpl implements RagSearchService {
         if (query.getEnableRerank() && !chunks.isEmpty()) {
             chunks = reranker.rerank(query.getQuery(), chunks, query.getRerankTopK());
         }
+        // finalFilter 无条件执行（与 enableRerank 无关），按文档分组每组最多 maxPerDoc 条
+        chunks = resultFilter.finalFilter(chunks, query.getTopK(), query.getMaxPerDoc());
         long rerankMs = System.currentTimeMillis() - rerankStart;
 
         // 4. 构建 Prompt 并调用 LLM
@@ -161,6 +165,8 @@ public class RagSearchServiceImpl implements RagSearchService {
         if (query.getEnableRerank() && !chunks.isEmpty()) {
             chunks = reranker.rerank(query.getQuery(), chunks, query.getRerankTopK());
         }
+        // finalFilter 无条件执行（与 enableRerank 无关），按文档分组每组最多 maxPerDoc 条
+        chunks = resultFilter.finalFilter(chunks, query.getTopK(), query.getMaxPerDoc());
         String context = chunks.stream()
                 .map(c -> "[来源:" + c.getDocumentName() + "] " + c.getContent())
                 .collect(Collectors.joining("\n\n"));
@@ -206,6 +212,8 @@ public class RagSearchServiceImpl implements RagSearchService {
         if (query.getEnableRerank() && !chunks.isEmpty()) {
             chunks = reranker.rerank(query.getQuery(), chunks, query.getRerankTopK());
         }
+        // finalFilter 无条件执行（与 enableRerank 无关），按文档分组每组最多 maxPerDoc 条
+        chunks = resultFilter.finalFilter(chunks, query.getTopK(), query.getMaxPerDoc());
         return chunks;
     }
 
@@ -228,13 +236,19 @@ public class RagSearchServiceImpl implements RagSearchService {
 
     private String buildCacheKey(RagQuery query) {
         // 使用租户 ID + 查询文本 + 检索参数作为缓存键，避免不同参数组合错误命中缓存
-        // 格式：company:rag:vector:{tenantId}:{query}:{topK}:{strategy}:{rerank}
+        // 格式：company:rag:vector:{tenantId}:{query}:{topK}:{strategy}:{rerank}:{rerankTopK}:{maxPerDoc}:{fusionTopK}:{scoreThreshold}
         String normalizedQuery = query.getQuery().trim().toLowerCase();
         String strategy = query.getRetrievalStrategy() != null ? query.getRetrievalStrategy() : "HYBRID";
         int topK = query.getTopK() != null ? query.getTopK() : 10;
         boolean enableRerank = query.getEnableRerank() != null && query.getEnableRerank();
+        int rerankTopK = query.getRerankTopK() != null ? query.getRerankTopK() : 20;
+        int maxPerDoc = query.getMaxPerDoc() != null ? query.getMaxPerDoc() : 3;
+        int fusionTopK = query.getFusionTopK() != null ? query.getFusionTopK() : 30;      // 新增参数
+        double scoreThreshold = query.getScoreThreshold() != null ? query.getScoreThreshold() : 0.3;  // 新增参数
         
         return RagConstant.CACHE_DOC_VECTOR + query.getTenantId() + ":" + 
-               normalizedQuery + ":" + topK + ":" + strategy + ":" + (enableRerank ? "1" : "0");
+               normalizedQuery + ":" + topK + ":" + strategy + ":" + 
+               (enableRerank ? "1" : "0") + ":" + rerankTopK + ":" + maxPerDoc + ":" + 
+               fusionTopK + ":" + scoreThreshold;
     }
 }
