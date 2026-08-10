@@ -1,5 +1,58 @@
 ## Git Push
 
+### 2026-08-10: RAG 检索优化修复
+
+- commit_type:            BugFix
+- task_id:                0000
+- task_name:              RAG 检索优化修复
+- commit_hash:            636deb7a0ca8c76927b23281c83b7d574fa78d95
+- branch:                 main
+- remote:                 gitee
+- staged_files:
+  - company-rag-rag/src/main/java/com/company/rag/rag/fusion/ResultFilter.java
+  - company-rag-rag/src/main/java/com/company/rag/rag/fusion/ResultFuser.java
+  - company-rag-rag/src/main/java/com/company/rag/rag/model/RagQuery.java
+  - company-rag-rag/src/main/java/com/company/rag/rag/rerank/SiliconFlowRerankClient.java
+  - company-rag-rag/src/main/java/com/company/rag/rag/service/RagCircuitBreakerConfig.java
+  - company-rag-rag/src/main/java/com/company/rag/rag/service/impl/MultiRetrieveServiceImpl.java
+  - company-rag-rag/src/main/java/com/company/rag/rag/service/impl/RagSearchServiceImpl.java
+  - company-rag-rag/src/test/java/com/company/rag/rag/rerank/SiliconFlowRerankClientTest.java
+- commit_message:         BugFix:0000_RAG 检索优化修复：优化 ResultFilter 去重逻辑和 Rerank 超时/重试配置
+- commit_command:         git commit -m "BugFix:0000_RAG 检索优化修复：优化 ResultFilter 去重逻辑和 Rerank 超时/重试配置"
+- commit_exit_code:       0
+- push_command:           git push gitee main
+- push_exit_code:         0
+- remote_head_check_command: git ls-remote gitee main
+- remote_head:            636deb7a0ca8c76927b23281c83b7d574fa78d95
+- result:                 推送成功，远端 HEAD 与本地提交哈希一致
+
+---
+
+### 2026-08-09: 修复来源文档显示 bug
+
+- commit_type:            BugFix
+- task_id:                0000
+- task_name:              修复来源文档显示 bug
+- commit_hash:            f58df226131c48ceeab855674903b3fe1f7d7351
+- branch:                 main
+- remote:                 gitee
+- staged_files:
+  - company-rag-rag/src/main/java/com/company/rag/rag/retriever/impl/FullTextRetriever.java
+  - company-rag-rag/src/main/java/com/company/rag/rag/retriever/impl/FuzzyRetriever.java
+  - company-rag-rag/src/main/java/com/company/rag/rag/service/impl/RagSearchServiceImpl.java
+  - company-rag-bootstrap/src/main/resources/application.yml
+  - company-rag-rag/src/main/java/com/company/rag/rag/router/ChatRouter.java
+- commit_message:         BugFix:0000_修复来源文档显示 bug：修复 metadata 丢失和来源文档显示格式问题
+- commit_command:         git commit -m "BugFix:0000_修复来源文档显示 bug：修复 metadata 丢失和来源文档显示格式问题"
+- commit_exit_code:       0
+- push_command:           git push gitee main
+- push_exit_code:         0
+- remote_head_check_command: git ls-remote gitee main
+- remote_head:            f58df226131c48ceeab855674903b3fe1f7d7351
+- result:                 推送成功，远端 HEAD 与本地提交哈希一致
+
+---
+
 ### 2026-08-09: SQL 语法错误修复
 
 - commit_type:            BugFix
