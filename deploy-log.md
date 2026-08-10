@@ -1,5 +1,34 @@
 ## Git Push
 
+### 2026-08-10: database_query 安全修复与 Flyway 禁用
+
+- commit_type:            Task
+- task_id:                0000
+- task_name:              untitled
+- commit_hash:            4fb55794378053501cdd0bca56e0095417a91499
+- branch:                 main
+- remote:                 gitee
+- staged_files:
+  - company-rag-agent/src/test/java/com/company/rag/agent/tool/DatabaseQueryToolTest.java
+  - company-rag-bootstrap/src/main/java/com/company/rag/bootstrap/CompanyRagApplication.java
+  - company-rag-bootstrap/src/main/resources/application-dev.yml
+  - company-rag-bootstrap/src/main/resources/application.yml
+  - company-rag-bootstrap/src/main/resources/db/migration/README.md
+  - company-rag-bootstrap/src/main/resources/db/migration/V0__baseline.sql
+  - company-rag-bootstrap/src/main/resources/db/migration/V1__fix_tenant_isolation_security.sql
+  - sql/migrations/001-fix-tenant-isolation-security.sql
+- commit_message:         Task:0000_untitled：add DatabaseQueryTool test,disable Flyway auto-config,update migration docs
+- commit_command:         git commit -m "Task:0000_untitled：add DatabaseQueryTool test,disable Flyway auto-config,update migration docs"
+- commit_exit_code:       0
+- push_command:           git push gitee main
+- push_exit_code:         0
+- remote_head_check_command: git ls-remote gitee main
+- remote_head:            4fb55794378053501cdd0bca56e0095417a91499
+- result:                 推送成功，远端 HEAD 与本地提交哈希一致
+
+---
+
+
 ### 2026-08-10: 生产环境加固修复
 
 - commit_type:            Task
