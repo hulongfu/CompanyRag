@@ -1,5 +1,28 @@
 ## Git Push
 
+### 2026-08-10: README 数据库初始化文档更新
+
+- commit_type:            Task
+- task_id:                0000
+- task_name:              untitled
+- commit_hash:            6326be8e244aeeb11c5ec092b042f32074361d71
+- branch:                 main
+- remote:                 gitee
+- staged_files:
+  - README.md
+  - sql/migrations/README.md
+- commit_message:         Task:0000_untitled：update README.md with database initialization guide, add sql/migrations/README.md
+- commit_command:         git commit -m "Task:0000_untitled：update README.md with database initialization guide, add sql/migrations/README.md"
+- commit_exit_code:       0
+- push_command:           git push gitee main
+- push_exit_code:         0
+- remote_head_check_command: git ls-remote gitee main
+- remote_head:            6326be8e244aeeb11c5ec092b042f32074361d71
+- result:                 推送成功，远端 HEAD 与本地提交哈希一致
+
+---
+
+
 ### 2026-08-10: database_query 安全修复与 Flyway 禁用
 
 - commit_type:            Task
