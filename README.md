@@ -703,13 +703,28 @@ company-rag/
 
 ### 数据库初始化
 
+**重要说明**：Flyway 数据库版本管理工具当前已禁用（保留用于未来生产环境部署），数据库初始化需要手动执行 SQL 脚本。
+
 ```bash
-# 方式一：Docker Compose 自动初始化
+# 方式一：手动执行迁移脚本（推荐）
+# 1. 启动 PostgreSQL 容器
 docker compose up -d postgres
 
-# 方式二：手动导入
-psql -h localhost -U postgres -d company_rag -f sql/init.sql
+# 2. 执行迁移脚本（按版本号顺序执行）
+psql -h localhost -U postgres -d company_rag -f sql/migrations/V1__fix_tenant_isolation_security.sql
+
+# 方式二：使用 DBeaver 等 GUI 工具
+# 打开 DBeaver → 连接数据库 → 右键 sql/migrations/ 目录下的 SQL 文件 → 执行脚本
 ```
+
+**Flyway 启用说明**（未来生产环境需要时）：
+
+1. 修改 `application.yml`：`flyway.enabled: true`
+2. 将 SQL 迁移脚本移动到 `company-rag-bootstrap/src/main/resources/db/migration/` 目录
+3. 确保命名符合 Flyway 规范：`V<版本>__<描述>.sql`
+4. 重新启动应用，Flyway 会自动执行迁移
+
+详见：`company-rag-bootstrap/src/main/resources/db/migration/README.md`
 
 ### 表结构概览
 
