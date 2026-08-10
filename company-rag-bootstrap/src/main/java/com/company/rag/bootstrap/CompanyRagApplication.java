@@ -23,7 +23,8 @@ import java.util.List;
 @Slf4j
 @SpringBootApplication(exclude = {
         ContextFunctionCatalogAutoConfiguration.class,
-        org.springframework.boot.autoconfigure.security.servlet.SecurityAutoConfiguration.class
+        org.springframework.boot.autoconfigure.security.servlet.SecurityAutoConfiguration.class,
+        org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration.class
 })
 @ComponentScan(basePackages = "com.company.rag")
 @MapperScan({"com.company.rag.tenant.mapper", "com.company.rag.document.mapper", "com.company.rag.rag.mapper"})
