@@ -77,12 +77,17 @@ springdoc:
   show-actuator: false
   writer-with-default-pretty-printer: true
 
-# Flyway 数据库迁移配置
+# Flyway 数据库迁移配置（当前禁用）
+# 说明：Flyway 用于生产环境自动执行数据库迁移脚本，确保多环境一致性
+# 如需启用：
+# 1. 将 enabled 改为 true
+# 2. 在 db/migration/ 目录放置迁移脚本
+# 3. 首次启用需设置 baseline-on-migrate: true
 flyway:
-  # 启用 Flyway
-  enabled: true
+  # 启用 Flyway（当前禁用）
+  enabled: false
   # 迁移脚本位置
-  locations: classpath:db/migration,filesystem:./sql/migrations
+  locations: classpath:db/migration
   # 编码
   encoding: UTF-8
   # 是否允许无序迁移（开发环境允许，生产环境建议禁止）

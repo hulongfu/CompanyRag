@@ -50,3 +50,7 @@ rag:
 logging:
   level:
     com.company.rag: DEBUG
+
+# Flyway 配置（开发环境禁用）
+flyway:
+  enabled: false
