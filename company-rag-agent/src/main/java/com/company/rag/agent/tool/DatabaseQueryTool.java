@@ -1,5 +1,6 @@
 package com.company.rag.agent.tool;
 
+import com.company.rag.tenant.context.TenantContext;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
@@ -9,6 +10,8 @@ import org.springframework.stereotype.Component;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * MCP 工具 - 数据库查询
@@ -18,7 +21,8 @@ import java.util.Map;
  * 1. 只允许 SELECT 查询（防止注入和修改）
  * 2. SQL 白名单检查（禁止危险关键字）
  * 3. 结果行数限制（默认 100 行）
- * 4. 多租户隔离（自动注入 tenant_id 过滤）
+ * 4. 多租户隔离（自动添加当前租户 schema 前缀，禁止跨租户访问）
+ * 5. 禁止显式指定 schema（防止 SELECT * FROM tenant_other.table）
  */
 @Slf4j
 @Component
@@ -26,6 +30,12 @@ public class DatabaseQueryTool implements AgentTool {
 
     private final JdbcTemplate jdbcTemplate;
     private static final int MAX_ROWS = 100;
+    
+    /** 匹配表名的正则：FROM 或 JOIN 后面的表名（可带 schema 前缀） */
+    private static final Pattern TABLE_PATTERN = Pattern.compile(
+        "\\b(FROM|JOIN)\\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\\.[a-zA-Z_][a-zA-Z0-9_]*)?)",
+        Pattern.CASE_INSENSITIVE
+    );
 
     public DatabaseQueryTool(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
@@ -109,14 +119,30 @@ public class DatabaseQueryTool implements AgentTool {
             return "错误：SQL 包含禁止的操作";
         }
 
+        // 租户隔离检查：确保租户上下文已设置
+        String currentSchema = TenantContext.getSchema();
+        if (currentSchema == null || currentSchema.isBlank()) {
+            log.error("租户上下文未设置，拒绝查询：userId={}", TenantContext.getUserId());
+            return "错误：未设置租户上下文，无法执行查询";
+        }
+
+        // 安全检查：禁止显式指定其他 schema（防止跨租户访问）
+        if (containsExplicitSchema(sql)) {
+            log.warn("检测到显式 schema 指定，拒绝跨租户访问：{}", sql);
+            return "错误：禁止显式指定 schema，只能访问当前租户数据";
+        }
+
+        // 自动添加当前租户 schema 前缀
+        String qualifiedSql = addSchemaPrefix(sql, currentSchema);
+        log.info("Agent 执行数据库查询（租户：{}）：{}", currentSchema, qualifiedSql);
+
         // 添加 LIMIT 限制
         if (!upperSql.contains("LIMIT")) {
-            sql += " LIMIT " + Math.min(limit != null ? limit : MAX_ROWS, MAX_ROWS);
+            qualifiedSql += " LIMIT " + Math.min(limit != null ? limit : MAX_ROWS, MAX_ROWS);
         }
 
         try {
-            log.info("Agent 执行数据库查询：{}", sql);
-            List<Map<String, Object>> result = jdbcTemplate.queryForList(sql);
+            List<Map<String, Object>> result = jdbcTemplate.queryForList(qualifiedSql);
             return formatResult(result);
         } catch (Exception e) {
             log.error("数据库查询失败：{}", e.getMessage());
@@ -133,10 +159,18 @@ public class DatabaseQueryTool implements AgentTool {
             return "错误：非法表名";
         }
 
+        // 租户隔离检查
+        String currentSchema = TenantContext.getSchema();
+        if (currentSchema == null || currentSchema.isBlank()) {
+            log.error("租户上下文未设置，拒绝查询表结构：userId={}", TenantContext.getUserId());
+            return "错误：未设置租户上下文，无法获取表结构";
+        }
+
         try {
+            // 查询指定 schema 的表结构
             String sql = "SELECT column_name, data_type, is_nullable " +
-                    "FROM information_schema.columns WHERE table_name = ?";
-            List<Map<String, Object>> columns = jdbcTemplate.queryForList(sql, tableName);
+                    "FROM information_schema.columns WHERE table_schema = ? AND table_name = ?";
+            List<Map<String, Object>> columns = jdbcTemplate.queryForList(sql, currentSchema, tableName);
             return formatResult(columns);
         } catch (Exception e) {
             return "获取表结构失败：" + e.getMessage();
@@ -161,6 +195,62 @@ public class DatabaseQueryTool implements AgentTool {
             }
         }
         return false;
+    }
+
+    /**
+     * 检查 SQL 是否显式指定了 schema（防止跨租户访问）
+     * 例如：SELECT * FROM tenant_other.table 是被禁止的
+     */
+    private boolean containsExplicitSchema(String sql) {
+        Matcher matcher = TABLE_PATTERN.matcher(sql);
+        while (matcher.find()) {
+            String tableName = matcher.group(2);
+            // 如果表名包含 . 说明显式指定了 schema
+            if (tableName.contains(".")) {
+                // 允许 public. 前缀（会被 TenantAwareJdbcTemplate 替换）
+                if (!tableName.startsWith("public.")) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 为 SQL 中的所有表名添加当前租户的 schema 前缀
+     */
+    private String addSchemaPrefix(String sql, String schema) {
+        Matcher matcher = TABLE_PATTERN.matcher(sql);
+        StringBuilder result = new StringBuilder();
+        int lastEnd = 0;
+        
+        while (matcher.find()) {
+            String keyword = matcher.group(1);
+            String tableName = matcher.group(2);
+            
+            // 如果表名已经有 public. 前缀，替换为当前租户 schema
+            if (tableName.startsWith("public.")) {
+                String actualTable = tableName.substring(7);
+                result.append(sql, lastEnd, matcher.start(2));
+                result.append(schema).append(".").append(actualTable);
+            }
+            // 如果表名没有 schema 前缀，添加当前租户 schema
+            else if (!tableName.contains(".")) {
+                result.append(sql, lastEnd, matcher.start(2));
+                result.append(schema).append(".").append(tableName);
+            }
+            // 其他情况保持原样（理论上不会发生，因为 containsExplicitSchema 已经检查过）
+            else {
+                continue;
+            }
+            lastEnd = matcher.end(2);
+        }
+        
+        if (lastEnd > 0) {
+            result.append(sql.substring(lastEnd));
+            return result.toString();
+        }
+        return sql;
     }
 
     /**

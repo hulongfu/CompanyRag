@@ -221,20 +221,35 @@ class DatabaseQueryToolTest {
 
     @Test
     void testAddSchemaPrefixWithAlreadyQualifiedTable() {
-        // 测试已经有 schema 前缀的表名不应该被重复添加
+        // 测试 public. 前缀会被替换为当前租户 schema（安全修复）
         TenantContext.setSchema("tenant_123");
         
         when(mockJdbcTemplate.queryForList(anyString())).thenReturn(List.of());
         
-        // SQL 已经有 schema 前缀
+        // SQL 有 public. 前缀
         Map<String, Object> params = Map.of(
             "sql", "SELECT * FROM public.users"
         );
         String result = databaseQueryTool.execute(params);
         
-        // 保持原有的 schema 不变
+        // public. 应该被替换为当前租户 schema
         verify(mockJdbcTemplate).queryForList(argThat(sql -> 
-            sql.contains("public.users") && !sql.contains("tenant_123.public.users")
+            sql.contains("tenant_123.users") && !sql.contains("public.users")
         ));
+    }
+
+    @Test
+    void testExecuteWithCrossTenantSchemaAccess() {
+        // 测试跨租户访问被禁止（安全修复核心测试）
+        TenantContext.setSchema("tenant_123");
+        
+        Map<String, Object> params = Map.of(
+            "sql", "SELECT * FROM tenant_other.users"
+        );
+        String result = databaseQueryTool.execute(params);
+        
+        // 应该拒绝跨租户访问
+        assertTrue(result.contains("错误"));
+        assertTrue(result.contains("禁止显式指定 schema"));
     }
 }

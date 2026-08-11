@@ -17,6 +17,10 @@
             <artifactId>company-rag-common</artifactId>
         </dependency>
         <dependency>
+            <groupId>com.company</groupId>
+            <artifactId>company-rag-tenant</artifactId>
+        </dependency>
+        <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>

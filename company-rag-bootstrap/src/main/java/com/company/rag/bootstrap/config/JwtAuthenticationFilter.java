@@ -3,6 +3,7 @@ package com.company.rag.bootstrap.config;
 import com.company.rag.common.security.JwtTokenProvider;
 import com.company.rag.common.security.SecurityUser;
 import com.company.rag.tenant.context.TenantContext;
+import com.company.rag.tenant.model.Tenant;
 import com.company.rag.tenant.service.TenantService;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.FilterChain;
@@ -78,6 +79,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 if (currentTenantId != null) {
                     TenantContext.setTenantId(currentTenantId);
                     TenantContext.setUserId(userId);
+                    // 设置租户 schema（用于 DatabaseQueryTool 等原生 JDBC 操作）
+                    Tenant currentTenant = tenantService.getById(currentTenantId);
+                    if (currentTenant != null && currentTenant.getSchemaName() != null) {
+                        TenantContext.setSchema(currentTenant.getSchemaName());
+                        log.debug("设置租户 Schema：userId={}, schema={}", userId, currentTenant.getSchemaName());
+                    }
                 }
 
                 log.debug("JWT 认证成功：userId={}, currentTenantId={}, role={}", userId, currentTenantId, role);
