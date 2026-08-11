@@ -55,8 +55,12 @@
 - **行级安全 (RLS)**：业务表（rag_document/doc_chunk/rag_session/rag_session_meta）使用 RLS 行级安全策略，通过 GUC `app.tenant_id` 控制访问
 - **向量存储**：`vector_store` 表仅通过 Schema 隔离（不启用 RLS，由 PgVectorStore 直连 JDBC）
 - **权限控制**：支持 admin / user / viewer 三种角色
+  - **平台级超级管理员**：系统唯一 admin 账号，管理所有租户（通过 SQL 初始化脚本创建）
+  - **普通用户**：由 admin 创建，关联到指定租户（user/viewer 角色）
 - **租户切换**：前端管理 `currentTenantId`，API 调用通过 `X-Tenant-Id` 头传递，后端验证 JWT 中的 `tenantIds`
 - **安全加固**：使用专用数据库用户 `company_rag_app`（非超级用户），移除 RLS 策略中的 `postgres` 后门
+- **自动关联**：admin 创建租户时自动建立与该租户的关联（通过 `sys_user_tenant_rel`）
+- **默认租户**：首次部署时自动创建 `tenant_default` 租户，供 admin 首次登录使用
 
 ### 🔄 RAG全链路
 1. **文档解析**：Apache Tika 自动识别 PDF/DOCX/TXT/MD/HTML
@@ -191,6 +195,32 @@ java -jar company-rag-bootstrap/target/company-rag-bootstrap-1.0.0-SNAPSHOT.jar
 ### 5. 登录认证
 
 系统使用 JWT 无状态认证，所有 API 请求需要在 Header 中携带 Token。
+
+#### 5.0 首次部署说明
+
+**首次部署时，需要先执行 SQL 初始化脚本创建 admin 账号和默认租户：**
+
+```bash
+# 执行初始化脚本
+psql -U postgres -d company_rag -f sql/migrations/V3__init_platform_admin.sql
+
+# 验证创建成功
+psql -U postgres -d company_rag -c "SELECT username, role FROM sys_user WHERE username='admin';"
+psql -U postgres -d company_rag -c "SELECT tenant_code, tenant_name FROM sys_tenant WHERE tenant_code='tenant_default';"
+```
+
+**初始化脚本会创建：**
+- ✅ 平台级超级管理员账号：`admin` / 密码：`admin123`
+- ✅ 默认租户：`tenant_default`（租户名称：默认租户）
+- ✅ admin 与默认租户的关联关系
+- ✅ 默认租户的 schema 和业务表（vector_store、doc_chunk、rag_document、rag_session、rag_session_meta）
+
+**重要提示：**
+- ⚠️ 首次登录后请立即修改 admin 密码
+- 📋 默认租户供 admin 首次登录使用，后续可通过租户管理创建其他租户
+- 🔒 admin 账号是平台级超级管理员，关联所有创建的租户
+
+---
 
 #### 5.1 前端登录流程（推荐）
 
@@ -705,17 +735,54 @@ company-rag/
 
 **重要说明**：Flyway 数据库版本管理工具当前已禁用（保留用于未来生产环境部署），数据库初始化需要手动执行 SQL 脚本。
 
+#### 首次部署（推荐）
+
+**首次部署时必须执行 V3 初始化脚本，创建 admin 账号和默认租户：**
+
 ```bash
-# 方式一：手动执行迁移脚本（推荐）
 # 1. 启动 PostgreSQL 容器
 docker compose up -d postgres
 
-# 2. 执行迁移脚本（按版本号顺序执行）
-psql -h localhost -U postgres -d company_rag -f sql/migrations/V1__fix_tenant_isolation_security.sql
+# 2. 执行 V3 初始化脚本（会自动创建 admin + 默认租户 + schema + 业务表）
+psql -h localhost -U postgres -d company_rag -f sql/migrations/V3__init_platform_admin.sql
 
-# 方式二：使用 DBeaver 等 GUI 工具
-# 打开 DBeaver → 连接数据库 → 右键 sql/migrations/ 目录下的 SQL 文件 → 执行脚本
+# 3. 验证创建成功
+psql -h localhost -U postgres -d company_rag -c "SELECT username, role FROM sys_user WHERE username='admin';"
+psql -h localhost -U postgres -d company_rag -c "SELECT tenant_code, tenant_name FROM sys_tenant WHERE tenant_code='tenant_default';"
+psql -h localhost -U postgres -d company_rag -c "SELECT u.username, t.tenant_code FROM sys_user_tenant_rel rel JOIN sys_user u ON rel.user_id = u.id JOIN sys_tenant t ON rel.tenant_id = t.id WHERE u.username='admin';"
 ```
+
+**V3 脚本会创建：**
+- ✅ 平台级超级管理员账号：`admin`（密码：`admin123`）
+- ✅ 默认租户：`tenant_default`（租户名称：默认租户）
+- ✅ admin 与默认租户的关联关系（`sys_user_tenant_rel`）
+- ✅ 默认租户的 schema：`tenant_tenant_default`
+- ✅ 5 个业务表：`vector_store`、`doc_chunk`、`rag_document`、`rag_session`、`rag_session_meta`
+- ✅ 索引（包括 HNSW 向量索引）
+- ✅ RLS（行级安全）策略
+- ✅ 数据库用户 `company_rag_app` 权限
+
+**重要提示：**
+- ⚠️ 首次登录后请立即修改 admin 密码
+- 📋 默认租户供 admin 首次登录使用
+- 🔒 admin 账号是平台级超级管理员，创建新租户时会自动关联
+
+#### 已部署系统升级
+
+**如果系统已有数据，需要按顺序执行所有迁移脚本：**
+
+```bash
+# 1. 备份现有数据
+pg_dump -h localhost -U postgres -d company_rag > backup_$(date +%Y%m%d).sql
+
+# 2. 按顺序执行迁移脚本（如果 V3 已存在则跳过）
+psql -h localhost -U postgres -d company_rag -f sql/migrations/V1__fix_tenant_isolation_security.sql
+psql -h localhost -U postgres -d company_rag -f sql/migrations/V3__init_platform_admin.sql
+```
+
+#### 方式二：使用 DBeaver 等 GUI 工具
+
+打开 DBeaver → 连接数据库 → 右键 `sql/migrations/` 目录下的 SQL 文件 → 执行脚本
 
 **Flyway 启用说明**（未来生产环境需要时）：
 

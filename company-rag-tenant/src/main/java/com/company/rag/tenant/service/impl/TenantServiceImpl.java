@@ -253,10 +253,23 @@ public class TenantServiceImpl implements TenantService {
             // 4. 创建 Schema 和业务表
             createTenantSchema(tenant);
 
-            // 5. 创建默认管理员用户
-            createDefaultAdminUser(tenant);
+            // 5. 自动关联当前登录用户（创建者）
+            // 通过 SecurityContextHolder 获取当前登录用户
+            Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+            if (authentication != null && authentication.getPrincipal() instanceof SecurityUser) {
+                SecurityUser currentUser = (SecurityUser) authentication.getPrincipal();
+                // 建立用户 - 租户关联
+                UserTenantRel rel = new UserTenantRel();
+                rel.setUserId(currentUser.getUserId());
+                rel.setTenantId(tenant.getId());
+                userTenantRelMapper.insert(rel);
+                log.info("已自动关联当前用户与租户：userId={}, tenantId={}", 
+                    currentUser.getUserId(), tenant.getId());
+            } else {
+                log.warn("当前用户未认证，跳过用户 - 租户关联");
+            }
 
-            log.info("租户 [{}] 创建成功，Schema: {}, 默认管理员用户已创建", 
+            log.info("租户 [{}] 创建成功，Schema: {}", 
                 tenant.getTenantCode(), tenant.getSchemaName());
         } catch (Exception e) {
             log.error("租户 [{}] 创建失败，将回滚事务", tenant.getTenantCode(), e);
@@ -341,31 +354,6 @@ public class TenantServiceImpl implements TenantService {
             log.error("租户 [{}] 删除失败", tenant.getTenantCode(), e);
             throw new BizException("删除租户失败：" + e.getMessage());
         }
-    }
-
-    /**
-     * 创建默认管理员用户
-     * 默认密码：admin123
-     */
-    private void createDefaultAdminUser(Tenant tenant) {
-        User adminUser = new User();
-        adminUser.setUsername("admin");
-        // BCrypt 加密默认密码 admin123
-        // 使用静态 BCrypt 密码：$2a$10$N.ZOn9G6/YLFixAOPMg/h.z7pCu6v2XyFDtC4q.jeeGm/TEZyj3C6
-        adminUser.setPassword("$2a$10$N.ZOn9G6/YLFixAOPMg/h.z7pCu6v2XyFDtC4q.jeeGm/TEZyj3C6");
-        adminUser.setDisplayName("管理员");
-        adminUser.setRole("admin");
-        adminUser.setStatus(1);
-
-        userMapper.insert(adminUser);
-        log.info("为租户 [{}] 创建默认管理员用户：admin", tenant.getTenantCode());
-
-        // 插入用户-租户关联记录
-        UserTenantRel rel = new UserTenantRel();
-        rel.setUserId(adminUser.getId());
-        rel.setTenantId(tenant.getId());
-        userTenantRelMapper.insert(rel);
-        log.info("为租户 [{}] 管理员用户建立关联记录", tenant.getTenantCode());
     }
 
     @Override
