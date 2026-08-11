@@ -1,5 +1,34 @@
 ## Git Push
 
+### 2026-08-11: DatabaseQueryTool 跨租户访问漏洞修复
+
+- commit_type:            BugFix
+- task_id:                0000
+- task_name:              修复 DatabaseQueryTool 跨租户访问漏洞
+- commit_hash:            d8abdfe3b8c3d75a17775e5a3ad77bef5f8910a1
+- branch:                 main
+- remote:                 gitee
+- staged_files:
+  - company-rag-agent/pom.xml
+  - company-rag-agent/src/main/java/com/company/rag/agent/tool/DatabaseQueryTool.java
+  - company-rag-agent/src/test/java/com/company/rag/agent/tool/DatabaseQueryToolTest.java
+  - company-rag-bootstrap/src/main/java/com/company/rag/bootstrap/config/JwtAuthenticationFilter.java
+  - docs/security-fixes/2026-08-11-database-query-tool-cross-tenant-fix.md
+  - sql/migrations/V1__fix_tenant_isolation_security.sql
+  - sql/migrations/V2__fix_database_query_tool_cross_tenant_access.sql
+  - verification-result.md
+- commit_message:         BugFix:0000_修复 DatabaseQueryTool 跨租户访问漏洞：fix cross-tenant data access vulnerability
+- commit_command:         git commit -m "BugFix:0000_修复 DatabaseQueryTool 跨租户访问漏洞：fix cross-tenant data access vulnerability"
+- commit_exit_code:       0
+- push_command:           git push gitee main
+- push_exit_code:         0
+- remote_head_check_command: git ls-remote gitee main
+- remote_head:            d8abdfe3b8c3d75a17775e5a3ad77bef5f8910a1
+- result:                 推送成功，远端 HEAD 与本地提交哈希一致
+
+---
+
+
 ### 2026-08-10: README 数据库初始化文档更新
 
 - commit_type:            Task
