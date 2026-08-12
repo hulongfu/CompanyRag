@@ -198,14 +198,22 @@ java -jar company-rag-bootstrap/target/company-rag-bootstrap-1.0.0-SNAPSHOT.jar
 
 #### 5.0 首次部署说明
 
-**首次部署时，需要先执行 SQL 初始化脚本创建 admin 账号和默认租户：**
+**Flyway 会自动执行数据库初始化脚本，无需手动执行 SQL！**
 
+首次启动应用时，Flyway 会自动按顺序执行以下迁移脚本：
+- `V1__fix_tenant_isolation_security.sql` - 多租户隔离安全修复
+- `V2__fix_database_query_tool_cross_tenant_access.sql` - DatabaseQueryTool 跨租户访问修复
+- `V3__init_platform_admin.sql` - 系统初始化（创建 admin 账号和默认租户）
+
+**验证初始化完成：**
 ```bash
-# 执行初始化脚本
-psql -U postgres -d company_rag -f sql/migrations/V3__init_platform_admin.sql
+# 检查 Flyway 迁移历史
+psql -U postgres -d company_rag -c "SELECT version, description, state FROM flyway_schema_history ORDER BY installed_rank;"
 
-# 验证创建成功
+# 验证 admin 账号创建成功
 psql -U postgres -d company_rag -c "SELECT username, role FROM sys_user WHERE username='admin';"
+
+# 验证默认租户创建成功
 psql -U postgres -d company_rag -c "SELECT tenant_code, tenant_name FROM sys_tenant WHERE tenant_code='tenant_default';"
 ```
 
@@ -219,6 +227,7 @@ psql -U postgres -d company_rag -c "SELECT tenant_code, tenant_name FROM sys_ten
 - ⚠️ 首次登录后请立即修改 admin 密码
 - 📋 默认租户供 admin 首次登录使用，后续可通过租户管理创建其他租户
 - 🔒 admin 账号是平台级超级管理员，关联所有创建的租户
+- 🔄 Flyway 配置见 `application.yml` 中的 `flyway.*` 配置项
 
 ---
 
@@ -733,26 +742,31 @@ company-rag/
 
 ### 数据库初始化
 
-**重要说明**：Flyway 数据库版本管理工具当前已禁用（保留用于未来生产环境部署），数据库初始化需要手动执行 SQL 脚本。
+**重要说明**：Flyway 数据库版本管理工具**已启用**，应用启动时会自动执行迁移脚本。
 
 #### 首次部署（推荐）
 
-**首次部署时必须执行 V3 初始化脚本，创建 admin 账号和默认租户：**
+**首次启动应用时，Flyway 会自动执行以下迁移脚本：**
 
+1. `V1__fix_tenant_isolation_security.sql` - 多租户隔离安全修复
+2. `V2__fix_database_query_tool_cross_tenant_access.sql` - DatabaseQueryTool 跨租户访问修复
+3. `V3__init_platform_admin.sql` - 系统初始化（创建 admin 账号和默认租户）
+
+**无需手动执行 SQL 脚本！** 应用启动后会自动完成初始化。
+
+**验证初始化完成：**
 ```bash
-# 1. 启动 PostgreSQL 容器
-docker compose up -d postgres
+# 检查 Flyway 迁移历史
+psql -h localhost -U postgres -d company_rag -c "SELECT version, description, state FROM flyway_schema_history ORDER BY installed_rank;"
 
-# 2. 执行 V3 初始化脚本（会自动创建 admin + 默认租户 + schema + 业务表）
-psql -h localhost -U postgres -d company_rag -f sql/migrations/V3__init_platform_admin.sql
-
-# 3. 验证创建成功
+# 验证 admin 账号创建成功
 psql -h localhost -U postgres -d company_rag -c "SELECT username, role FROM sys_user WHERE username='admin';"
+
+# 验证默认租户创建成功
 psql -h localhost -U postgres -d company_rag -c "SELECT tenant_code, tenant_name FROM sys_tenant WHERE tenant_code='tenant_default';"
-psql -h localhost -U postgres -d company_rag -c "SELECT u.username, t.tenant_code FROM sys_user_tenant_rel rel JOIN sys_user u ON rel.user_id = u.id JOIN sys_tenant t ON rel.tenant_id = t.id WHERE u.username='admin';"
 ```
 
-**V3 脚本会创建：**
+**初始化脚本会创建：**
 - ✅ 平台级超级管理员账号：`admin`（密码：`admin123`）
 - ✅ 默认租户：`tenant_default`（租户名称：默认租户）
 - ✅ admin 与默认租户的关联关系（`sys_user_tenant_rel`）
@@ -766,30 +780,40 @@ psql -h localhost -U postgres -d company_rag -c "SELECT u.username, t.tenant_cod
 - ⚠️ 首次登录后请立即修改 admin 密码
 - 📋 默认租户供 admin 首次登录使用
 - 🔒 admin 账号是平台级超级管理员，创建新租户时会自动关联
+- 🔄 Flyway 配置见 `application.yml` 中的 `flyway.*` 配置项
 
 #### 已部署系统升级
 
-**如果系统已有数据，需要按顺序执行所有迁移脚本：**
+**如果系统已有数据库，Flyway 会自动检测并执行基线标记（baseline-on-migrate），不会重新执行已存在的脚本。**
 
-```bash
-# 1. 备份现有数据
-pg_dump -h localhost -U postgres -d company_rag > backup_$(date +%Y%m%d).sql
+**新增迁移脚本步骤：**
+1. 在 `company-rag-bootstrap/src/main/resources/db/migration/` 目录创建新文件
+2. 命名格式：`V<版本>__<描述>.sql`（版本号严格递增：V4 → V5 → V6）
+3. 脚本必须幂等（使用 `IF EXISTS`、`IF NOT EXISTS`）
+4. 重启应用，Flyway 会自动执行新脚本
 
-# 2. 按顺序执行迁移脚本（如果 V3 已存在则跳过）
-psql -h localhost -U postgres -d company_rag -f sql/migrations/V1__fix_tenant_isolation_security.sql
-psql -h localhost -U postgres -d company_rag -f sql/migrations/V3__init_platform_admin.sql
+**示例：**
+```sql
+-- V4__add_user_avatar_column.sql
+ALTER TABLE sys_user ADD COLUMN IF NOT EXISTS avatar_url VARCHAR(512);
 ```
 
 #### 方式二：使用 DBeaver 等 GUI 工具
 
-打开 DBeaver → 连接数据库 → 右键 `sql/migrations/` 目录下的 SQL 文件 → 执行脚本
+打开 DBeaver → 连接数据库 → 右键 SQL 文件 → 执行脚本（仅用于手动测试，生产环境建议使用 Flyway 自动管理）
 
-**Flyway 启用说明**（未来生产环境需要时）：
+**Flyway 配置详情：**
 
-1. 修改 `application.yml`：`flyway.enabled: true`
-2. 将 SQL 迁移脚本移动到 `company-rag-bootstrap/src/main/resources/db/migration/` 目录
-3. 确保命名符合 Flyway 规范：`V<版本>__<描述>.sql`
-4. 重新启动应用，Flyway 会自动执行迁移
+```yaml
+flyway:
+  enabled: true                    # 已启用
+  locations: classpath:db/migration
+  baseline-on-migrate: true        # 已有数据库自动基线标记
+  baseline-version: 0
+  validate-on-migrate: true        # 校验迁移脚本
+  clean-disabled: true             # 禁用 clean 操作（生产安全）
+  migrate-at-startup: true         # 启动时自动执行迁移
+```
 
 详见：`company-rag-bootstrap/src/main/resources/db/migration/README.md`
 
