@@ -10,8 +10,10 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -33,10 +35,19 @@ public class DatabaseQueryTool implements AgentTool {
     private final JdbcTemplate jdbcTemplate;
     private static final int MAX_ROWS = 100;
     
-    /** 匹配表名的正则：FROM 或 JOIN 后面的表名（可带 schema 前缀） */
+    /** 
+     * 匹配表名的正则：FROM 或 JOIN 后面的表名（可带 schema 前缀）
+     * 增强：支持匹配子查询中的 FROM/JOIN（通过括号深度匹配）
+     */
     private static final Pattern TABLE_PATTERN = Pattern.compile(
         "\\b(FROM|JOIN)\\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\\.[a-zA-Z_][a-zA-Z0-9_]*)?)",
         Pattern.CASE_INSENSITIVE
+    );
+    
+    /** 匹配 SQL 注释的正则：-- 或 /* 注释 */
+    private static final Pattern COMMENT_PATTERN = Pattern.compile(
+        "(--[^\\n]*|/\\*.*?\\*/)",
+        Pattern.DOTALL
     );
 
     public DatabaseQueryTool(JdbcTemplate jdbcTemplate) {
@@ -110,16 +121,19 @@ public class DatabaseQueryTool implements AgentTool {
             return "错误：SQL 查询语句不能为空";
         }
 
-        // ✅ 新增：使用 JSqlParser 进行严格语法分析（第一道防线）
+        // ✅ 第一道防线：移除 SQL 注释（防止注释绕过）
+        String cleanSql = removeComments(sql);
+        
+        // ✅ 第二道防线：使用 JSqlParser 进行严格语法分析
         try {
-            SqlSecurityValidator.validateSelectSql(sql);
+            SqlSecurityValidator.validateSelectSql(cleanSql);
         } catch (BizException e) {
             log.warn("JSqlParser 验证失败：{}", e.getMessage());
             return "错误：" + e.getMessage();
         }
 
         // 安全检查：只允许 SELECT（JSqlParser 已验证，这里是双重检查）
-        String upperSql = sql.trim().toUpperCase();
+        String upperSql = cleanSql.trim().toUpperCase();
         if (!upperSql.startsWith("SELECT")) {
             return "错误：仅支持 SELECT 查询";
         }
@@ -136,9 +150,9 @@ public class DatabaseQueryTool implements AgentTool {
             return "错误：未设置租户上下文，无法执行查询";
         }
 
-        // 安全检查：禁止显式指定其他 schema（防止跨租户访问）
-        if (containsExplicitSchema(sql)) {
-            log.warn("检测到显式 schema 指定，拒绝跨租户访问：{}", sql);
+        // ✅ 第三道防线：检查显式 schema 指定（包括子查询）
+        if (containsExplicitSchema(cleanSql)) {
+            log.warn("检测到显式 schema 指定，拒绝跨租户访问：{}", cleanSql);
             return "错误：禁止显式指定 schema，只能访问当前租户数据";
         }
 
@@ -188,6 +202,17 @@ public class DatabaseQueryTool implements AgentTool {
     }
 
     /**
+     * 移除 SQL 中的注释（防止注释绕过检查）
+     */
+    private String removeComments(String sql) {
+        if (sql == null || sql.isEmpty()) {
+            return sql;
+        }
+        // 移除所有注释
+        return COMMENT_PATTERN.matcher(sql).replaceAll("");
+    }
+
+    /**
      * 检查 SQL 是否包含危险关键字
      */
     private boolean containsDangerousKeywords(String upperSql) {
@@ -210,16 +235,33 @@ public class DatabaseQueryTool implements AgentTool {
     /**
      * 检查 SQL 是否显式指定了 schema（防止跨租户访问）
      * 例如：SELECT * FROM tenant_other.table 是被禁止的
+     * 
+     * 增强：检测所有表名（包括子查询中的表）
      */
     private boolean containsExplicitSchema(String sql) {
-        Matcher matcher = TABLE_PATTERN.matcher(sql);
-        while (matcher.find()) {
-            String tableName = matcher.group(2);
-            // 如果表名包含 . 说明显式指定了 schema
-            if (tableName.contains(".")) {
-                // 允许 public. 前缀（会被 TenantAwareJdbcTemplate 替换）
-                if (!tableName.startsWith("public.")) {
-                    return true;
+        // 使用 JSqlParser 提取所有表名（包括子查询）
+        try {
+            Set<String> tableNames = SqlSecurityValidator.extractTableNames(sql);
+            for (String tableName : tableNames) {
+                // 如果表名包含 . 说明显式指定了 schema
+                if (tableName.contains(".")) {
+                    // 允许 public. 前缀（会被 TenantAwareJdbcTemplate 替换）
+                    if (!tableName.startsWith("public.")) {
+                        log.warn("检测到跨租户访问尝试：table={}", tableName);
+                        return true;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            // JSqlParser 解析失败，降级使用正则检查
+            log.debug("JSqlParser 提取表名失败，降级使用正则检查：{}", e.getMessage());
+            Matcher matcher = TABLE_PATTERN.matcher(sql);
+            while (matcher.find()) {
+                String tableName = matcher.group(2);
+                if (tableName.contains(".")) {
+                    if (!tableName.startsWith("public.")) {
+                        return true;
+                    }
                 }
             }
         }

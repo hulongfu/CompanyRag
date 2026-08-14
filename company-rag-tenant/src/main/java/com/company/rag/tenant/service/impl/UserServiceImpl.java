@@ -3,6 +3,7 @@ package com.company.rag.tenant.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.company.rag.common.model.UserDTO;
 import com.company.rag.common.security.PasswordGenerator;
+import com.company.rag.tenant.context.TenantContext;
 import com.company.rag.tenant.mapper.UserMapper;
 import com.company.rag.tenant.mapper.UserTenantRelMapper;
 import com.company.rag.tenant.model.Tenant;
@@ -88,13 +89,31 @@ public class UserServiceImpl implements UserService {
         log.info("查询用户列表：role={}, tenantId={}, status={}, username={}", 
                 role, tenantId, status, username);
         
+        // 获取当前登录用户信息
+        Long currentUserId = TenantContext.getUserId();
+        Long currentTenantId = TenantContext.getTenantId();
+        
+        // 租户隔离校验：确保用户只能查看自己所在租户的用户
+        if (tenantId != null && currentTenantId != null) {
+            // 验证传入的 tenantId 是否与当前用户的租户一致
+            if (!tenantId.equals(currentTenantId)) {
+                // 检查当前用户是否属于指定租户（通过用户 - 租户关联表）
+                List<Long> userTenantIds = userTenantRelMapper.findTenantIdsByUserId(currentUserId);
+                if (userTenantIds == null || !userTenantIds.contains(tenantId)) {
+                    log.warn("越权访问尝试：userId={}, currentTenantId={}, requestedTenantId={}", 
+                            currentUserId, currentTenantId, tenantId);
+                    throw new SecurityException("无权查看该租户的用户信息");
+                }
+            }
+        }
+        
         List<User> users;
         
         // 如果指定了租户 ID，按租户查询
         if (tenantId != null) {
             users = userMapper.findByTenantId(tenantId, status);
         } else {
-            // 否则查询所有用户
+            // 否则查询所有用户（但受租户上下文限制）
             LambdaQueryWrapper<User> wrapper = new LambdaQueryWrapper<>();
             if (StringUtils.hasText(role)) {
                 wrapper.eq(User::getRole, role);
@@ -105,7 +124,12 @@ public class UserServiceImpl implements UserService {
             if (StringUtils.hasText(username)) {
                 wrapper.like(User::getUsername, username);
             }
-            users = userMapper.selectList(wrapper);
+            // 如果没有指定租户 ID，使用当前用户的租户 ID 作为过滤条件
+            if (currentTenantId != null) {
+                users = userMapper.findByTenantId(currentTenantId, status);
+            } else {
+                users = userMapper.selectList(wrapper);
+            }
         }
         
         // 构建响应

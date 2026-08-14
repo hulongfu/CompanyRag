@@ -46,8 +46,10 @@ public class UserController {
     
     /**
      * 2. 查询用户列表 (支持筛选)
+     * 限制：只能查看自己所在租户的用户（admin 用户除外）
      */
     @GetMapping("/list")
+    @PreAuthorize("isAuthenticated()")
     public R<List<UserDTO.UserResponse>> list(
             @RequestParam(required = false) String role,
             @RequestParam(required = false) Long tenantId,
@@ -66,8 +68,10 @@ public class UserController {
     
     /**
      * 3. 查询用户详情
+     * 限制：只能查看自己所在租户的用户（admin 用户除外）
      */
     @GetMapping("/{id}")
+    @PreAuthorize("isAuthenticated()")
     public R<UserDTO.UserDetailResponse> getById(@PathVariable Long id) {
         try {
             log.debug("查询用户详情：id={}", id);
