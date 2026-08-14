@@ -41,6 +41,12 @@
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-model</artifactId>
         </dependency>
+        <!-- JSqlParser - SQL 语法分析验证 -->
+        <dependency>
+            <groupId>com.github.jsqlparser</groupId>
+            <artifactId>jsqlparser</artifactId>
+            <version>4.6</version>
+        </dependency>
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
