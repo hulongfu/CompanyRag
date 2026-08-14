@@ -1,5 +1,7 @@
 package com.company.rag.agent.tool;
 
+import com.company.rag.agent.security.SqlSecurityValidator;
+import com.company.rag.common.exception.BizException;
 import com.company.rag.tenant.context.TenantContext;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.tool.annotation.Tool;
@@ -108,13 +110,21 @@ public class DatabaseQueryTool implements AgentTool {
             return "错误：SQL 查询语句不能为空";
         }
 
-        // 安全检查：只允许 SELECT
+        // ✅ 新增：使用 JSqlParser 进行严格语法分析（第一道防线）
+        try {
+            SqlSecurityValidator.validateSelectSql(sql);
+        } catch (BizException e) {
+            log.warn("JSqlParser 验证失败：{}", e.getMessage());
+            return "错误：" + e.getMessage();
+        }
+
+        // 安全检查：只允许 SELECT（JSqlParser 已验证，这里是双重检查）
         String upperSql = sql.trim().toUpperCase();
         if (!upperSql.startsWith("SELECT")) {
             return "错误：仅支持 SELECT 查询";
         }
 
-        // 检查危险关键字
+        // 检查危险关键字（保留作为辅助检查）
         if (containsDangerousKeywords(upperSql)) {
             return "错误：SQL 包含禁止的操作";
         }
