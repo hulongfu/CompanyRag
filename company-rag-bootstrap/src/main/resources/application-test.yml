@@ -1,6 +1,6 @@
 spring:
   datasource:
-    url: jdbc:postgresql://localhost:5433/company_rag
+    url: jdbc:postgresql://localhost:5433/company_rag_test
   ai:
     # 统一使用 OpenAI 兼容接口，chat 用通义千问，embedding/rerank 用硅基流动
     openai:
@@ -51,7 +51,7 @@ logging:
   level:
     com.company.rag: DEBUG
 
-# Flyway 配置（开发环境也启用，确保数据库结构一致性）
+# Flyway 配置（测试环境启用，用于验证迁移脚本）
 flyway:
   enabled: true
   # 迁移脚本位置
@@ -65,5 +65,7 @@ flyway:
   migrate-at-startup: true
   # 校验迁移脚本
   validate-on-migrate: true
-  # 允许无序迁移（开发环境可用）
+  # 允许无序迁移（测试环境可用）
   out-of-order: true
+  # 输出详细日志
+  debug: true
