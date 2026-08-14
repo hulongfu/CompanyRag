@@ -25,37 +25,35 @@ public class TenantInterceptor implements HandlerInterceptor {
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
+        // 仅从请求头获取租户 ID，禁止从 URL 参数传递（防止越权访问）
         String tenantId = request.getHeader(RagConstant.HEADER_TENANT_ID);
         String userId = request.getHeader(RagConstant.HEADER_USER_ID);
 
         if (tenantId != null) {
-            Long tid = Long.valueOf(tenantId);
-            TenantContext.setTenantId(tid);
-
-            // 从数据库获取租户的 Schema 名称，设置 Schema 隔离
-            Tenant tenant = tenantMapper.selectById(tid);
-            if (tenant != null && tenant.getSchemaName() != null) {
-                TenantContext.setSchema(tenant.getSchemaName());
-                // TenantContextHelper 已废弃，不再调用其 set 方法
-            }
-        }
-        if (userId != null) {
-            TenantContext.setUserId(Long.valueOf(userId));
-        }
-        
-        // 如果请求头中没有租户 ID，尝试从参数中获取（兼容前端）
-        if (tenantId == null) {
-            String paramTenantId = request.getParameter("tenantId");
-            if (paramTenantId != null) {
-                Long tid = Long.valueOf(paramTenantId);
+            try {
+                Long tid = Long.valueOf(tenantId);
                 TenantContext.setTenantId(tid);
-                // 同样查询租户 Schema 并设置，与请求头分支保持一致
+
+                // 从数据库获取租户的 Schema 名称，设置 Schema 隔离
                 Tenant tenant = tenantMapper.selectById(tid);
                 if (tenant != null && tenant.getSchemaName() != null) {
                     TenantContext.setSchema(tenant.getSchemaName());
                 }
+            } catch (NumberFormatException e) {
+                // 无效的租户 ID 格式，保持上下文为空，由后续认证拦截
             }
         }
+        if (userId != null) {
+            try {
+                TenantContext.setUserId(Long.valueOf(userId));
+            } catch (NumberFormatException e) {
+                // 无效的用户 ID 格式，忽略
+            }
+        }
+        
+        // 注意：不再支持从 URL 参数 ?tenantId= 传递租户 ID
+        // 原因：该方式绕过了 JwtAuthenticationFilter 中的租户权限校验
+        // 所有租户切换必须通过 X-Tenant-Id 请求头，该方式已在 Filter 层验证用户是否属于该租户
         
         return true;
     }
