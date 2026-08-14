@@ -336,15 +336,22 @@ class DatabaseQueryToolTest {
         // 测试注释绕过被 JSqlParser 拦截
         TenantContext.setSchema("tenant_123");
         
-        // 注释中的 DELETE 不会被执行，但 JSqlParser 会解析实际 SQL
+        // Mock 查询结果
+        when(mockJdbcTemplate.queryForList(anyString())).thenReturn(List.of());
+        
+        // 注释中的 DELETE 不会被执行，因为 removeComments() 会移除注释
         Map<String, Object> params = Map.of(
             "sql", "SELECT * FROM users -- DELETE FROM users"
         );
         String result = databaseQueryTool.execute(params);
         
-        // JSqlParser 会忽略注释，只解析 SELECT 部分
-        // 但关键字检查会检测到 DELETE
-        assertTrue(result.contains("错误"));
+        // removeComments() 会移除注释，所以关键字检查检测不到 DELETE
+        // 但 JSqlParser 会验证 SQL 语法，查询应该成功执行
+        assertNotNull(result);
+        // 验证注释被移除
+        verify(mockJdbcTemplate).queryForList(argThat(sql -> 
+            !sql.contains("--") && !sql.contains("DELETE")
+        ));
     }
 
     @Test
@@ -513,5 +520,59 @@ class DatabaseQueryToolTest {
         
         // 包含 UNION、分号注入、DROP 等多个攻击向量
         assertTrue(result.contains("错误"));
+    }
+
+    @Test
+    void testExecuteWithQuotedIdentifierSchemaBypass() {
+        // 测试带引号标识符的跨租户访问绕过（新发现的安全漏洞）
+        // SQL: SELECT * FROM "tenant_other"."secret"
+        TenantContext.setSchema("tenant_123");
+        
+        Map<String, Object> params = Map.of(
+            "sql", "SELECT * FROM \"tenant_other\".\"secret\""
+        );
+        String result = databaseQueryTool.execute(params);
+        
+        // 应该拒绝跨租户访问，即使是带引号的标识符
+        assertTrue(result.contains("错误"));
+        assertTrue(result.contains("schema") || result.contains("禁止"));
+    }
+    
+    @Test
+    void testContainsExplicitSchemaWithQuotedIdentifier() {
+        // 测试 containsExplicitSchema 方法能检测带引号的标识符
+        TenantContext.setSchema("tenant_123");
+        
+        // 带引号的跨租户访问
+        Map<String, Object> params = Map.of(
+            "sql", "SELECT * FROM \"tenant_other\".\"secret\""
+        );
+        
+        // 通过反射调用 containsExplicitSchema 方法
+        try {
+            java.lang.reflect.Method method = DatabaseQueryTool.class
+                .getDeclaredMethod("containsExplicitSchema", String.class);
+            method.setAccessible(true);
+            
+            String sql = "SELECT * FROM \"tenant_other\".\"secret\"";
+            Boolean hasSchema = (Boolean) method.invoke(databaseQueryTool, sql);
+            
+            assertTrue(hasSchema, "应该检测到显式指定 schema");
+            
+            // 测试不带引号的跨租户访问
+            String sql2 = "SELECT * FROM tenant_other.secret";
+            Boolean hasSchema2 = (Boolean) method.invoke(databaseQueryTool, sql2);
+            
+            assertTrue(hasSchema2, "应该检测到显式指定 schema");
+            
+            // 测试合法的表名（不带 schema）
+            String sql3 = "SELECT * FROM users";
+            Boolean hasSchema3 = (Boolean) method.invoke(databaseQueryTool, sql3);
+            
+            assertFalse(hasSchema3, "不应该检测到显式指定 schema");
+            
+        } catch (Exception e) {
+            fail("反射调用失败：" + e.getMessage());
+        }
     }
 }
