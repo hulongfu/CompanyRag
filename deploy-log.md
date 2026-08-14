@@ -1,5 +1,33 @@
 ## Git Push
 
+### 2026-08-14: 租户安全漏洞综合修复
+
+- commit_type:            BugFix
+- task_id:                0001
+- task_name:              租户安全漏洞修复
+- commit_hash:            0f9c377ecd74c8a97b6a48f94141ab435c3c9754
+- short_hash:             0f9c377
+- branch:                 main
+- remote:                 gitee
+- staged_files:
+  - company-rag-agent/src/main/java/com/company/rag/agent/tool/DatabaseQueryTool.java
+  - company-rag-bootstrap/src/main/java/com/company/rag/bootstrap/config/JwtAuthenticationFilter.java
+  - company-rag-tenant/src/main/java/com/company/rag/tenant/interceptor/TenantInterceptor.java
+  - company-rag-tenant/src/main/java/com/company/rag/tenant/service/impl/UserServiceImpl.java
+  - company-rag-web/src/main/java/com/company/rag/web/controller/TenantController.java
+  - company-rag-web/src/main/java/com/company/rag/web/controller/UserController.java
+- commit_message:         BugFix:0001_租户安全漏洞修复：fix 5 tenant isolation vulnerabilities
+- commit_command:         git commit -m "BugFix:0001_租户安全漏洞修复：fix 5 tenant isolation vulnerabilities"
+- commit_exit_code:       0
+- push_command:           git push gitee main
+- push_exit_code:         0
+- remote_head_check_command: git ls-remote gitee main
+- remote_head:            0f9c377ecd74c8a97b6a48f94141ab435c3c9754
+- result:                 推送成功，远端 HEAD 与本地提交哈希一致
+- notes:                  修复 5 个安全问题：1) ?tenantId= URL 参数绕过 2) SQL 子查询跨租户绕过 3) Controller 层权限缺失 4) TenantContext 清理不完整 5) UserService 租户校验缺失
+
+---
+
 ### 2026-08-14: JSqlParser SQL 注入防护
 
 - commit_type:            Feat
