@@ -1,5 +1,29 @@
 ## Git Push
 
+### 2026-08-14: JSqlParser SQL 注入防护
+
+- commit_type:            Feat
+- task_id:                20260814
+- task_name:              企业级生产部署评估 - SQL 注入防护
+- commit_hash:            50d8e7d
+- short_hash:             50d8e7d
+- branch:                 main
+- remote:                 gitee
+- staged_files:
+  - company-rag-agent/pom.xml
+  - company-rag-agent/src/main/java/com/company/rag/agent/tool/DatabaseQueryTool.java
+  - company-rag-agent/src/main/java/com/company/rag/agent/security/SqlSecurityValidator.java (新建)
+  - company-rag-agent/src/test/java/com/company/rag/agent/tool/DatabaseQueryToolTest.java
+  - docs/superpowers/specs/2026-08-14-production-readiness-assessment.md
+- commit_message:         feat: 添加 JSqlParser SQL 注入防护
+- commit_exit_code:       0
+- push_command:           git push gitee main
+- push_exit_code:         0
+- result:                 推送成功
+- notes:                  引入 JSqlParser 4.6 进行 SQL 语法级验证，添加 29 个单元测试，所有测试通过
+
+---
+
 ### 2026-08-14: 企业级生产部署评估
 
 - commit_type:            Feat
