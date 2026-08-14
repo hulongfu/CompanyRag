@@ -470,24 +470,66 @@ open company-rag-bootstrap/target/site/jacoco/index.html
 
 ### 中危风险
 
-#### 1. SQL 注入风险（DatabaseQueryTool）
-**现状：**
+#### 1. SQL 注入风险（DatabaseQueryTool） ✅ **已修复**
+
+**历史状态：**
 - DatabaseQueryTool 使用正则匹配表名，防止 SQL 注入
 - 正则表达式：`^[a-zA-Z_][a-zA-Z0-9_]*$`
 
-**建议：**
-- 引入 JSqlParser 进行严格语法分析
-- 增加 SQL 白名单机制（通过配置限制可查询的表）
+**修复措施（2026-08-14）：**
+- ✅ 引入 JSqlParser 4.6 进行严格语法分析
+- ✅ 创建 SqlSecurityValidator 安全验证器
+  - 语法级禁止 UNION/INTERSECT/EXCEPT 操作符
+  - 递归验证子查询确保也是 SELECT 语句
+  - 禁止显式指定 schema（包括 public.）防止跨租户访问
+  - 禁止多语句执行（分号注入）
+- ✅ 集成到 DatabaseQueryTool.queryDatabase() 方法
+- ✅ 添加 29 个单元测试验证防护功能
 
-**改进代码：**
+**改进效果：**
+- 从关键字检查升级到语法级验证，显著降低 SQL 注入风险
+- 可防御的攻击类型：
+  - UNION 注入
+  - 子查询注入
+  - 注释绕过
+  - 分号注入
+  - 跨 schema 访问
+
+**代码证据：**
 ```java
-// 建议增加 JSqlParser 验证
-try {
-    CCJSqlParserUtil.parse(sql);
-} catch (JSQLParserException e) {
-    throw new BusinessException("SQL 语法不合法");
+// SqlSecurityValidator.java - 语法级 SQL 安全验证
+public class SqlSecurityValidator {
+    public void validateSql(String sql) {
+        // 1. 解析 SQL 为 AST
+        Statement stmt = CCJSqlParserUtil.parse(sql);
+        
+        // 2. 检查是否为 SELECT
+        if (!(stmt instanceof Select)) {
+            throw new BusinessException("仅支持 SELECT 查询");
+        }
+        
+        // 3. 禁止 UNION/INTERSECT/EXCEPT
+        SelectBody selectBody = ((Select) stmt).getSelectBody();
+        if (selectBody instanceof SetOperationList) {
+            throw new BusinessException("禁止使用 UNION/INTERSECT/EXCEPT 操作符");
+        }
+        
+        // 4. 递归验证子查询
+        validateSelectBody(selectBody);
+        
+        // 5. 禁止显式指定 schema
+        validateNoExplicitSchema(selectBody);
+    }
 }
 ```
+
+**测试覆盖：**
+- `DatabaseQueryToolTest.testExecuteWithUnionInjection()` - UNION 注入
+- `DatabaseQueryToolTest.testExecuteWithSubqueryInjection()` - 子查询注入
+- `DatabaseQueryToolTest.testExecuteWithCommentBypass()` - 注释绕过
+- `DatabaseQueryToolTest.testExecuteWithSemicolonInjection()` - 分号注入
+- `DatabaseQueryToolTest.testExecuteWithExplicitSchemaInSubquery()` - 子查询跨 schema
+- `DatabaseQueryToolTest.testExecuteWithValidComplexSelect()` - 合法复杂查询
 
 ---
 
