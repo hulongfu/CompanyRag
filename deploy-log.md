@@ -26,6 +26,24 @@
 - result:                 推送成功，远端 HEAD 与本地提交哈希一致
 - notes:                  修复 5 个安全问题：1) ?tenantId= URL 参数绕过 2) SQL 子查询跨租户绕过 3) Controller 层权限缺失 4) TenantContext 清理不完整 5) UserService 租户校验缺失
 
+### 2026-08-14: 修复 containsExplicitSchema 漏检带引号标识符
+
+- commit_type:            BugFix
+- task_id:                0002
+- task_name:              引号标识符跨租户访问漏洞修复
+- commit_hash:            4287e71
+- short_hash:             4287e71
+- branch:                 main
+- remote:                 (待推送)
+- staged_files:
+  - company-rag-agent/src/main/java/com/company/rag/agent/tool/DatabaseQueryTool.java
+  - company-rag-agent/src/test/java/com/company/rag/agent/security/QuotedIdentifierTest.java
+  - company-rag-agent/src/test/java/com/company/rag/agent/tool/DatabaseQueryToolTest.java
+- commit_message:         BugFix:0002_修复 containsExplicitSchema 漏检带引号标识符的跨租户访问
+- commit_exit_code:       0
+- result:                 提交成功，待推送
+- notes:                  修复 containsExplicitSchema 方法对带引号标识符（如"tenant_other"."secret"）的漏检问题，增加 hasExplicitSchemaInSelect() 方法直接检查 table.getSchemaName() != null。同时修复 addSchemaPrefix 使用 cleanSql 确保注释被移除。
+
 ---
 
 ### 2026-08-14: JSqlParser SQL 注入防护
