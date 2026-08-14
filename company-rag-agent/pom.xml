@@ -42,10 +42,11 @@
             <artifactId>spring-ai-model</artifactId>
         </dependency>
         <!-- JSqlParser - SQL 语法分析验证 -->
+        <!-- 版本必须与 mybatis-plus-jsqlparser 依赖的版本一致 (5.0) -->
         <dependency>
             <groupId>com.github.jsqlparser</groupId>
             <artifactId>jsqlparser</artifactId>
-            <version>4.6</version>
+            <version>5.0</version>
         </dependency>
         <dependency>
             <groupId>org.projectlombok</groupId>

@@ -38,9 +38,8 @@ public class SqlSecurityValidator {
             
             Select selectStatement = (Select) statement;
             
-            // 3. 验证查询体
-            SelectBody selectBody = selectStatement.getSelectBody();
-            validateSelectBody(selectBody);
+            // 3. 验证查询体 (JSqlParser 5.0 中 Select 本身就是查询体)
+            validateSelect(selectStatement);
             
         } catch (JSQLParserException e) {
             throw new BizException("SQL 语法错误：" + e.getMessage());
@@ -48,36 +47,37 @@ public class SqlSecurityValidator {
     }
     
     /**
-     * 验证 SelectBody
+     * 验证 Select（JSqlParser 5.0 中 Select 本身就是查询体）
      */
-    private static void validateSelectBody(SelectBody selectBody) {
-        if (selectBody instanceof PlainSelect) {
-            PlainSelect plainSelect = (PlainSelect) selectBody;
-            
+    private static void validateSelect(Select select) {
+        // JSqlParser 5.0: getPlainSelect() 对 SetOperationList 会抛出 ClassCastException
+        // 需要先检查类型
+        if (select instanceof SetOperationList) {
+            // UNION/INTERSECT/EXCEPT 操作 - 禁止
+            throw new BizException("禁止使用 UNION/INTERSECT/EXCEPT 操作符");
+        }
+
+        PlainSelect plainSelect = select.getPlainSelect();
+        if (plainSelect != null) {
             // 验证 FROM 子句
             validateFromItem(plainSelect.getFromItem());
-            
+
             // 验证 JOIN
             if (plainSelect.getJoins() != null) {
                 for (Join join : plainSelect.getJoins()) {
                     validateFromItem(join.getRightItem());
                 }
             }
-            
+
             // 验证 WHERE 子句（防止危险函数）
             if (plainSelect.getWhere() != null) {
                 validateExpression(plainSelect.getWhere());
             }
-            
+
             // 验证 HAVING 子句
             if (plainSelect.getHaving() != null) {
                 validateExpression(plainSelect.getHaving());
             }
-            
-        } else if (selectBody instanceof SetOperationList) {
-            // UNION/INTERSECT/EXCEPT 操作 - 禁止
-            SetOperationList setOpList = (SetOperationList) selectBody;
-            throw new BizException("禁止使用 UNION/INTERSECT/EXCEPT 操作符");
         }
     }
     
@@ -93,14 +93,14 @@ public class SqlSecurityValidator {
                 throw new BizException("禁止显式指定 schema");
             }
             
-        } else if (fromItem instanceof SubSelect) {
-            // 递归验证子查询
-            SubSelect subSelect = (SubSelect) fromItem;
-            validateSelectBody(subSelect.getSelectBody());
+        } else if (fromItem instanceof ParenthesedSelect) {
+            // 递归验证子查询 (JSqlParser 5.0: ParenthesedSelect 有 getSelect() 方法)
+            ParenthesedSelect parenthesedSelect = (ParenthesedSelect) fromItem;
+            validateSelect(parenthesedSelect.getSelect());
             
-        } else if (fromItem instanceof ParenthesisFromItem) {
+        } else if (fromItem instanceof ParenthesedFromItem) {
             // 括号包裹的项
-            ParenthesisFromItem parenthesis = (ParenthesisFromItem) fromItem;
+            ParenthesedFromItem parenthesis = (ParenthesedFromItem) fromItem;
             validateFromItem(parenthesis.getFromItem());
         }
     }
@@ -117,8 +117,10 @@ public class SqlSecurityValidator {
         if (expression instanceof net.sf.jsqlparser.expression.operators.relational.ExpressionList) {
             net.sf.jsqlparser.expression.operators.relational.ExpressionList list = 
                 (net.sf.jsqlparser.expression.operators.relational.ExpressionList) expression;
-            for (net.sf.jsqlparser.expression.Expression expr : list.getExpressions()) {
-                validateExpression(expr);
+            for (Object expr : list.getExpressions()) {
+                if (expr instanceof net.sf.jsqlparser.expression.Expression) {
+                    validateExpression((net.sf.jsqlparser.expression.Expression) expr);
+                }
             }
         }
         
@@ -180,20 +182,24 @@ public class SqlSecurityValidator {
         
         if (statement instanceof Select) {
             Select select = (Select) statement;
-            extractTableNamesFromSelectBody(select.getSelectBody(), tableNames);
+            extractTableNamesFromSelect(select, tableNames);
         }
         
         return tableNames;
     }
     
     /**
-     * 从 SelectBody 中提取表名
+     * 从 Select 中提取表名（JSqlParser 5.0）
      */
-    private static void extractTableNamesFromSelectBody(SelectBody selectBody, Set<String> tableNames) {
-        if (selectBody instanceof PlainSelect) {
-            PlainSelect plainSelect = (PlainSelect) selectBody;
+    private static void extractTableNamesFromSelect(Select select, Set<String> tableNames) {
+        if (select instanceof SetOperationList) {
+            return;
+        }
+
+        PlainSelect plainSelect = select.getPlainSelect();
+        if (plainSelect != null) {
             extractTableNamesFromFromItem(plainSelect.getFromItem(), tableNames);
-            
+
             if (plainSelect.getJoins() != null) {
                 for (Join join : plainSelect.getJoins()) {
                     extractTableNamesFromFromItem(join.getRightItem(), tableNames);
@@ -209,9 +215,9 @@ public class SqlSecurityValidator {
         if (fromItem instanceof Table) {
             Table table = (Table) fromItem;
             tableNames.add(table.getName());
-        } else if (fromItem instanceof SubSelect) {
-            SubSelect subSelect = (SubSelect) fromItem;
-            extractTableNamesFromSelectBody(subSelect.getSelectBody(), tableNames);
+        } else if (fromItem instanceof ParenthesedSelect) {
+            ParenthesedSelect parenthesedSelect = (ParenthesedSelect) fromItem;
+            extractTableNamesFromSelect(parenthesedSelect.getSelect(), tableNames);
         }
     }
 }
