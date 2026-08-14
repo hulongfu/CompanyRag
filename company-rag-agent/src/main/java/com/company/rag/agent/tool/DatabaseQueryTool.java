@@ -156,8 +156,8 @@ public class DatabaseQueryTool implements AgentTool {
             return "错误：禁止显式指定 schema，只能访问当前租户数据";
         }
 
-        // 自动添加当前租户 schema 前缀
-        String qualifiedSql = addSchemaPrefix(sql, currentSchema);
+        // 自动添加当前租户 schema 前缀（使用移除注释后的 SQL）
+        String qualifiedSql = addSchemaPrefix(cleanSql, currentSchema);
         log.info("Agent 执行数据库查询（租户：{}）：{}", currentSchema, qualifiedSql);
 
         // 添加 LIMIT 限制
@@ -237,24 +237,16 @@ public class DatabaseQueryTool implements AgentTool {
      * 例如：SELECT * FROM tenant_other.table 是被禁止的
      * 
      * 增强：检测所有表名（包括子查询中的表）
+     * 增强：支持带引号的标识符（例如："tenant_other"."secret"）
      */
     private boolean containsExplicitSchema(String sql) {
-        // 使用 JSqlParser 提取所有表名（包括子查询）
+        // 使用 JSqlParser 提取所有表名并检查 schema（包括子查询）
         try {
-            Set<String> tableNames = SqlSecurityValidator.extractTableNames(sql);
-            for (String tableName : tableNames) {
-                // 如果表名包含 . 说明显式指定了 schema
-                if (tableName.contains(".")) {
-                    // 允许 public. 前缀（会被 TenantAwareJdbcTemplate 替换）
-                    if (!tableName.startsWith("public.")) {
-                        log.warn("检测到跨租户访问尝试：table={}", tableName);
-                        return true;
-                    }
-                }
-            }
+            // 直接遍历 JSqlParser 解析后的表对象，检查 getSchemaName()
+            return hasExplicitSchemaInSelect(sql);
         } catch (Exception e) {
             // JSqlParser 解析失败，降级使用正则检查
-            log.debug("JSqlParser 提取表名失败，降级使用正则检查：{}", e.getMessage());
+            log.debug("JSqlParser 检查 schema 失败，降级使用正则检查：{}", e.getMessage());
             Matcher matcher = TABLE_PATTERN.matcher(sql);
             while (matcher.find()) {
                 String tableName = matcher.group(2);
@@ -264,6 +256,82 @@ public class DatabaseQueryTool implements AgentTool {
                     }
                 }
             }
+        }
+        return false;
+    }
+    
+    /**
+     * 检查 Select 语句中是否有表显式指定了 schema
+     * 支持带引号的标识符（例如："tenant_other"."secret"）
+     */
+    private boolean hasExplicitSchemaInSelect(String sql) throws Exception {
+        net.sf.jsqlparser.statement.Statement statement = 
+            net.sf.jsqlparser.parser.CCJSqlParserUtil.parse(sql);
+        
+        if (!(statement instanceof net.sf.jsqlparser.statement.select.Select)) {
+            return false;
+        }
+        
+        net.sf.jsqlparser.statement.select.Select select = 
+            (net.sf.jsqlparser.statement.select.Select) statement;
+        
+        return hasExplicitSchemaInSelectObject(select);
+    }
+    
+    /**
+     * 递归检查 Select 对象中的所有表是否显式指定了 schema
+     */
+    private boolean hasExplicitSchemaInSelectObject(
+            net.sf.jsqlparser.statement.select.Select select) {
+        if (select instanceof net.sf.jsqlparser.statement.select.SetOperationList) {
+            return false;
+        }
+        
+        net.sf.jsqlparser.statement.select.PlainSelect plainSelect = 
+            select.getPlainSelect();
+        if (plainSelect == null) {
+            return false;
+        }
+        
+        // 检查 FROM 子句
+        if (hasExplicitSchemaInFromItem(plainSelect.getFromItem())) {
+            return true;
+        }
+        
+        // 检查 JOIN
+        if (plainSelect.getJoins() != null) {
+            for (net.sf.jsqlparser.statement.select.Join join : plainSelect.getJoins()) {
+                if (hasExplicitSchemaInFromItem(join.getRightItem())) {
+                    return true;
+                }
+            }
+        }
+        
+        return false;
+    }
+    
+    /**
+     * 递归检查 FromItem 是否显式指定了 schema
+     */
+    private boolean hasExplicitSchemaInFromItem(
+            net.sf.jsqlparser.statement.select.FromItem fromItem) {
+        if (fromItem instanceof net.sf.jsqlparser.schema.Table) {
+            net.sf.jsqlparser.schema.Table table = 
+                (net.sf.jsqlparser.schema.Table) fromItem;
+            // 检查是否有 schema（包括带引号的 schema）
+            return table.getSchemaName() != null;
+        } else if (fromItem instanceof 
+                net.sf.jsqlparser.statement.select.ParenthesedSelect) {
+            // 递归检查子查询
+            net.sf.jsqlparser.statement.select.ParenthesedSelect parenthesedSelect = 
+                (net.sf.jsqlparser.statement.select.ParenthesedSelect) fromItem;
+            return hasExplicitSchemaInSelectObject(parenthesedSelect.getSelect());
+        } else if (fromItem instanceof 
+                net.sf.jsqlparser.statement.select.ParenthesedFromItem) {
+            // 括号包裹的项
+            net.sf.jsqlparser.statement.select.ParenthesedFromItem parenthesis = 
+                (net.sf.jsqlparser.statement.select.ParenthesedFromItem) fromItem;
+            return hasExplicitSchemaInFromItem(parenthesis.getFromItem());
         }
         return false;
     }
