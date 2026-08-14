@@ -62,6 +62,7 @@ public class TenantController {
      * - admin 用户可以看到所有租户
      */
     @GetMapping("/list")
+    @PreAuthorize("isAuthenticated()")
     public R<List<TenantDTO.TenantResponse>> list() {
         // 根据当前登录用户获取租户列表（自动区分 admin 和普通用户）
         List<Tenant> tenants = tenantService.getTenantsByCurrentUser();
@@ -86,6 +87,7 @@ public class TenantController {
      * 查询租户详情
      */
     @GetMapping("/{id}")
+    @PreAuthorize("isAuthenticated()")
     public R<TenantDTO.TenantResponse> getById(@PathVariable Long id) {
         Tenant tenant = tenantService.getById(id);
         if (tenant == null) {
