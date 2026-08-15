@@ -1,5 +1,26 @@
 ## Git Push
 
+### 2026-08-15: 修复 WHERE 子句中子查询的跨租户访问漏洞
+
+- commit_type:            BugFix
+- task_id:                0003
+- task_name:              WHERE 子句子查询跨租户访问漏洞修复
+- commit_hash:            ef03186
+- short_hash:             ef03186
+- branch:                 main
+- remote:                 gitee
+- staged_files:
+  - company-rag-agent/src/main/java/com/company/rag/agent/tool/DatabaseQueryTool.java
+  - company-rag-agent/src/test/java/com/company/rag/agent/tool/WhereSubqueryTest.java
+- commit_message:         BugFix:0003_修复 WHERE 子句中子查询的跨租户访问漏洞
+- commit_exit_code:       0
+- push_command:           git push gitee main
+- push_exit_code:         0
+- remote_head_check_command: git ls-remote gitee main
+- remote_head:            ef03186
+- result:                 推送成功，远端 HEAD 与本地提交哈希一致
+- notes:                  修复 hasExplicitSchemaInSelectObject 方法未检查 WHERE/SELECT/HAVING/GROUP BY/ORDER BY 子句中的子查询问题。增强 hasExplicitSchemaInExpression 方法递归检查 InExpression、ExistsExpression、ComparisonOperator、AndExpression、OrExpression 等所有表达式类型。新增 4 个测试用例全部通过。
+
 ### 2026-08-14: 租户安全漏洞综合修复
 
 - commit_type:            BugFix

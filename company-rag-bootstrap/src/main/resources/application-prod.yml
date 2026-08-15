@@ -1,7 +1,7 @@
 spring:
   datasource:
-    # url含 ?currentSchema=public，激活这些profile会覆盖动态Schema切换，建议后续清理
-    url: jdbc:postgresql://postgres:5433/company_rag?currentSchema=public
+    # 移除 currentSchema=public，让 TenantSchemaInterceptor 动态设置 search_path
+    url: jdbc:postgresql://postgres:5433/company_rag
   ai:
     # 统一使用 OpenAI 兼容接口，chat 用通义千问，embedding/rerank 用硅基流动
     openai:

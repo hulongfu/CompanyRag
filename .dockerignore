@@ -1,0 +1,77 @@
+# 敏感信息 - 防止密钥泄露到镜像中
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+secrets/
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+*~
+
+# Maven
+target/
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+release.properties
+dependency-reduced-pom.xml
+buildNumber.properties
+.mvn/timing.properties
+.mvn/wrapper/maven-wrapper.jar
+
+# 开发文档
+docs/
+*.md
+!README.md
+
+# 测试
+**/src/test/
+**/target/
+surefire-reports/
+test-output/
+
+# 日志
+*.log
+logs/
+
+# 临时文件
+tmp/
+temp/
+*.tmp
+*.bak
+*.orig
+
+# Docker
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# 部署脚本
+deploy*.md
+scripts/
+
+# 前端构建产物（如果需要单独构建）
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# 数据库迁移备份
+**/*.sql.bak
+
+# 证书和密钥
+keystore/
+*.jks
+*.p12

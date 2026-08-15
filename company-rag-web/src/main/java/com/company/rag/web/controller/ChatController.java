@@ -12,6 +12,7 @@ import com.company.rag.rag.service.RagSearchService;
 import com.company.rag.rag.service.RagSessionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
@@ -36,6 +37,7 @@ public class ChatController {
      * @return 聊天响应
      */
     @PostMapping("/chat")
+    @PreAuthorize("isAuthenticated()")
     public R<ChatResponse> chat(@RequestBody ChatRequest request,
                                 @RequestHeader(value = "X-Tenant-Id", required = false) Long tenantId) {
         log.info("收到聊天请求：query={}, sessionId={}, tenantId={}", 
@@ -89,6 +91,7 @@ public class ChatController {
      * @return RAG 结果
      */
     @PostMapping("/rag/search")
+    @PreAuthorize("isAuthenticated()")
     @Deprecated
     public R<RagResult> ragSearch(@RequestBody RagQuery query,
                                    @RequestHeader(value = "X-Tenant-Id", required = false) Long tenantId) {
