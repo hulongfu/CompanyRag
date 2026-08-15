@@ -1,5 +1,37 @@
 ## Git Push
 
+### 2026-08-15: 生产安全 bug 修复
+
+- commit_type:            BugFix
+- task_id:                0000
+- task_name:              生产安全 bug 修复
+- commit_hash:            350c84dceb58eab413a47b39f9d806cc2121f388
+- short_hash:             350c84d
+- branch:                 main
+- remote:                 github + gitee
+- staged_files:
+  - Dockerfile
+  - README.md
+  - .dockerignore
+  - company-rag-common/src/main/java/com/company/rag/common/config/JwtSecurityValidator.java
+  - company-rag-common/src/main/java/com/company/rag/common/security/UserContext.java
+  - company-rag-bootstrap/src/main/resources/application-prod.yml
+  - company-rag-bootstrap/src/main/resources/application.yml
+  - company-rag-rag/src/main/java/com/company/rag/rag/service/RagCircuitBreakerConfig.java
+  - company-rag-web/src/main/java/com/company/rag/web/controller/CacheManageController.java
+  - company-rag-web/src/main/java/com/company/rag/web/controller/ChatController.java
+  - company-rag-web/src/main/java/com/company/rag/web/controller/SessionController.java
+  - deploy-log.md
+- commit_message:         BugFix:0000_生产安全 bug 修复：fix security vulnerabilities and production readiness issues
+- commit_command:         git commit -m "BugFix:0000_生产安全 bug 修复：fix security vulnerabilities and production readiness issues"
+- commit_exit_code:       0
+- push_command:           git push origin main && git push gitee main
+- push_exit_code:         0
+- remote_head_check_command: git ls-remote origin main && git ls-remote gitee main
+- remote_head:            350c84dceb58eab413a47b39f9d806cc2121f388
+- result:                 推送成功，GitHub 和 Gitee 远端 HEAD 与本地提交哈希一致
+- notes:                  修复 8 个生产安全和稳定性问题：1) SessionController userId 硬编码 2) JWT 弱密钥无 fail-fast 3) 控制器缺少@PreAuthorize 4) Dockerfile root 运行 5) Dockerfile 无.dockerignore 6) -DskipTests 7) 无优雅停机 8) LLM 超时配置错误 9) application-prod.yml currentSchema=public 租户隔离问题
+
 ### 2026-08-15: 修复 WHERE 子句中子查询的跨租户访问漏洞
 
 - commit_type:            BugFix
