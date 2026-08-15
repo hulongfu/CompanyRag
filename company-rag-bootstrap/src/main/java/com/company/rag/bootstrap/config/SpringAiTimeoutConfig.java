@@ -5,7 +5,6 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.ClientHttpRequestFactory;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
-import org.springframework.web.reactive.function.client.WebClient;
 
 import java.time.Duration;
 
@@ -47,19 +46,6 @@ public class SpringAiTimeoutConfig {
         
         return RestClient.builder()
                 .requestFactory(requestFactory);
-    }
-
-    /**
-     * 配置 WebClient 的超时（用于流式响应）
-     * Spring AI 会自动使用这个 Bean 来创建 OpenAiApi
-     * 
-     * 注意：WebClient 的超时由 Spring Boot 的自动配置处理
-     * 配置在 application.yml 的 spring.http.client 部分
-     */
-    @Bean
-    public WebClient.Builder webClientBuilder() {
-        // Spring Boot 的 WebClientAutoConfiguration 会自动应用 spring.http.client 配置
-        return WebClient.builder();
     }
 
     /**
