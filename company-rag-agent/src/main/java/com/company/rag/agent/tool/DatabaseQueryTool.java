@@ -280,6 +280,7 @@ public class DatabaseQueryTool implements AgentTool {
     
     /**
      * 递归检查 Select 对象中的所有表是否显式指定了 schema
+     * 检查范围：FROM、JOIN、SELECT 列表、WHERE、HAVING、GROUP BY、ORDER BY
      */
     private boolean hasExplicitSchemaInSelectObject(
             net.sf.jsqlparser.statement.select.Select select) {
@@ -305,6 +306,140 @@ public class DatabaseQueryTool implements AgentTool {
                     return true;
                 }
             }
+        }
+        
+        // 检查 SELECT 列表中的子查询
+        if (plainSelect.getSelectItems() != null) {
+            for (net.sf.jsqlparser.statement.select.SelectItem selectItem : plainSelect.getSelectItems()) {
+                if (hasExplicitSchemaInSelectItem(selectItem)) {
+                    return true;
+                }
+            }
+        }
+        
+        // 检查 WHERE 子句中的子查询
+        if (plainSelect.getWhere() != null) {
+            if (hasExplicitSchemaInExpression(plainSelect.getWhere())) {
+                return true;
+            }
+        }
+        
+        // 检查 HAVING 子句中的子查询
+        if (plainSelect.getHaving() != null) {
+            if (hasExplicitSchemaInExpression(plainSelect.getHaving())) {
+                return true;
+            }
+        }
+        
+        // 检查 GROUP BY 中的子查询
+        if (plainSelect.getGroupBy() != null && plainSelect.getGroupBy().getGroupByExpressions() != null) {
+            for (Object groupExprObj : plainSelect.getGroupBy().getGroupByExpressions()) {
+                if (groupExprObj instanceof net.sf.jsqlparser.expression.Expression) {
+                    if (hasExplicitSchemaInExpression((net.sf.jsqlparser.expression.Expression) groupExprObj)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        
+        // 检查 ORDER BY 中的子查询
+        if (plainSelect.getOrderByElements() != null) {
+            for (net.sf.jsqlparser.statement.select.OrderByElement orderBy : plainSelect.getOrderByElements()) {
+                if (hasExplicitSchemaInExpression(orderBy.getExpression())) {
+                    return true;
+                }
+            }
+        }
+        
+        return false;
+    }
+    
+    /**
+     * 检查 SelectItem 是否包含显式指定 schema 的子查询
+     */
+    private boolean hasExplicitSchemaInSelectItem(
+            net.sf.jsqlparser.statement.select.SelectItem selectItem) {
+        if (selectItem == null) {
+            return false;
+        }
+        
+        // 检查表达式（可能包含子查询）
+        if (selectItem.getExpression() != null) {
+            return hasExplicitSchemaInExpression(selectItem.getExpression());
+        }
+        
+        return false;
+    }
+    
+    /**
+     * 递归检查 Expression 中是否包含显式指定 schema 的子查询
+     * 简化版本：直接检查 ParenthesedSelect 和 InExpression
+     */
+    private boolean hasExplicitSchemaInExpression(
+            net.sf.jsqlparser.expression.Expression expression) {
+        if (expression == null) {
+            return false;
+        }
+        
+        // 检查直接子查询
+        if (expression instanceof net.sf.jsqlparser.statement.select.ParenthesedSelect) {
+            net.sf.jsqlparser.statement.select.ParenthesedSelect parenthesedSelect = 
+                (net.sf.jsqlparser.statement.select.ParenthesedSelect) expression;
+            return hasExplicitSchemaInSelectObject(parenthesedSelect.getSelect());
+        }
+        
+        // 检查 IN 子句中的子查询
+        if (expression instanceof net.sf.jsqlparser.expression.operators.relational.InExpression) {
+            net.sf.jsqlparser.expression.operators.relational.InExpression inExpr = 
+                (net.sf.jsqlparser.expression.operators.relational.InExpression) expression;
+            // 检查右表达式是否是子查询
+            if (inExpr.getRightExpression() instanceof net.sf.jsqlparser.statement.select.ParenthesedSelect) {
+                net.sf.jsqlparser.statement.select.ParenthesedSelect subSelect = 
+                    (net.sf.jsqlparser.statement.select.ParenthesedSelect) inExpr.getRightExpression();
+                return hasExplicitSchemaInSelectObject(subSelect.getSelect());
+            }
+        }
+        
+        // 检查 EXISTS 子句
+        if (expression instanceof net.sf.jsqlparser.expression.operators.relational.ExistsExpression) {
+            net.sf.jsqlparser.expression.operators.relational.ExistsExpression existsExpr = 
+                (net.sf.jsqlparser.expression.operators.relational.ExistsExpression) expression;
+            if (existsExpr.getRightExpression() instanceof net.sf.jsqlparser.statement.select.ParenthesedSelect) {
+                net.sf.jsqlparser.statement.select.ParenthesedSelect subSelect = 
+                    (net.sf.jsqlparser.statement.select.ParenthesedSelect) existsExpr.getRightExpression();
+                return hasExplicitSchemaInSelectObject(subSelect.getSelect());
+            }
+        }
+        
+        // 检查比较表达式（=、<> 等）的左右两边
+        if (expression instanceof net.sf.jsqlparser.expression.operators.relational.ComparisonOperator) {
+            net.sf.jsqlparser.expression.operators.relational.ComparisonOperator compExpr = 
+                (net.sf.jsqlparser.expression.operators.relational.ComparisonOperator) expression;
+            if (compExpr.getLeftExpression() != null) {
+                if (hasExplicitSchemaInExpression(compExpr.getLeftExpression())) {
+                    return true;
+                }
+            }
+            if (compExpr.getRightExpression() != null) {
+                if (hasExplicitSchemaInExpression(compExpr.getRightExpression())) {
+                    return true;
+                }
+            }
+        }
+        
+        // 检查 AND/OR 表达式
+        if (expression instanceof net.sf.jsqlparser.expression.operators.conditional.AndExpression) {
+            net.sf.jsqlparser.expression.operators.conditional.AndExpression andExpr = 
+                (net.sf.jsqlparser.expression.operators.conditional.AndExpression) expression;
+            return hasExplicitSchemaInExpression(andExpr.getLeftExpression()) ||
+                   hasExplicitSchemaInExpression(andExpr.getRightExpression());
+        }
+        
+        if (expression instanceof net.sf.jsqlparser.expression.operators.conditional.OrExpression) {
+            net.sf.jsqlparser.expression.operators.conditional.OrExpression orExpr = 
+                (net.sf.jsqlparser.expression.operators.conditional.OrExpression) expression;
+            return hasExplicitSchemaInExpression(orExpr.getLeftExpression()) ||
+                   hasExplicitSchemaInExpression(orExpr.getRightExpression());
         }
         
         return false;
