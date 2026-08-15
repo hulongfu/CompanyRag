@@ -6,6 +6,12 @@ server:
 spring:
   application:
     name: company-rag
+  # HTTP 客户端超时配置（Spring Boot 3.2+）
+  # 适用于 RestClient 和 WebClient（包括流式响应）
+  http:
+    client:
+      connect-timeout: 10s
+      read-timeout: 120s
   lifecycle:
     # 优雅停机超时时间
     timeout-per-shutdown-phase: 30s
