@@ -1,9 +1,14 @@
 server:
   port: ${SERVER_PORT:8080}
+  # 优雅停机配置（K8s/Docker 停止时等待请求处理完成）
+  shutdown: graceful
 
 spring:
   application:
     name: company-rag
+  lifecycle:
+    # 优雅停机超时时间
+    timeout-per-shutdown-phase: 30s
   mvc:
     # 注意：不能设置 static-path-pattern，否则会影响 SpringDoc Swagger UI 的静态资源加载
     # static-path-pattern: /static/**

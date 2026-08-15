@@ -4,8 +4,6 @@ import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import io.github.resilience4j.ratelimiter.RateLimiterConfig;
 import io.github.resilience4j.ratelimiter.RateLimiterRegistry;
-import io.github.resilience4j.timelimiter.TimeLimiterConfig;
-import io.github.resilience4j.timelimiter.TimeLimiterRegistry;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -13,16 +11,16 @@ import java.time.Duration;
 
 /**
  * Resilience4j 熔断限流配置
- * 保护LLM调用和后端服务不被突发流量打垮
+ * 保护 LLM 调用和后端服务不被突发流量打垮
  */
 @Configuration
 public class RagCircuitBreakerConfig {
 
     /**
-     * LLM调用熔断器配置
-     * - 失败率超过50%则熔断
-     * - 熔断后30秒尝试半开
-     * - 最小调用数10次才触发熔断判断
+     * LLM 调用熔断器配置
+     * - 失败率超过 50% 则熔断
+     * - 熔断后 30 秒尝试半开
+     * - 最小调用数 10 次才触发熔断判断
      */
     @Bean
     public CircuitBreakerRegistry circuitBreakerRegistry() {
@@ -38,8 +36,8 @@ public class RagCircuitBreakerConfig {
 
     /**
      * 速率限制器配置
-     * - 每租户每秒最多5次LLM调用
-     * - 突发容量10次
+     * - 每租户每秒最多 5 次 LLM 调用
+     * - 突发容量 10 次
      */
     @Bean
     public RateLimiterRegistry rateLimiterRegistry() {
@@ -49,17 +47,5 @@ public class RagCircuitBreakerConfig {
                 .timeoutDuration(Duration.ofMillis(500))
                 .build();
         return RateLimiterRegistry.of(config);
-    }
-
-    /**
-     * 超时限制器配置
-     * - LLM 调用超时 30 秒
-     */
-    @Bean
-    public TimeLimiterRegistry timeLimiterRegistry() {
-        TimeLimiterConfig config = TimeLimiterConfig.custom()
-                .timeoutDuration(Duration.ofSeconds(30))
-                .build();
-        return TimeLimiterRegistry.of(config);
     }
 }

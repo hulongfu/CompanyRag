@@ -16,11 +16,23 @@ COPY company-rag-bootstrap/pom.xml company-rag-bootstrap/
 RUN mvn dependency:go-offline -B
 
 COPY . .
-RUN mvn package -DskipTests -B
+# 执行测试并打包（生产环境不应跳过测试）
+RUN mvn package -B
 
 # 运行阶段
 FROM docker.m.daocloud.io/library/eclipse-temurin:17-jre
 WORKDIR /app
+
+# 创建非 root 用户运行应用（安全最佳实践）
+RUN groupadd -r appgroup && useradd -r -g appgroup appuser
+
 COPY --from=build /build/company-rag-bootstrap/target/*.jar app.jar
+
+# 更改文件所有者为 appuser
+RUN chown appuser:appgroup app.jar
+
+# 切换到非 root 用户
+USER appuser
+
 EXPOSE 8080
 ENTRYPOINT ["java", "-jar", "app.jar"]
