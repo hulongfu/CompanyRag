@@ -12,6 +12,8 @@ spring:
         options:
           model: qwen-max
           temperature: 0.7
+          # 注意：不能在这里配置 timeout，OpenAiChatOptions 没有 timeout 属性
+          # 超时配置在 SpringAiTimeoutConfig 类中，通过 RestClient.Builder 实现
       # Embedding 模型配置（硅基流动 - OpenAI 兼容模式）
       embedding:
         api-key: ${SILICONFLOW_API_KEY:you_siliconflow_api_key}
