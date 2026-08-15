@@ -152,6 +152,15 @@ cp .env.example .env      # Linux/Mac
 
 # 【必须配置】JWT Token 密钥（生产环境必须设置强随机密钥）
 # 生成方法：openssl rand -base64 32
+# 
+# 重要说明：
+#   - JWT_SECRET 不是登录密码，而是用于签名和验证 JWT Token 的密钥
+#   - 登录密码：存储在数据库中，用户注册/修改时设置
+#   - JWT_SECRET：服务端持有，登录成功后生成 Token 时签名，每次请求时验证 Token 真伪
+#   - 开发环境：可以固定使用一个随机密钥（生成一次后记录到 .env，开发期间不变）
+#   - 生产环境：必须使用强随机密钥，定期轮换
+#   - 修改 JWT_SECRET 后：之前颁发的 Token 会失效，用户需要重新登录
+#   - 安全警告：切勿使用示例密钥（如 your_jwt_secret、this-is-a-secret 等），否则应用拒绝启动
 JWT_SECRET=your_jwt_secret_key_here
 
 # 【必须配置】DashScope API Key（通义千问）
@@ -194,7 +203,28 @@ java -jar company-rag-bootstrap/target/company-rag-bootstrap-1.0.0-SNAPSHOT.jar
 
 ### 5. 登录认证
 
-系统使用 JWT 无状态认证，所有 API 请求需要在 Header 中携带 Token。
+系统使用 JWT（JSON Web Token）无状态认证。所有 API 请求需要在 Header 中携带 Token。
+
+#### JWT 工作原理
+
+```
+用户登录 → 验证用户名/密码 → 生成 JWT Token（用 JWT_SECRET 签名）
+                          ↓
+后续请求 → 携带 Token → 验证签名（用 JWT_SECRET） → 解析用户信息
+```
+
+**关键概念：**
+- **登录密码**：存储在数据库中，用户注册/修改时设置
+- **JWT_SECRET**：服务端持有的密钥，用于：
+  - 登录成功后生成 Token 时签名
+  - 每次请求时验证 Token 的真伪
+- **Token 有效期**：默认 2 小时（7200 秒），过期后需要重新登录或刷新
+
+**重要提示：**
+- ⚠️ **JWT_SECRET 不是登录密码**，不要与用户账号密码混淆
+- ⚠️ **修改 JWT_SECRET 后**：之前颁发的所有 Token 会失效，用户需要重新登录
+- ✅ **开发环境**：可以固定使用一个随机密钥（生成一次后记录到 .env，开发期间保持不变）
+- ✅ **生产环境**：必须使用强随机密钥，建议定期轮换（轮换后用户需要重新登录）
 
 #### 5.0 首次部署说明
 
