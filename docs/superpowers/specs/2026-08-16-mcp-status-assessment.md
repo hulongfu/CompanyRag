@@ -175,7 +175,27 @@ public interface AgentTool {
 | `api_doc` | API 文档生成 | `filter` (可选) | Spring RequestMappingHandlerMapping |
 | `searchKnowledgeBase` | 知识库搜索 | `question`, `topK` | PGVector 向量库 |
 
-### 3.4 现有工具注册机制
+### 3.4 工具实现方式说明
+
+**当前项目存在两种工具实现方式：**
+
+**方式 1：纯 `@Tool` 注解（`KnowledgeBaseTool`）**
+- 不实现 `AgentTool` 接口
+- 直接在方法上使用 `@Tool` 注解
+- Spring AI 自动扫描并注册
+- 代码简洁，类型安全
+
+**方式 2：`AgentTool` 接口 + `@Tool` 双支持（其他 3 个工具）**
+- 实现 `AgentTool` 接口（`getName()`, `getDescription()`, `getParameterSchema()`, `execute()`）
+- 同时保留 `@Tool` 注解方法
+- 既支持 Spring AI Agent，也支持 `AgentToolRegistry` 手动调用
+- 代码稍冗余，但灵活性更高
+
+**现状评估：** 两种方式都能正常工作，MCP 适配层可以兼容两种方式。无需提前重构，在 MCP 实现过程中根据实际需要决定是否统一。
+
+**阶段 2 决策：** 在 MCP Server 实现时，根据实际适配复杂度决定是否需要统一工具实现方式。初步评估：MCP 适配层可以兼容两种方式，无需专门重构。
+
+### 3.5 现有工具注册机制
 
 通过 Spring AI 的 `ToolCallbackProvider` 自动注册：
 
