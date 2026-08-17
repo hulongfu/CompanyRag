@@ -1,6 +1,7 @@
 package com.company.rag.bootstrap.config;
 
 import com.company.rag.common.security.JwtTokenProvider;
+import com.company.rag.mcp.filter.McpSecurityFilter;
 import com.company.rag.tenant.service.TenantService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -41,6 +42,7 @@ import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
 public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
+    private final McpSecurityFilter mcpSecurityFilter;
     private final PasswordEncoder passwordEncoder;
     private final UserDetailsService userDetailsService;
     private final JwtTokenProvider jwtTokenProvider;
@@ -95,6 +97,9 @@ public class SecurityConfig {
                 .requestMatchers(new AntPathRequestMatcher("/health")).permitAll()
                 .requestMatchers(new AntPathRequestMatcher("/metrics")).permitAll()
                 
+                // 放行 MCP 端点（MCP Server 需要被外部 AI 应用/框架调用）
+                .requestMatchers(new AntPathRequestMatcher("/mcp/**")).permitAll()
+                
                 // 其他所有请求需要认证
                 .anyRequest().authenticated()
             )
@@ -118,7 +123,10 @@ public class SecurityConfig {
             )
             
             // 添加 JWT 认证过滤器（在用户名密码认证过滤器之前执行）
-            .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
+            .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+            
+            // 添加 MCP 安全过滤器（在 JWT 认证过滤器之前执行，用于 MCP 端点的特殊处理）
+            .addFilterBefore(mcpSecurityFilter, JwtAuthenticationFilter.class);
         
         return http.build();
     }

@@ -26,6 +26,7 @@
         <module>company-rag-agent</module>
         <module>company-rag-web</module>
         <module>company-rag-bootstrap</module>
+        <module>company-rag-mcp</module>
     </modules>
 
     <properties>
@@ -142,6 +143,11 @@
             <dependency>
                 <groupId>com.company</groupId>
                 <artifactId>company-rag-web</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.company</groupId>
+                <artifactId>company-rag-mcp</artifactId>
                 <version>${project.version}</version>
             </dependency>
         </dependencies>
