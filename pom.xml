@@ -27,6 +27,7 @@
         <module>company-rag-web</module>
         <module>company-rag-bootstrap</module>
         <module>company-rag-mcp</module>
+        <module>company-rag-mcp-client</module>
     </modules>
 
     <properties>
