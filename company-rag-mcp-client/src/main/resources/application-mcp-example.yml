@@ -1,0 +1,45 @@
+# MCP Client 配置示例
+
+# 启用 MCP Client 功能（默认启用）
+mcp.enabled: true
+
+# MCP Clients 配置
+mcp.clients:
+  # 文件系统 MCP Server 示例
+  - id: filesystem
+    name: 文件系统 MCP Server
+    url: http://localhost:3000/mcp
+    enabled: true
+    timeout: 30000
+    headers:
+      Authorization: "Bearer your-token-here"
+      X-Tenant-Id: "${tenant.id:default}"
+  
+  # GitHub MCP Server 示例
+  - id: github
+    name: GitHub MCP Server
+    url: https://api.github.com/mcp
+    enabled: false
+    timeout: 60000
+    headers:
+      Authorization: "Bearer ${GITHUB_TOKEN}"
+  
+  # 自定义 MCP Server 示例
+  - id: custom
+    name: 自定义 MCP Server
+    url: http://custom-mcp-server:8080/mcp
+    enabled: false
+    timeout: 30000
+
+# 配置说明:
+# - id: 客户端唯一标识，会作为工具名称前缀（如：filesystem_read_file）
+# - name: 描述性名称
+# - url: MCP Server 的 HTTP 端点地址
+# - enabled: 是否启用此客户端
+# - timeout: 请求超时时间（毫秒）
+# - headers: 自定义请求头，支持环境变量占位符
+
+# 工具命名规则:
+# 外部 MCP Server 的工具会自动注册到 AgentToolRegistry
+# 工具名称格式：{clientId}_{toolName}
+# 例如：filesystem 客户端的 read_file 工具会被注册为 filesystem_read_file
