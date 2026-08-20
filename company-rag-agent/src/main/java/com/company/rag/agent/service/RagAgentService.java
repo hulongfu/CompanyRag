@@ -8,10 +8,15 @@ import com.company.rag.common.tool.ToolCallRecord;
 import com.company.rag.common.tool.ToolCallRecorder;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.SystemMessage;
+import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -76,21 +81,41 @@ public class RagAgentService {
     }
 
     /**
-     * 处理 Agent 请求，自动选择工具
+     * 处理 Agent 请求，自动选择工具（无历史记忆）
      * @param userMessage 用户消息
      * @return Agent 处理结果（包含回答和工具上下文）
      */
     public AgentResult process(String userMessage) {
+        return processWithHistory(null, userMessage);
+    }
+
+    /**
+     * 处理 Agent 请求，带会话历史记忆（三级窗口控制）
+     * @param history 历史消息列表（按时间升序）
+     * @param userMessage 当前用户消息
+     * @return Agent 处理结果（包含回答和工具上下文）
+     */
+    public AgentResult processWithHistory(List<Message> history, String userMessage) {
         // 生成 traceId 并设置到当前线程
         String traceId = recorder.generateTraceId();
         recorder.setTraceId(traceId);
         long requestStart = System.currentTimeMillis();
         
-        log.info("[AGENT] traceId={}, userMsg=\"{}\"", traceId, userMessage);
+        log.info("[AGENT] traceId={}, userMsg=\"{}\", historySize={}", 
+                traceId, userMessage, history != null ? history.size() : 0);
         
         try {
+            // 构建 prompt：如果有历史，使用三级窗口控制策略
+            var promptSpec = chatClient.prompt();
+            
+            if (history != null && !history.isEmpty()) {
+                List<Message> windowedHistory = applyWindowControl(history);
+                log.debug("[AGENT] traceId={}, 窗口控制后消息数：{}", traceId, windowedHistory.size());
+                promptSpec.messages(windowedHistory);
+            }
+            
             // ChatClient 自动处理工具调用（Function Calling）
-            String response = chatClient.prompt()
+            String response = promptSpec
                     .user(userMessage)
                     .call()
                     .content();
@@ -112,6 +137,107 @@ public class RagAgentService {
         } finally {
             recorder.clearTraceId();
         }
+    }
+
+    /**
+     * 三级窗口控制策略：
+     * 1. 第一级：直接注入所有历史（最简单）
+     * 2. 第二级：LLM 摘要压缩早期对话
+     * 3. 第三级：硬窗口截取最近 N 轮
+     */
+    private static final int MAX_TOKENS = 4000;           // 最大 token 数
+    private static final int COMPRESSION_THRESHOLD = 8000; // 触发压缩的 token 阈值
+    private static final int MAX_HISTORY_ROUNDS = 10;     // 硬窗口：最多 10 轮
+
+    private List<Message> applyWindowControl(List<Message> history) {
+        int estimatedTokens = estimateTokens(history);
+        
+        if (estimatedTokens <= MAX_TOKENS) {
+            // 第一级：完整历史在限制内，直接使用
+            log.debug("窗口控制：使用完整历史，{} 轮，估计 {} tokens", history.size() / 2, estimatedTokens);
+            return history;
+            
+        } else if (estimatedTokens <= COMPRESSION_THRESHOLD) {
+            // 第二级：使用 LLM 摘要压缩
+            log.debug("窗口控制：历史过长 ({} tokens)，使用 LLM 压缩", estimatedTokens);
+            return compressHistoryWithLLM(history);
+            
+        } else {
+            // 第三级：硬窗口截断
+            log.info("窗口控制：历史过长 ({} tokens)，截断保留最近 {} 轮", estimatedTokens, MAX_HISTORY_ROUNDS);
+            return truncateHistory(history, MAX_HISTORY_ROUNDS);
+        }
+    }
+
+    /**
+     * 使用 LLM 压缩历史对话
+     * 策略：保留最近 3 轮完整对话，压缩早期对话为摘要
+     */
+    private List<Message> compressHistoryWithLLM(List<Message> history) {
+        if (history.size() <= 6) { // 3 轮对话 = 6 条消息
+            return history;
+        }
+        
+        // 分离早期对话和最近对话
+        int keepFullRounds = 3;
+        int keepFullMessages = keepFullRounds * 2; // 每轮 = User + Assistant
+        List<Message> earlyHistory = history.subList(0, history.size() - keepFullMessages);
+        List<Message> recentHistory = history.subList(history.size() - keepFullMessages, history.size());
+        
+        // 构建早期对话文本
+        StringBuilder earlyContext = new StringBuilder();
+        for (int i = 0; i < earlyHistory.size(); i += 2) {
+            if (i + 1 < earlyHistory.size()) {
+                // 使用 getText() 方法获取纯文本内容（Spring AI 1.0.4）
+                String userContent = earlyHistory.get(i).getText();
+                String assistantContent = earlyHistory.get(i + 1).getText();
+                earlyContext.append("用户：").append(userContent).append("\n");
+                earlyContext.append("助手：").append(assistantContent).append("\n");
+                earlyContext.append("---\n");
+            }
+        }
+        
+        // 调用 LLM 压缩早期对话
+        String prompt = String.format(
+            "请总结以下对话的关键信息，保留重要事实、结论和上下文，150 字以内：\n\n%s",
+            earlyContext.toString()
+        );
+        
+        String summary = chatClient.prompt(prompt).call().content();
+        
+        // 组装消息：摘要 + 最近完整对话
+        List<Message> result = new ArrayList<>();
+        result.add(new SystemMessage("对话历史摘要：" + summary));
+        result.addAll(recentHistory);
+        
+        return result;
+    }
+
+    /**
+     * 硬窗口截断：只保留最近 N 轮对话
+     */
+    private List<Message> truncateHistory(List<Message> history, int maxRounds) {
+        int maxMessages = maxRounds * 2; // 每轮 = User + Assistant
+        if (history.size() <= maxMessages) {
+            return history;
+        }
+        return history.subList(history.size() - maxMessages, history.size());
+    }
+
+    /**
+     * 估算 token 数量（简化版：按字符数/4 估算）
+     * Spring AI 1.0.4 中，Message 接口的 getText() 方法返回纯文本内容
+     */
+    private int estimateTokens(List<Message> messages) {
+        int totalChars = messages.stream()
+            .mapToInt(m -> {
+                if (m == null) return 0;
+                // 使用 getText() 获取纯文本内容，避免 toString() 包含类名和元数据
+                String content = m.getText();
+                return content != null ? content.length() : 0;
+            })
+            .sum();
+        return totalChars / 4;  // 粗略估算：4 个字符 ≈ 1 个 token
     }
 
     /**

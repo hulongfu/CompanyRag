@@ -4,6 +4,7 @@ import com.company.rag.agent.service.AgentResult;
 import com.company.rag.agent.service.RagAgentService;
 import com.company.rag.common.model.R;
 import com.company.rag.common.security.SecurityUser;
+import com.company.rag.rag.entity.RagSession;
 import com.company.rag.rag.model.RagQuery;
 import com.company.rag.rag.model.RagResult;
 import com.company.rag.rag.response.ChatRequest;
@@ -12,9 +13,15 @@ import com.company.rag.rag.service.RagSearchService;
 import com.company.rag.rag.service.RagSessionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * 统一对话 Controller
@@ -57,12 +64,37 @@ public class ChatController {
         }
         
         // 使用 RagAgentService 处理（Agent 模式，LLM 自动决定调用工具）
-        AgentResult result = ragAgentService.process(request.getQuery());
+        // 如果有 sessionId 和 tenantId，读取历史会话记录并传入
+        AgentResult result;
+        if (request.getSessionId() != null && request.getTenantId() != null) {
+            // 读取历史会话（按时间升序）
+            List<RagSession> historySessions = ragSessionService.getSessionDetail(
+                    request.getTenantId(), request.getSessionId());
+            
+            // 转换为 Message 列表
+            List<Message> historyMessages = new ArrayList<>();
+            for (RagSession session : historySessions) {
+                historyMessages.add(new UserMessage(session.getQuery()));
+                historyMessages.add(new AssistantMessage(session.getAnswer()));
+            }
+            
+            log.debug("加载会话历史：sessionId={}, historySize={}", 
+                    request.getSessionId(), historyMessages.size() / 2);
+            
+            // 调用带历史的处理方法
+            result = ragAgentService.processWithHistory(historyMessages, request.getQuery());
+        } else {
+            // 无 sessionId 或 tenantId 缺失，使用无历史模式
+            // 注意：tenantId 缺失时不读取历史，避免"读不到旧记忆却存到租户 1"的割裂
+            result = ragAgentService.process(request.getQuery());
+        }
         
         // 保存会话和聊天记录（包含自动重命名逻辑）
+        // 如果有 sessionId，无论 tenantId 是否为空都保存（为空时使用默认租户 1）
         if (request.getSessionId() != null) {
+            Long effectiveTenantId = request.getTenantId() != null ? request.getTenantId() : 1L;
             ragSessionService.saveConversation(
-                    request.getTenantId() != null ? request.getTenantId() : 1L,
+                    effectiveTenantId,
                     request.getSessionId(),
                     request.getUserId(),
                     request.getQuery(),
@@ -70,6 +102,8 @@ public class ChatController {
                     result.getToolContext(),
                     null, null, null
             );
+            log.debug("保存会话记录：sessionId={}, tenantId={}", 
+                    request.getSessionId(), effectiveTenantId);
         }
         
         ChatResponse response = ChatResponse.builder()
