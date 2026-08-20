@@ -1,5 +1,27 @@
 ## Git Push
 
+### 2026-08-20: 会话记忆功能实现
+
+- commit_type:            Feat
+- task_id:                20260820
+- task_name:              会话记忆功能实现
+- commit_hash:            a2e50296a02f4762e8261d185bc9eb646d454c3f
+- short_hash:             a2e5029
+- branch:                 main
+- remote:                 gitee
+- staged_files:
+  - company-rag-agent/src/main/java/com/company/rag/agent/service/RagAgentService.java
+  - company-rag-web/src/main/java/com/company/rag/web/controller/ChatController.java
+- commit_message:         Feat:20260820_会话记忆功能实现：实现会话记忆功能，支持三级窗口控制策略
+- commit_command:         git commit -m "Feat:20260820_会话记忆功能实现：实现会话记忆功能，支持三级窗口控制策略"
+- commit_exit_code:       0
+- push_command:           git push gitee main
+- push_exit_code:         0
+- remote_head_check_command: git ls-remote gitee main
+- remote_head:            a2e50296a02f4762e8261d185bc9eb646d454c3f
+- result:                 推送成功，Gitee 远端 HEAD 与本地提交哈希一致
+- notes:                  实现会话记忆功能：1) RagAgentService 新增 processWithHistory 方法 2) ChatController 读取历史会话并传给 Agent 3) 三级窗口控制策略（直接注入→LLM 压缩→硬窗口截断）4) 修复 toString() 导致的噪声问题，改用 getText() 提取纯文本内容
+
 ### 2026-08-15: 生产安全 bug 修复
 
 - commit_type:            BugFix
