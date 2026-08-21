@@ -19,6 +19,9 @@ spring:
     # 注意：不能设置 static-path-pattern，否则会影响 SpringDoc Swagger UI 的静态资源加载
     # static-path-pattern: /static/**
   web:
+    # 禁用 favicon，避免浏览器请求 /favicon.ico 导致 404 错误
+    favicon:
+      enabled: false
     resources:
       static-locations: classpath:/static/,classpath:/public/,classpath:/resources/,classpath:/META-INF/resources/
   profiles:
