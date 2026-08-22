@@ -35,11 +35,13 @@ public class McpToolAdapter {
         List<Map<String, Object>> toolsMap = agentToolRegistry.listTools();
         
         return toolsMap.stream()
-                .map(toolMap -> new McpToolDefinition(
-                        (String) toolMap.get("name"),
-                        (String) toolMap.get("description"),
-                        toolMap.get("parameters")
-                ))
+                .map(toolMap -> {
+                    McpToolDefinition definition = new McpToolDefinition();
+                    definition.setName((String) toolMap.get("name"));
+                    definition.setDescription((String) toolMap.get("description"));
+                    definition.setInputSchema(toolMap.get("parameters"));
+                    return definition;
+                })
                 .collect(Collectors.toList());
     }
     

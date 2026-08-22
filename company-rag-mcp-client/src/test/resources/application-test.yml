@@ -1,0 +1,10 @@
+# 测试配置
+mcp:
+  enabled: true
+  clients:
+    clients:
+      - id: test-mcp
+        name: Test MCP Server
+        url: http://127.0.0.1:9001/mcp
+        enabled: true
+        timeout: 30000

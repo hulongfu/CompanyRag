@@ -21,9 +21,9 @@ public class JsonRpcRequest {
     private String method;
     
     /**
-     * 请求参数
+     * 请求参数（支持多种格式：initialize 用 Map，tools/call 用 JsonRpcParams）
      */
-    private JsonRpcParams params;
+    private Object params;
     
     /**
      * 请求 ID，用于匹配请求和响应
