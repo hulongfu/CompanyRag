@@ -133,11 +133,17 @@ public class McpController {
      * 处理 tools/call 方法
      */
     private JsonRpcResponse handleToolsCall(JsonRpcRequest request) {
-        String toolName = request.getParams().getName();
+        // params 可能是 JsonRpcParams 或 Map（initialize 请求）
+        if (!(request.getParams() instanceof JsonRpcRequest.JsonRpcParams)) {
+            return jsonRpcHandler.buildErrorResponse(request.getId(), -32602, "Invalid request parameters");
+        }
+        
+        JsonRpcRequest.JsonRpcParams params = (JsonRpcRequest.JsonRpcParams) request.getParams();
+        String toolName = params.getName();
         Map<String, Object> arguments = null;
         
-        if (request.getParams().getArguments() instanceof Map) {
-            arguments = (Map<String, Object>) request.getParams().getArguments();
+        if (params.getArguments() instanceof Map) {
+            arguments = (Map<String, Object>) params.getArguments();
         }
         
         log.info("处理 tools/call 请求：tool={}", toolName);
