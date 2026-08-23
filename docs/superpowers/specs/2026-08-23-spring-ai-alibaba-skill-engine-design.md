@@ -174,6 +174,25 @@ python scripts/calculator.py [expression]
 **Result:** "100"
 ```
 
+**Skill 目录结构说明**：
+
+```
+./agent_skills/
+└── {skill-name}/
+    ├── SKILL.md              # 必需：Skill 定义文件（YAML Front Matter + Markdown）
+    ├── scripts/              # 可选：脚本目录（Python/Shell 脚本）
+    │   └── {script-name}.py
+    ├── references/           # 可选：参考文件目录（API 文档、示例等）
+    │   └── api-docs.md
+    └── assets/               # 可选：资源与模板目录
+        └── template.md
+```
+
+- **SKILL.md**：必需，包含 Skill 元数据（name、description、read_when）和执行说明
+- **scripts/**：可选，存放 Skill 执行所需的脚本文件（Python、Shell 等）
+- **references/**：可选，存放参考文件（API 文档、示例代码、规范等）
+- **assets/**：可选，存放模板文件和资源文件（报告模板、配置文件等）
+
 ### 2.3 调用流程
 
 #### 2.3.1 Agent 自主决策流程
