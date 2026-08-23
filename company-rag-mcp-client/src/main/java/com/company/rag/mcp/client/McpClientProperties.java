@@ -14,7 +14,7 @@ import java.util.Map;
  */
 @Data
 @Component
-@ConfigurationProperties(prefix = "mcp.clients")
+@ConfigurationProperties(prefix = "mcp")
 public class McpClientProperties {
     
     /**

@@ -16,7 +16,6 @@ import jakarta.annotation.PreDestroy;
 @Slf4j
 @Configuration
 @RequiredArgsConstructor
-@EnableConfigurationProperties(McpClientProperties.class)
 @ConditionalOnProperty(prefix = "mcp", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class McpClientAutoConfig {
     
@@ -46,8 +45,10 @@ public class McpClientAutoConfig {
         @org.springframework.context.event.EventListener(org.springframework.context.event.ContextRefreshedEvent.class)
         public void onApplicationEvent(org.springframework.context.event.ContextRefreshedEvent event) {
             log.info("开始初始化 MCP Clients...");
-            
+            log.info("【DEBUG】配置的 MCP Clients 数量：{}", properties.getClients().size());
             for (McpClientProperties.ClientConfig config : properties.getClients()) {
+                log.info("【DEBUG】发现 MCP Client 配置：id={}, enabled={}, url={}", 
+                    config.getId(), config.isEnabled(), config.getUrl());
                 if (!config.isEnabled()) {
                     log.info("跳过禁用的 MCP Client: {}", config.getId());
                     continue;
