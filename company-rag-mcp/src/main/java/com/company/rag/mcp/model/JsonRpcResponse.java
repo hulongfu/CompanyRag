@@ -3,11 +3,13 @@ package com.company.rag.mcp.model;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
 import lombok.AllArgsConstructor;
+import lombok.NoArgsConstructor;
 
 /**
  * JSON-RPC 2.0 响应格式
  */
 @Data
+@NoArgsConstructor
 @AllArgsConstructor
 public class JsonRpcResponse {
     
@@ -48,6 +50,7 @@ public class JsonRpcResponse {
     }
     
     @Data
+    @NoArgsConstructor
     @AllArgsConstructor
     public static class JsonRpcError {
         /**

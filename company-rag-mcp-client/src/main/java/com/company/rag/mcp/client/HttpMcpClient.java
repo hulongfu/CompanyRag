@@ -9,11 +9,13 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
+import reactor.core.publisher.Mono;
 
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 基于 Spring WebClient 的 MCP 客户端实现
@@ -29,6 +31,7 @@ public class HttpMcpClient implements McpClient {
     private final WebClient webClient;
     private final ObjectMapper objectMapper;
     private final AtomicBoolean connected = new AtomicBoolean(false);
+    private final AtomicReference<String> sessionId = new AtomicReference<>();
     
     public HttpMcpClient(String clientId, String serverUrl, int timeout, Map<String, String> headers) {
         this.clientId = clientId;
@@ -146,9 +149,13 @@ public class HttpMcpClient implements McpClient {
                 "clientInfo", Map.of("name", clientId, "version", "1.0.0")
             ));
             
-            JsonRpcResponse response = sendRequest(request);
+            JsonRpcResponse response = sendRequest(request, false); // initialize 请求不需要 session ID
             if (response.getError() != null) {
                 log.warn("MCP Client [{}] initialize 失败：{}", clientId, response.getError().getMessage());
+            } else {
+                // 从响应中提取 session ID（如果服务器返回了）
+                // MCP HTTP SSE 传输中，session ID 通常在 HTTP 响应头中，但有些服务器会放在 result 中
+                log.debug("MCP Client [{}] initialize 响应：{}", clientId, response.getResult());
             }
         } catch (Exception e) {
             log.warn("MCP Client [{}] initialize 请求失败", clientId, e);
@@ -168,15 +175,27 @@ public class HttpMcpClient implements McpClient {
             
             // 发送通知（不等待响应）
             String requestBody = objectMapper.writeValueAsString(request);
+            log.debug("MCP Client [{}] 发送 initialized 通知：{}", clientId, requestBody);
+            
+            // 通知也需要接受 SSE 格式（MCP 协议要求）
             webClient.post()
                     .contentType(MediaType.APPLICATION_JSON)
-                    .headers(httpHeaders -> headers.forEach(httpHeaders::add))
+                    .accept(MediaType.APPLICATION_JSON, MediaType.TEXT_EVENT_STREAM)
+                    .headers(httpHeaders -> {
+                        headers.forEach(httpHeaders::add);
+                        // 添加 session ID（initialize 后必须携带）
+                        if (sessionId.get() != null) {
+                            httpHeaders.add("Mcp-Session-Id", sessionId.get());
+                        }
+                    })
                     .bodyValue(requestBody)
                     .retrieve()
                     .bodyToMono(String.class)
                     .block();
+            
+            log.debug("MCP Client [{}] initialized 通知发送成功", clientId);
         } catch (Exception e) {
-            log.warn("MCP Client [{}] initialized 通知失败", clientId, e);
+            log.warn("MCP Client [{}] initialized 通知失败：{}", clientId, e.getMessage());
         }
     }
     
@@ -184,21 +203,53 @@ public class HttpMcpClient implements McpClient {
      * 发送 JSON-RPC 请求
      */
     private JsonRpcResponse sendRequest(JsonRpcRequest request) {
+        return sendRequest(request, true);
+    }
+    
+    /**
+     * 发送 JSON-RPC 请求
+     * @param request JSON-RPC 请求
+     * @param requireSession 是否需要 session ID
+     */
+    private JsonRpcResponse sendRequest(JsonRpcRequest request, boolean requireSession) {
         try {
             String requestBody = objectMapper.writeValueAsString(request);
             log.debug("MCP Client [{}] 发送请求：{}", clientId, requestBody);
             
+            // 使用 exchangeToMono 获取响应头和响应体
             String responseBody = webClient.post()
                     .contentType(MediaType.APPLICATION_JSON)
-                    .headers(httpHeaders -> headers.forEach(httpHeaders::add))
+                    .accept(MediaType.APPLICATION_JSON, MediaType.TEXT_EVENT_STREAM)
+                    .headers(httpHeaders -> {
+                        // 添加自定义 headers
+                        headers.forEach(httpHeaders::add);
+                        // 添加 session ID（如果需要）
+                        if (requireSession && sessionId.get() != null) {
+                            httpHeaders.add("Mcp-Session-Id", sessionId.get());
+                        }
+                    })
                     .bodyValue(requestBody)
-                    .retrieve()
-                    .bodyToMono(String.class)
+                    .exchangeToMono(clientResponse -> {
+                        // 从响应头中提取 session ID（如果是 initialize 响应）
+                        String newSessionId = clientResponse.headers().header("Mcp-Session-Id").stream().findFirst().orElse(null);
+                        if (newSessionId != null && !requireSession) {
+                            sessionId.set(newSessionId);
+                            log.info("MCP Client [{}] 从响应头获取到 session ID: {}", clientId, sessionId.get());
+                        }
+                        // 检查响应状态
+                        if (!clientResponse.statusCode().is2xxSuccessful()) {
+                            return clientResponse.createException().flatMap(Mono::error);
+                        }
+                        return clientResponse.bodyToMono(String.class);
+                    })
                     .block();
             
             log.debug("MCP Client [{}] 接收响应：{}", clientId, responseBody);
             
-            return objectMapper.readValue(responseBody, JsonRpcResponse.class);
+            // 解析 SSE 格式响应
+            String jsonContent = parseSseResponse(responseBody);
+            
+            return objectMapper.readValue(jsonContent, JsonRpcResponse.class);
         } catch (WebClientResponseException e) {
             log.error("MCP Client [{}] HTTP 请求失败：{} - {}", clientId, e.getStatusCode(), e.getResponseBodyAsString());
             throw new RuntimeException("HTTP 请求失败：" + e.getMessage(), e);
@@ -206,6 +257,52 @@ public class HttpMcpClient implements McpClient {
             log.error("MCP Client [{}] JSON 处理失败", clientId, e);
             throw new RuntimeException("JSON 处理失败：" + e.getMessage(), e);
         }
+    }
+    
+    /**
+     * 解析 SSE (Server-Sent Events) 格式响应
+     * SSE 格式示例:
+     * event: message
+     * data: {"jsonrpc":"2.0","id":"123","result":{}}
+     * 
+     * @param sseResponse SSE 响应文本
+     * @return 提取的 JSON 内容
+     */
+    private String parseSseResponse(String sseResponse) {
+        if (sseResponse == null || sseResponse.isEmpty()) {
+            throw new RuntimeException("SSE 响应为空");
+        }
+        
+        // 如果是纯 JSON，直接返回
+        String trimmed = sseResponse.trim();
+        if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+            return trimmed;
+        }
+        
+        // 解析 SSE 格式：提取 data: 后面的内容
+        String[] lines = sseResponse.split("\\r?\\n");
+        StringBuilder jsonData = new StringBuilder();
+        
+        for (String line : lines) {
+            if (line.startsWith("data:")) {
+                // 提取 data: 后面的 JSON 内容
+                String jsonLine = line.substring(5).trim();
+                if (!jsonLine.isEmpty()) {
+                    if (jsonData.length() > 0) {
+                        jsonData.append("\n");
+                    }
+                    jsonData.append(jsonLine);
+                }
+            }
+        }
+        
+        String result = jsonData.toString();
+        if (result.isEmpty()) {
+            throw new RuntimeException("SSE 响应中未找到 data 行，原始响应：" + sseResponse);
+        }
+        
+        log.debug("MCP Client [{}] 从 SSE 中提取 JSON: {}", clientId, result);
+        return result;
     }
     
     /**

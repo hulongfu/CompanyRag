@@ -37,7 +37,11 @@ spring:
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:difyai123456}
 
-  # 多路检索配置
+# JWT 配置（开发环境临时配置，生产环境应通过环境变量）
+jwt:
+  secret: k07fDiqMxu5Fgnes77ASlM2Tl7CM9yCeiIZcWV8z9w8=
+
+# 多路检索配置
 rag:
   retrieval:
     # 多路检索配置
@@ -48,6 +52,24 @@ rag:
     # 融合配置
     score-threshold: 0.3
     fusion-top-k: 50
+
+# MCP Client 配置：连接外部 MCP Server
+mcp:
+  enabled: true
+  clients:
+    # 本地测试 MCP Server（端口 9001）
+    - id: custom
+      name: 本地测试 MCP Server
+      url: http://localhost:9001/mcp
+      enabled: true
+      timeout: 30000
+    
+    # 文件系统 MCP Server（可选）
+    - id: filesystem
+      name: 文件系统 MCP Server
+      url: http://localhost:3000/mcp
+      enabled: false
+      timeout: 30000
 
 logging:
   level:
