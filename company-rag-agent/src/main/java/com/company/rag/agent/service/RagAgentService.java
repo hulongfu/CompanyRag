@@ -45,10 +45,13 @@ public class RagAgentService {
     private final AgentToolRegistry toolRegistry;
     private final ToolCallRecorder recorder;
     
-    private final ChatClient chatClient;
+    // 缓存的 ChatClient 实例
+    private volatile ChatClient cachedChatClient;
+    // 缓存 ChatClient 构建时的工具列表版本号
+    private volatile int cachedToolVersion;
 
     /**
-     * 构造方法，初始化 ChatClient 并注册工具
+     * 构造方法，初始化必要组件并构建初始 ChatClient
      */
     public RagAgentService(ChatModel chatModel, 
                            ToolCallbackProvider toolCallbackProvider,
@@ -59,25 +62,39 @@ public class RagAgentService {
         this.toolRegistry = toolRegistry;
         this.recorder = recorder;
         
-        // 构建 ChatClient，注册工具回调
-        this.chatClient = ChatClient.builder(chatModel)
-                .defaultToolCallbacks(toolCallbackProvider)
-                .build();
+        // 初始构建 ChatClient(此时 MCP 工具可能还未注册)
+        rebuildChatClient();
         
         // 调试日志：输出工具信息
-        log.info("RagAgentService 初始化：chatModel={}, toolCallbackProvider={}", 
+        log.info("RagAgentService 初始化：chatModel={}, toolCallbackProvider={}, initialToolVersion={}", 
                  chatModel.getClass().getSimpleName(), 
-                 toolCallbackProvider != null ? toolCallbackProvider.getClass().getSimpleName() : "null");
-        
-        if (toolCallbackProvider != null) {
-            var callbacks = toolCallbackProvider.getToolCallbacks();
-            log.info("注册的工具数量：{}", callbacks.length);
-            for (var callback : callbacks) {
-                log.info("  - 工具：{}, 描述：{}", 
-                         callback.getToolDefinition().name(),
-                         callback.getToolDefinition().description());
-            }
+                 toolCallbackProvider != null ? toolCallbackProvider.getClass().getSimpleName() : "null",
+                 cachedToolVersion);
+    }
+    
+    /**
+     * 重建 ChatClient(当工具列表变化时调用)
+     */
+    private void rebuildChatClient() {
+        this.cachedChatClient = ChatClient.builder(chatModel)
+                .defaultToolCallbacks(toolCallbackProvider)
+                .build();
+        this.cachedToolVersion = toolRegistry.getVersion();
+        log.debug("重建 ChatClient，当前工具版本号：{}", cachedToolVersion);
+    }
+    
+    /**
+     * 获取 ChatClient(带缓存检查)
+     * 如果工具列表已更新，则重建 ChatClient
+     */
+    private ChatClient getChatClient() {
+        int currentVersion = toolRegistry.getVersion();
+        if (cachedChatClient == null || cachedToolVersion != currentVersion) {
+            log.info("检测到工具列表变化 (oldVersion={}, newVersion={})，重建 ChatClient", 
+                     cachedToolVersion, currentVersion);
+            rebuildChatClient();
         }
+        return cachedChatClient;
     }
 
     /**
@@ -105,11 +122,14 @@ public class RagAgentService {
                 traceId, userMessage, history != null ? history.size() : 0);
         
         try {
+            // 获取 ChatClient(带缓存检查，工具列表变化时自动重建)
+            ChatClient chatClient = getChatClient();
+            
             // 构建 prompt：如果有历史，使用三级窗口控制策略
             var promptSpec = chatClient.prompt();
             
             if (history != null && !history.isEmpty()) {
-                List<Message> windowedHistory = applyWindowControl(history);
+                List<Message> windowedHistory = applyWindowControl(chatClient, history);
                 log.debug("[AGENT] traceId={}, 窗口控制后消息数：{}", traceId, windowedHistory.size());
                 promptSpec.messages(windowedHistory);
             }
@@ -149,7 +169,7 @@ public class RagAgentService {
     private static final int COMPRESSION_THRESHOLD = 8000; // 触发压缩的 token 阈值
     private static final int MAX_HISTORY_ROUNDS = 10;     // 硬窗口：最多 10 轮
 
-    private List<Message> applyWindowControl(List<Message> history) {
+    private List<Message> applyWindowControl(ChatClient chatClient, List<Message> history) {
         int estimatedTokens = estimateTokens(history);
         
         if (estimatedTokens <= MAX_TOKENS) {
@@ -160,7 +180,7 @@ public class RagAgentService {
         } else if (estimatedTokens <= COMPRESSION_THRESHOLD) {
             // 第二级：使用 LLM 摘要压缩
             log.debug("窗口控制：历史过长 ({} tokens)，使用 LLM 压缩", estimatedTokens);
-            return compressHistoryWithLLM(history);
+            return compressHistoryWithLLM(chatClient, history);
             
         } else {
             // 第三级：硬窗口截断
@@ -173,7 +193,7 @@ public class RagAgentService {
      * 使用 LLM 压缩历史对话
      * 策略：保留最近 3 轮完整对话，压缩早期对话为摘要
      */
-    private List<Message> compressHistoryWithLLM(List<Message> history) {
+    private List<Message> compressHistoryWithLLM(ChatClient chatClient, List<Message> history) {
         if (history.size() <= 6) { // 3 轮对话 = 6 条消息
             return history;
         }

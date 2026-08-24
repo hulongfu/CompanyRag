@@ -29,6 +29,10 @@
             <artifactId>company-rag-agent</artifactId>
         </dependency>
         <dependency>
+            <groupId>com.company</groupId>
+            <artifactId>company-rag-mcp-client</artifactId>
+        </dependency>
+        <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
