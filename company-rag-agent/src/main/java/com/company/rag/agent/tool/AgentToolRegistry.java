@@ -14,13 +14,14 @@ import java.util.*;
 public class AgentToolRegistry {
 
     private final Map<String, AgentTool> tools = new HashMap<>();
+    private volatile int version = 0; // 工具列表版本号，每次工具变更时递增
 
     public AgentToolRegistry(List<AgentTool> toolList) {
-        // 自动注册所有AgentTool实现
+        // 自动注册所有 AgentTool 实现
         for (AgentTool tool : toolList) {
             register(tool);
         }
-        log.info("已注册{}个Agent工具: {}", tools.size(), tools.keySet());
+        log.info("已注册{}个 Agent 工具：{}", tools.size(), tools.keySet());
     }
 
     /**
@@ -28,7 +29,8 @@ public class AgentToolRegistry {
      */
     public void register(AgentTool tool) {
         tools.put(tool.getName(), tool);
-        log.debug("注册Agent工具: {}", tool.getName());
+        version++; // 递增版本号
+        log.debug("注册 Agent 工具：{} (version={})", tool.getName(), version);
     }
 
     /**
@@ -74,5 +76,21 @@ public class AgentToolRegistry {
      */
     public boolean hasTool(String name) {
         return tools.containsKey(name);
+    }
+    
+    /**
+     * 获取当前工具列表版本号
+     * @return 版本号，每次工具注册或变更时递增
+     */
+    public int getVersion() {
+        return version;
+    }
+    
+    /**
+     * 获取所有已注册的工具
+     * @return 工具 Map 的只读视图
+     */
+    public Map<String, AgentTool> getAllTools() {
+        return Collections.unmodifiableMap(tools);
     }
 }

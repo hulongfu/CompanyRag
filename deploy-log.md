@@ -1,5 +1,34 @@
 ## Git Push
 
+### 2026-08-24: MCP 工具动态版本修复
+
+- commit_type:            BugFix
+- task_id:                mcp-tool-fix
+- task_name:              MCP 工具动态注册问题修复
+- commit_hash:            0b134bb3734755d9071cdfe46b37c4986bb0074e
+- short_hash:             0b134bb
+- branch:                 feature/openclaw-skill-engine
+- remote:                 gitee
+- staged_files:
+  - company-rag-agent/src/main/java/com/company/rag/agent/service/RagAgentService.java
+  - company-rag-agent/src/main/java/com/company/rag/agent/tool/AgentToolRegistry.java
+  - company-rag-mcp-client/src/main/java/com/company/rag/mcp/client/McpClientAutoConfig.java
+  - company-rag-rag/src/main/java/com/company/rag/rag/config/AggregatedToolCallbackProvider.java
+  - company-rag-rag/src/main/java/com/company/rag/rag/config/AgentToolConfig.java
+  - company-rag-rag/pom.xml
+  - docs/fixes/2026-08-24-mcp-tool-dynamic-version-fix.md
+  - docs/fixes/2026-08-24-mcp-tool-integration-fix.md
+- commit_message:         修复 MCP 工具动态注册问题：实现版本号机制，ChatClient 自动重建
+- commit_command:         git commit -m "修复 MCP 工具动态注册问题：实现版本号机制，ChatClient 自动重建"
+- commit_exit_code:       0
+- push_command:           git push gitee feature/openclaw-skill-engine
+- push_exit_code:         0
+- remote_head_check_command: git ls-remote gitee feature/openclaw-skill-engine
+- remote_head:            07d1ae7
+- result:                 推送成功，Gitee 远端 HEAD 与本地提交哈希一致；GitHub 因网络问题推送失败（预期情况）
+- notes:                  修复 MCP 工具注册后无法被 ChatClient 调用的问题：1) AgentToolRegistry 增加版本号管理，每次注册工具时递增 2) RagAgentService 改为缓存模式，getChatClient() 检查版本号变化 3) 工具列表变化时自动重建 ChatClient 4) 移除 McpClientAutoConfig 多余的@EnableConfigurationProperties。实现工具动态注册生效，支持 MCP 工具和本地工具混合使用。
+
+
 ### 2026-08-20: 会话记忆功能实现
 
 - commit_type:            Feat
