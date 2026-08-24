@@ -5,8 +5,8 @@
 - commit_type:            BugFix
 - task_id:                mcp-tool-fix
 - task_name:              MCP 工具动态注册问题修复
-- commit_hash:            0b134bb3734755d9071cdfe46b37c4986bb0074e
-- short_hash:             0b134bb
+- commit_hash:            55c40d6343d01a6f02cf6ebbfabbad87b7c9022a
+- short_hash:             55c40d6
 - branch:                 feature/openclaw-skill-engine
 - remote:                 gitee
 - staged_files:
