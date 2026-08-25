@@ -1,5 +1,40 @@
 ## Git Push
 
+### 2026-08-25: Spring AI Alibaba 1.1.2 API 兼容性修复
+
+- commit_type:            BugFix
+- task_id:                0000
+- task_name:              spring-ai-alibaba-api-fix
+- commit_hash:            61f5aaf5387846452883c1051271474fef23f5d1
+- short_hash:             61f5aaf
+- branch:                 feature/openclaw-skill-engine
+- remote:                 gitee
+- staged_files:
+  - company-rag-agent/pom.xml
+  - company-rag-agent/src/main/java/com/company/rag/agent/config/AgentConfig.java
+  - company-rag-agent/src/main/java/com/company/rag/agent/service/RagAgentService.java
+  - company-rag-bootstrap/pom.xml
+  - company-rag-bootstrap/src/main/resources/application-dev.yml
+  - company-rag-bootstrap/src/main/resources/application-prod.yml
+  - company-rag-bootstrap/src/main/resources/application-test.yml
+  - company-rag-mcp/src/test/java/com/company/rag/mcp/handler/JsonRpcHandlerTest.java
+  - company-rag-rag/src/test/java/com/company/rag/rag/tools/KnowledgeBaseToolEndToEndTest.java
+  - company-rag-web/src/main/java/com/company/rag/web/controller/AgentController.java
+  - pom.xml
+  - docs/fixes/2026-08-24-spring-ai-alibaba-1.1.2-api-fix.md
+- commit_message:         BugFix:0000_spring-ai-alibaba-api-fix:fix DashScope auto-configuration conflicts and upgrade Spring AI to 1.1.3
+- commit_command:         git commit -m "BugFix:0000_spring-ai-alibaba-api-fix:fix DashScope auto-configuration conflicts and upgrade Spring AI to 1.1.3"
+- commit_exit_code:       0
+- push_command:           git push gitee feature/openclaw-skill-engine
+- push_exit_code:         0
+- remote_head_check_command: git ls-remote gitee feature/openclaw-skill-engine
+- remote_head:            61f5aaf5387846452883c1051271474fef23f5d1
+- result:                 推送成功，Gitee 远端 HEAD 与本地提交哈希一致；GitHub 因网络问题推送失败（预期情况）
+- notes:                  修复 Spring AI Alibaba 1.1.2 API 兼容性问题：1) 升级 Spring AI BOM 从 1.0.4 到 1.1.3 2) 排除所有 DashScope 原生自动配置（Audio/Chat/Agent/Embedding/Image/Rerank/Video）3) 添加 ReactAgent name 配置 4) 修复 AgentController 编译错误 5) 删除重复的 toolCallbackProvider Bean。实现使用 OpenAI 兼容接口（通义千问 Chat + 硅基流动 Embedding/Rerank）
+
+---
+
+
 ### 2026-08-24: MCP 工具动态版本修复
 
 - commit_type:            BugFix
