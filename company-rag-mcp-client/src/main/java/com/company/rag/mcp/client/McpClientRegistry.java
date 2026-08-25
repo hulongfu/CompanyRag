@@ -72,6 +72,14 @@ public class McpClientRegistry {
     }
     
     /**
+     * 获取所有已注册的 Client
+     * @return Client Map 的只读视图
+     */
+    public Map<String, McpClient> getClients() {
+        return new ConcurrentHashMap<>(clients);
+    }
+    
+    /**
      * 获取 Client
      * @param clientId 客户端 ID
      * @return MCP 客户端实例
