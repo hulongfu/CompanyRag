@@ -12,6 +12,9 @@ import org.springframework.context.annotation.Description;
  * 
  * 注意：ToolCallbackProvider 由 company-rag-rag 模块的 AgentToolConfig 统一提供，
  * 使用 AggregatedToolCallbackProvider 聚合所有工具（包括 MCP 工具）
+ * 
+ * 修复说明：McpClientInitializer 改为在 Bean 创建时立即初始化，
+ * 不再需要 @DependsOn 依赖
  */
 @Configuration
 public class AgentConfig {
