@@ -1,14 +1,11 @@
 package com.company.rag.web.controller;
 
-import com.company.rag.common.model.R;
 import com.company.rag.agent.service.RagAgentService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.Map;
-
 /**
- * @deprecated 使用 {@link ChatController} 替代
+ * @deprecated 使用 {@link ChatController} 替代，此类将在后续版本中删除
  */
 @Deprecated
 @RestController
@@ -18,27 +15,5 @@ public class AgentController {
 
     private final RagAgentService agentService;
 
-    @PostMapping("/chat")
-    public R<String> chat(@RequestBody Map<String, String> request) {
-        String message = request.get("message");
-        // context 参数不再使用，忽略
-        return R.ok(agentService.process(message).getAnswer());
-    }
-
-    @PostMapping("/query-db")
-    public R<String> queryDb(@RequestBody Map<String, String> request) {
-        return R.ok(agentService.queryDatabase(request.get("sql")));
-    }
-
-    @PostMapping("/search-code")
-    public R<String> searchCode(@RequestBody Map<String, String> request) {
-        return R.ok(agentService.searchCode(
-                request.get("keyword"),
-                request.get("fileExtension")));
-    }
-
-    @GetMapping("/api-doc")
-    public R<String> apiDoc(@RequestParam(required = false) String filter) {
-        return R.ok(agentService.getApiDoc(filter));
-    }
+    // 所有方法已移除，请使用 ChatController
 }

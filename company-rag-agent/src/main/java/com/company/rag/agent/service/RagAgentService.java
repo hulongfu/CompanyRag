@@ -3,8 +3,8 @@ package com.company.rag.agent.service;
 import com.company.rag.common.tool.ToolCallRecord;
 import com.company.rag.common.tool.ToolCallRecorder;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.agent.ReactAgent;
-import org.springframework.ai.agent.ReactAgentResult;
+import com.alibaba.cloud.ai.graph.agent.ReactAgent;
+import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.stereotype.Service;
@@ -87,9 +87,9 @@ public class RagAgentService {
             // 2. 自主决定调用 Tool 或 Skill
             // 3. 执行工具/技能并获取结果
             // 4. 基于结果生成最终回答
-            ReactAgentResult agentResult = reactAgent.call(messages);
+            AssistantMessage agentResult = reactAgent.call(messages);
             
-            String response = agentResult.getOutput().getContent();
+            String response = agentResult.getText();
             
             // 聚合工具调用记录，输出结构化日志
             long totalMs = System.currentTimeMillis() - requestStart;
