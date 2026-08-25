@@ -1,5 +1,34 @@
 ## Git Push
 
+### 2026-08-25: MCP 工具无法调用修复（第六次修复）
+
+- commit_type:            BugFix
+- task_id:                0000
+- task_name:              MCP 工具无法调用修复
+- commit_hash:            d4aded88848afe22ae433fa6c8d795e4528dcc07
+- short_hash:             d4aded8
+- branch:                 feature/openclaw-skill-engine
+- remote:                 gitee & github
+- staged_files:
+  - docs/fixes/2026-08-25-mcp-tool-not-called-fix.md
+  - company-rag-agent/src/main/java/com/company/rag/agent/config/AgentConfig.java
+  - company-rag-mcp-client/src/main/java/com/company/rag/mcp/client/McpClientAutoConfig.java
+  - company-rag-mcp-client/src/main/java/com/company/rag/mcp/client/McpClientRegistry.java
+  - company-rag-rag/src/main/java/com/company/rag/rag/config/AgentToolConfig.java
+- commit_message:         BugFix:0000_MCP 工具无法调用修复：use @DependsOn to fix Bean initialization order
+- commit_command:         git commit -m "BugFix:0000_MCP 工具无法调用修复：use @DependsOn to fix Bean initialization order"
+- commit_exit_code:       0
+- push_command:           git push gitee feature/openclaw-skill-engine && git push origin feature/openclaw-skill-engine
+- push_exit_code:         0
+- remote_head_check_command: git ls-remote gitee/origin feature/openclaw-skill-engine
+- remote_head:            d4aded88848afe22ae433fa6c8d795e4528dcc07
+- result:                 推送成功，Gitee 和 GitHub 远端 HEAD 与本地提交哈希一致
+- notes:                  修复 Bean 初始化顺序问题：1) 发现@AutoConfigureAfter 因缺少@AutoConfiguration 注解而失效 2) 改用@DependsOn("mcpClientAutoConfig")强制 Bean 创建顺序 3) 确保 MCP 工具在 ReactAgent 构建前完成注册
+
+---
+
+
+
 ### 2026-08-25: Spring AI Alibaba 1.1.2 API 兼容性修复
 
 - commit_type:            BugFix
