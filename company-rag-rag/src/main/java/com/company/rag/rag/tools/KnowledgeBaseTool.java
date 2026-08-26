@@ -1,5 +1,6 @@
 package com.company.rag.rag.tools;
 
+import com.company.rag.agent.tool.AgentTool;
 import com.company.rag.common.tool.ToolCallRecorder;
 import com.company.rag.rag.model.KnowledgeBaseResult;
 import com.company.rag.rag.model.RagQuery;
@@ -19,10 +20,12 @@ import java.util.stream.Collectors;
 /**
  * MCP 工具：企业知识库智能问答（RAG）
  * 将自然语言问题转换为 RAG 检索，返回带引用来源的答案
+ * 
+ * 实现 AgentTool 接口以被 AgentToolRegistry 自动注册
  */
 @Slf4j
 @Component
-public class KnowledgeBaseTool {
+public class KnowledgeBaseTool implements AgentTool {
     
     private final RagSearchService ragSearchService;
     private final ToolCallRecorder recorder;
@@ -135,5 +138,51 @@ public class KnowledgeBaseTool {
                     chunk.getContent()));
         }
         return sb.toString();
+    }
+    
+    // ==================== AgentTool 接口实现 ====================
+    
+    @Override
+    public String getName() {
+        return "searchKnowledgeBase";
+    }
+    
+    @Override
+    public String getDescription() {
+        return "在企业知识库文档中检索信息，包括 Markdown（.md）、PDF、Word（.docx）、TXT 文件。适用于查询 README、设计文档、使用手册、FAQ、流程规范、项目说明等。";
+    }
+    
+    @Override
+    public Map<String, Object> getParameterSchema() {
+        Map<String, Object> schema = new LinkedHashMap<>();
+        schema.put("type", "object");
+        schema.put("properties", Map.of(
+                "question", Map.of(
+                        "type", "string",
+                        "description", "用户自然语言问题，例如：怎么申请测试环境？"
+                ),
+                "topK", Map.of(
+                        "type", "integer",
+                        "description", "返回文档片段数量上限，默认 5"
+                )
+        ));
+        schema.put("required", List.of("question"));
+        return schema;
+    }
+    
+    @Override
+    public String execute(Map<String, Object> params) {
+        String question = (String) params.get("question");
+        Integer topK = (Integer) params.get("topK");
+        
+        // 调用 @Tool 注解的方法
+        KnowledgeBaseResult result = searchKnowledgeBase(question, topK);
+        
+        // 转换为 JSON 字符串返回
+        if (result.isSuccess()) {
+            return result.getAnswer();
+        } else {
+            return "错误：" + result.getError();
+        }
     }
 }
