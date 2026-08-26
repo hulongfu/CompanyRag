@@ -1,5 +1,30 @@
 ## Git Push
 
+### 2026-08-26: 多租户 RLS 跨租户泄漏隐患分析评估（架构澄清）
+
+- commit_type:            Task
+- task_id:                0000
+- task_name:              多租户 RLS 跨租户泄漏隐患分析评估
+- commit_hash:            5b27e77cbb42e08c31f7052d82bbe39e3843339c
+- short_hash:             5b27e77
+- branch:                 feature/openclaw-skill-engine
+- remote:                 gitee & github
+- staged_files:
+  - company-rag-tenant/src/main/java/com/company/rag/tenant/context/TenantContextHelper.java
+  - company-rag-tenant/src/main/java/com/company/rag/tenant/interceptor/TenantSchemaInterceptor.java
+  - docs/architecture/multi-tenant-isolation-architecture.md
+- commit_message:         Task:0000_多租户 RLS 跨租户泄漏隐患分析评估：clarify architecture and remove misleading comments
+- commit_command:         git commit -m "Task:0000_多租户 RLS 跨租户泄漏隐患分析评估：clarify architecture and remove misleading comments"
+- commit_exit_code:       0
+- push_command:           git push gitee feature/openclaw-skill-engine && git push origin feature/openclaw-skill-engine
+- push_exit_code:         0
+- remote_head_check_command: git ls-remote gitee/origin feature/openclaw-skill-engine
+- remote_head:            5b27e77cbb42e08c31f7052d82bbe39e3843339c
+- result:                 推送成功，Gitee 和 GitHub 远端 HEAD 与本地提交哈希一致
+- notes:                  方案 C 实施：1) 清理 TenantSchemaInterceptor 和 TenantContextHelper 中的误导性注释 2) 添加清晰的架构说明：Schema 隔离为主（100% 可靠），RLS 为辅（深度防御）3) 新增完整架构文档 multi-tenant-isolation-architecture.md 防止后续误解
+
+---
+
 ### 2026-08-25: MCP 工具无法调用修复（第六次修复）
 
 - commit_type:            BugFix
