@@ -1,5 +1,33 @@
 ## Git Push
 
+### 2026-08-27: MCP 安全加固与技能加载修复
+
+- commit_type:            BugFix
+- task_id:                MCP安全技能加载修复
+- task_name:              MCP安全加固与技能加载修复
+- commit_hash:            d7642dbecdc8e94130be01bf60b9792720e7926f
+- short_hash:             d7642db
+- branch:                 feature/openclaw-skill-engine
+- remote:                 gitee & github
+- staged_files:
+  - Dockerfile
+  - company-rag-agent/src/main/java/com/company/rag/agent/config/AgentConfig.java
+  - company-rag-mcp/src/main/java/com/company/rag/mcp/filter/McpSecurityFilter.java
+  - agent_skills/
+  - docs/fixes/2026-08-26-mcp-architecture-optimization.md
+  - docs/fixes/2026-08-26-mcp-security-and-skill-loading-fix.md
+- commit_message:         BugFix:MCP安全技能加载修复_MCP安全加固与技能加载修复：forbid MCP anonymous access, self-set tenant schema, and support SKILLS_PATH env for skill loading
+- commit_command:         git commit -m "BugFix:MCP安全技能加载修复_MCP安全加固与技能加载修复：forbid MCP anonymous access, self-set tenant schema, and support SKILLS_PATH env for skill loading"
+- commit_exit_code:       0
+- push_command:           git push gitee feature/openclaw-skill-engine && git push origin feature/openclaw-skill-engine
+- push_exit_code:         0
+- remote_head_check_command: git ls-remote gitee/origin feature/openclaw-skill-engine
+- remote_head:            d7642dbecdc8e94130be01bf60b9792720e7926f
+- result:                 gitee 推送成功且远端 HEAD 与本地一致；github push 命令成功(exit 0) 但后续 ls-remote 验证因网络连接丢失失败，无法独立确认 github 远端 HEAD
+- notes:                  MCP 安全加固：1) 禁止匿名访问，强制 JWT 认证 2) 在 McpSecurityFilter 内自足设置租户 Schema（消除对 JwtAuthenticationFilter 的隐式耦合）3) finally 清理 TenantContext。技能加载修复：AgentConfig 支持 SKILLS_PATH 环境变量 + 加载失败降级处理；Dockerfile 复制 agent_skills 目录并设置环境变量。编译验证通过（mvn compile）
+
+---
+
 ### 2026-08-26: 多租户 RLS 跨租户泄漏隐患分析评估（架构澄清）
 
 - commit_type:            Task
