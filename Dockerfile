@@ -39,6 +39,9 @@ RUN chown -R appuser:appgroup /app/agent_skills
 # 设置环境变量：技能路径
 ENV SKILLS_PATH=/app/agent_skills
 
+# 强制设置生产环境（防止裸镜像默认 dev 环境）
+ENV SPRING_PROFILES_ACTIVE=prod
+
 # 切换到非 root 用户
 USER appuser
 

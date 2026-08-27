@@ -58,9 +58,9 @@ spring:
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:difyai123456}
 
-# JWT 配置（开发环境临时配置，生产环境应通过环境变量）
+# JWT 配置（开发环境通过环境变量注入，禁止硬编码）
 jwt:
-  secret: k07fDiqMxu5Fgnes77ASlM2Tl7CM9yCeiIZcWV8z9w8=
+  secret: ${JWT_SECRET:}
 
 # 多路检索配置
 rag:
