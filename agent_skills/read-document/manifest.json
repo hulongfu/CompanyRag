@@ -1,0 +1,40 @@
+{
+  "files": [
+    {
+      "path": "SKILL.md",
+      "name": "SKILL.md",
+      "nodeType": "FILE",
+      "parentPath": "",
+      "contentType": "application/octet-stream",
+      "size": 4243,
+      "checksum": "3cb81be652adb38e6c731bc9e6c3fa47",
+      "objectKey": "/tmp/team-skill-storage/TEAM/1337/read-document/versions/1.0.0/SKILL.md",
+      "lastModifiedTime": "2026-05-28T09:10:00.00000000",
+      "readonly": true
+    },
+    {
+      "path": "scripts",
+      "name": "scripts",
+      "nodeType": "DIRECTORY",
+      "parentPath": "",
+      "contentType": null,
+      "size": null,
+      "checksum": null,
+      "objectKey": "/tmp/team-skill-storage/TEAM/1337/read-document/versions/1.0.0/scripts",
+      "lastModifiedTime": "2026-05-28T09:10:00.00000000",
+      "readonly": true
+    },
+    {
+      "path": "scripts/read_document.py",
+      "name": "read_document.py",
+      "nodeType": "FILE",
+      "parentPath": "scripts",
+      "contentType": "application/octet-stream",
+      "size": 12607,
+      "checksum": "d717a666f97113899c31135e387de02c",
+      "objectKey": "/tmp/team-skill-storage/TEAM/1337/read-document/versions/1.0.0/scripts/read_document.py",
+      "lastModifiedTime": "2026-05-28T09:10:00.00000000",
+      "readonly": true
+    }
+  ]
+}

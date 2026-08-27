@@ -42,26 +42,44 @@ public class AgentConfig {
             ChatModel chatModel,
             ToolCallbackProvider toolCallbackProvider) {
         
-        // 配置 Skills 注册中心，扫描 ./agent_skills 目录
-        String skillsPath = "./agent_skills";
-        log.info("扫描 Skills 目录内容：{}", skillsPath);
+        // 配置 Skills 注册中心，支持通过环境变量配置技能路径
+        // 默认值：./agent_skills（本地开发）
+        // Docker 环境：通过 SKILLS_PATH 环境变量配置，如 /app/agent_skills
+        String skillsPath = System.getenv("SKILLS_PATH");
+        if (skillsPath == null || skillsPath.isEmpty()) {
+            skillsPath = "./agent_skills";
+        }
+        
+        final String finalSkillsPath = skillsPath;
+        log.info("扫描 Skills 目录内容：{}", finalSkillsPath);
         try {
-            java.nio.file.Path path = java.nio.file.Paths.get(skillsPath);
+            java.nio.file.Path path = java.nio.file.Paths.get(finalSkillsPath);
             if (Files.exists(path)) {
                 Files.list(path).forEach(p ->
                     log.info("  - {}", p.getFileName())
                 );
             } else {
-                log.warn("Skills 目录不存在：{}", path.toAbsolutePath());
+                log.error("Skills 目录不存在：{}", path.toAbsolutePath());
+                log.error("请检查 SKILLS_PATH 环境变量或确保 {} 目录存在", finalSkillsPath);
             }
         } catch (IOException e) {
-            log.warn("无法列出 Skills 目录内容", e);
+            log.error("无法列出 Skills 目录内容：{}", finalSkillsPath, e);
         }
         
         // 创建 FileSystemSkillRegistry，扫描外部文件系统中的技能
-        FileSystemSkillRegistry skillRegistry = FileSystemSkillRegistry.builder()
-                .userSkillsDirectory(skillsPath)  // 使用 String 参数
-                .build();
+        FileSystemSkillRegistry skillRegistry;
+        try {
+            skillRegistry = FileSystemSkillRegistry.builder()
+                    .userSkillsDirectory(finalSkillsPath)  // 使用 String 参数
+                    .build();
+            log.info("Skills 注册中心初始化成功：{}", finalSkillsPath);
+        } catch (Exception e) {
+            log.error("Skills 注册中心初始化失败：{}", finalSkillsPath, e);
+            // 降级处理：创建空的注册中心，避免应用启动失败
+            skillRegistry = FileSystemSkillRegistry.builder()
+                    .userSkillsDirectory("./agent_skills_empty_fallback")
+                    .build();
+        }
         
         /**
          * SkillsAgentHook：在 Agent 启动时，自动从指定的技能注册表（如文件系统或 classpath）加载所有技能描述。
@@ -74,12 +92,17 @@ public class AgentConfig {
                 .skillRegistry(skillRegistry)  // 注入 SkillRegistry
                 .build();
         
-        return ReactAgent.builder()
+        ReactAgent agent = ReactAgent.builder()
                 .name("rag-agent")
                 .model(chatModel)
                 .toolCallbackProviders(toolCallbackProvider)
                 .hooks(List.of(skillsHook))  // 添加 SkillsAgentHook，使 Agent 能调用技能
                 .enableLogging(true)  // 启用内置日志输出，将 Agent 的思考过程、工具调用结果打印到控制台
                 .build();
+        
+        // 技能加载成功告警
+        log.info("ReactAgent 初始化完成，技能功能已启用");
+        
+        return agent;
     }
 }

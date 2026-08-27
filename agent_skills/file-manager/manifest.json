@@ -1,0 +1,40 @@
+{
+  "files": [
+    {
+      "path": "SKILL.md",
+      "name": "SKILL.md",
+      "nodeType": "FILE",
+      "parentPath": "",
+      "contentType": "application/octet-stream",
+      "size": 4593,
+      "checksum": "3a6dc3a1479865e280d379cd4a202e46",
+      "objectKey": "/tmp/team-skill-storage/TEAM/1337/file-manager/versions/1.0.0/SKILL.md",
+      "lastModifiedTime": "2026-05-28T09:15:00.00000000",
+      "readonly": true
+    },
+    {
+      "path": "scripts",
+      "name": "scripts",
+      "nodeType": "DIRECTORY",
+      "parentPath": "",
+      "contentType": null,
+      "size": null,
+      "checksum": null,
+      "objectKey": "/tmp/team-skill-storage/TEAM/1337/file-manager/versions/1.0.0/scripts",
+      "lastModifiedTime": "2026-05-28T09:15:00.00000000",
+      "readonly": true
+    },
+    {
+      "path": "scripts/file_manager.py",
+      "name": "file_manager.py",
+      "nodeType": "FILE",
+      "parentPath": "scripts",
+      "contentType": "application/octet-stream",
+      "size": 19110,
+      "checksum": "dda6c445cfa9a3f4cf403bd2c105e6de",
+      "objectKey": "/tmp/team-skill-storage/TEAM/1337/file-manager/versions/1.0.0/scripts/file_manager.py",
+      "lastModifiedTime": "2026-05-28T09:15:00.00000000",
+      "readonly": true
+    }
+  ]
+}
