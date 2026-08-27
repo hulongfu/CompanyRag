@@ -26,10 +26,18 @@ WORKDIR /app
 # 创建非 root 用户运行应用（安全最佳实践）
 RUN groupadd -r appgroup && useradd -r -g appgroup appuser
 
+# 复制应用 JAR
 COPY --from=build /build/company-rag-bootstrap/target/*.jar app.jar
+
+# 复制 agent_skills 目录（技能定义）
+COPY --from=build /build/agent_skills /app/agent_skills
 
 # 更改文件所有者为 appuser
 RUN chown appuser:appgroup app.jar
+RUN chown -R appuser:appgroup /app/agent_skills
+
+# 设置环境变量：技能路径
+ENV SKILLS_PATH=/app/agent_skills
 
 # 切换到非 root 用户
 USER appuser
