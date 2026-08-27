@@ -38,6 +38,7 @@ services:
     environment:
       SPRING_PROFILES_ACTIVE: prod
       DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY}
+      JWT_SECRET: ${JWT_SECRET}
     ports:
       - "8080:8080"
     depends_on:
