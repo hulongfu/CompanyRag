@@ -110,12 +110,17 @@ JWT_SECRET=...
 
 **旧密钥（已泄露，不再安全）：**
 ```
-JWT_SECRET=k07fDiqMxu5Fgnes77ASlM2Tl7CM9yCeiIZcWV8z9w8=
+JWT_SECRET=k07fDiqMxu5Fgnes77ASlM2Tl7CM9yCeiIZcWV8z9w8=  # [已泄露]
 ```
 
 **新密钥（已更新）：**
 ```
-JWT_SECRET=HpuBmoiAE+WW0YyIayX8shBc72a1ZuDYrXITXHpyghU=
+JWT_SECRET=<REDACTED - 新密钥已从 Git 历史中删除，请从安全渠道获取>  # [已从历史删除]
+```
+
+**当前密钥（2026-08-27 后）：**
+```
+JWT_SECRET=<请从 .env 文件或安全密钥管理系统获取>  # [生产环境密钥]
 ```
 
 ---
