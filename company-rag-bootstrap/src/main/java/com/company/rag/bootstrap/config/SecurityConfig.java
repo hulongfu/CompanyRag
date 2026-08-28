@@ -81,7 +81,8 @@ public class SecurityConfig {
                 .requestMatchers(new AntPathRequestMatcher("/*.html")).permitAll()
                 .requestMatchers(new AntPathRequestMatcher("/*.ico")).permitAll()
                 
-                // 放行 Swagger UI 和 API 文档
+                // 放行 Swagger UI 和 API 文档（开发环境）
+                // 生产环境应通过认证访问，避免 API 全景暴露
                 .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**", "/swagger-resources/**", "/webjars/**").permitAll()
                 
                 // 放行测试端点
@@ -90,12 +91,14 @@ public class SecurityConfig {
                 // 放行错误页面（Swagger 内部资源 404 时会转发到 /error）
                 .requestMatchers("/error").permitAll()
                 
-                // 放行健康检查和 Prometheus 端点（其他敏感端点需要认证）
+                // 放行健康检查端点（用于 K8s/Docker 健康检查）
                 .requestMatchers(new AntPathRequestMatcher("/actuator/health")).permitAll()
-                .requestMatchers(new AntPathRequestMatcher("/actuator/info")).permitAll()
-                .requestMatchers(new AntPathRequestMatcher("/actuator/prometheus")).permitAll()
                 .requestMatchers(new AntPathRequestMatcher("/health")).permitAll()
-                .requestMatchers(new AntPathRequestMatcher("/metrics")).permitAll()
+                
+                // 信息端点和 Prometheus 指标需要认证（避免敏感信息泄露）
+                .requestMatchers(new AntPathRequestMatcher("/actuator/info")).authenticated()
+                .requestMatchers(new AntPathRequestMatcher("/actuator/prometheus")).authenticated()
+                .requestMatchers(new AntPathRequestMatcher("/metrics")).authenticated()
                 
                 // 放行 MCP 端点（MCP Server 需要被外部 AI 应用/框架调用）
                 .requestMatchers(new AntPathRequestMatcher("/mcp/**")).permitAll()

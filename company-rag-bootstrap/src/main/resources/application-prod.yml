@@ -45,6 +45,18 @@ spring:
       host: redis
       port: 6379
 
+# MyBatis 配置：生产环境关闭 SQL 日志，避免性能开销和敏感数据泄露
+mybatis-plus:
+  configuration:
+    # 关闭 SQL 日志（覆盖 application.yml 中的 StdOutImpl 配置）
+    log-impl: org.apache.ibatis.logging.nologging.NoLoggingImpl
+
 logging:
   level:
     com.company.rag: INFO
+    # 关闭 JDBC SQL 日志（避免泄露敏感数据）
+    jdbc.sqlonly: WARN
+    jdbc.sqltiming: WARN
+    jdbc.audit: WARN
+    jdbc.resultset: WARN
+    jdbc.resultsettable: WARN

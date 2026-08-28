@@ -4,6 +4,7 @@ import com.company.rag.common.tool.ToolCallRecord;
 import com.company.rag.common.tool.ToolCallRecorder;
 import lombok.extern.slf4j.Slf4j;
 import com.alibaba.cloud.ai.graph.agent.ReactAgent;
+import com.alibaba.cloud.ai.graph.exception.GraphRunnerException;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
@@ -11,6 +12,11 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 
 /**
@@ -34,6 +40,17 @@ public class RagAgentService {
 
     private final ReactAgent reactAgent;
     private final ToolCallRecorder recorder;
+    
+    /**
+     * Agent 整体超时时间（分钟）
+     * 包括所有工具调用和 LLM 响应时间
+     */
+    private static final int AGENT_TIMEOUT_MINUTES = 5;
+    
+    /**
+     * 用于超时控制的线程池
+     */
+    private final ExecutorService executorService = Executors.newCachedThreadPool();
 
     /**
      * 构造方法，注入 ReactAgent 和 ToolCallRecorder
@@ -43,8 +60,9 @@ public class RagAgentService {
         this.reactAgent = reactAgent;
         this.recorder = recorder;
         
-        log.info("RagAgentService 初始化：reactAgent={}", 
-                 reactAgent != null ? reactAgent.getClass().getSimpleName() : "null");
+        log.info("RagAgentService 初始化：reactAgent={}, timeout={} minutes", 
+                 reactAgent != null ? reactAgent.getClass().getSimpleName() : "null",
+                 AGENT_TIMEOUT_MINUTES);
     }
 
     /**
@@ -81,13 +99,13 @@ public class RagAgentService {
             }
             messages.add(new UserMessage(userMessage));
             
-            // 使用 ReactAgent 处理请求（ReAct 模式）
+            // 使用 ReactAgent 处理请求（ReAct 模式），带超时保护
             // ReactAgent 会自动：
             // 1. 分析用户意图
             // 2. 自主决定调用 Tool 或 Skill
             // 3. 执行工具/技能并获取结果
             // 4. 基于结果生成最终回答
-            AssistantMessage agentResult = reactAgent.call(messages);
+            AssistantMessage agentResult = callAgentWithTimeout(messages);
             
             String response = agentResult.getText();
             
@@ -107,6 +125,45 @@ public class RagAgentService {
             return new AgentResult("抱歉，系统繁忙，请稍后重试。", "error:" + e.getMessage());
         } finally {
             recorder.clearTraceId();
+        }
+    }
+    
+    /**
+     * 带超时保护的 Agent 调用
+     * 使用 CompletableFuture 实现超时控制，避免 LLM 挂起或 ReAct 循环拖垮请求
+     * 
+     * @param messages 消息列表
+     * @return Agent 响应结果
+     * @throws TimeoutException 超时异常
+     * @throws GraphRunnerException Agent 执行异常
+     * @throws Exception 其他异常
+     */
+    private AssistantMessage callAgentWithTimeout(List<Message> messages) throws GraphRunnerException, Exception {
+        try {
+            // 使用 CompletableFuture 包装异步调用，设置超时时间
+            // 在 supplyAsync 内部捕获 GraphRunnerException 并包装为 RuntimeException
+            CompletableFuture<AssistantMessage> future = CompletableFuture
+                    .supplyAsync(() -> {
+                        try {
+                            return reactAgent.call(messages);
+                        } catch (GraphRunnerException e) {
+                            throw new RuntimeException("Agent 执行失败：" + e.getMessage(), e);
+                        }
+                    }, executorService);
+            
+            return future.get(AGENT_TIMEOUT_MINUTES, TimeUnit.MINUTES);
+            
+        } catch (TimeoutException e) {
+            log.error("[AGENT] 调用超时：timeout={} minutes，请简化问题或减少工具调用", AGENT_TIMEOUT_MINUTES);
+            throw new TimeoutException(String.format("Agent 调用超时：%d 分钟，可能原因：1) LLM 响应过慢 2) 工具调用次数过多 3) ReAct 循环", 
+                    AGENT_TIMEOUT_MINUTES));
+        } catch (Exception e) {
+            // 解包装 RuntimeException 中的 GraphRunnerException
+            if (e.getCause() instanceof GraphRunnerException) {
+                throw (GraphRunnerException) e.getCause();
+            }
+            log.error("[AGENT] 调用失败：error={}", e.getMessage(), e);
+            throw e;
         }
     }
 }

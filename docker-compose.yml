@@ -38,6 +38,7 @@ services:
     environment:
       SPRING_PROFILES_ACTIVE: prod
       DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY}
+      SILICONFLOW_API_KEY: ${SILICONFLOW_API_KEY}
       JWT_SECRET: ${JWT_SECRET}
     ports:
       - "8080:8080"
@@ -64,7 +65,8 @@ services:
     ports:
       - "3000:3000"
     environment:
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin123}
+      # 强制要求设置环境变量，不提供默认值（安全要求）
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD environment variable is required}
     volumes:
       - grafanadata:/var/lib/grafana
 
