@@ -1,5 +1,34 @@
 ## Git Push
 
+### 2026-08-28: 安全加固修复（Grafana 密码/MyBatis 日志/Swagger/Prometheus/Agent 超时）
+
+- commit_type:            BugFix
+- task_id:                0000
+- task_name:              security-hardening-fixes
+- commit_hash:            319fcca6e33920fa648cd563cd3f6995166ad0fa
+- short_hash:             319fcca
+- branch:                 main
+- remote:                 gitee & github
+- staged_files:
+  - .env.example
+  - company-rag-agent/src/main/java/com/company/rag/agent/service/RagAgentService.java
+  - company-rag-bootstrap/src/main/java/com/company/rag/bootstrap/config/SecurityConfig.java
+  - company-rag-bootstrap/src/main/resources/application-prod.yml
+  - docker-compose.yml
+  - docs/security-fixes/2026-08-28-security-hardening-fixes.md
+- commit_message:         Task:0000_security-hardening-fixes：fix Grafana default password, MyBatis SQL logging, Swagger exposure, Prometheus metrics security, and Agent timeout protection
+- commit_command:         git commit -m "Task:0000_security-hardening-fixes：fix Grafana default password, MyBatis SQL logging, Swagger exposure, Prometheus metrics security, and Agent timeout protection"
+- commit_exit_code:       0
+- push_command:           git push gitee main && git push origin main
+- push_exit_code:         0
+- remote_head_check_command: git ls-remote gitee main && git ls-remote origin main
+- remote_head:            319fcca6e33920fa648cd563cd3f6995166ad0fa
+- result:                 推送成功，Gitee 和 GitHub 远端 HEAD 与本地提交哈希一致
+- notes:                  修复 5 个安全问题：1) Grafana 默认密码 admin123 → 移除 docker-compose.yml 默认值，强制部署时配置 2) MyBatis SQL 日志生产未关闭 → application-prod.yml 添加 log-impl: null 3) Swagger API 文档生产公开 → SecurityConfig 改为仅 dev/test 环境放行 4) Actuator Prometheus 无保护 → 需要认证访问 5) Agent 无超时保护 → RagAgentService 添加 5 分钟 CompletableFuture 超时。编译验证通过（mvn clean compile）
+
+---
+
+
 ### 2026-08-27: MCP 安全加固与技能加载修复
 
 - commit_type:            BugFix
