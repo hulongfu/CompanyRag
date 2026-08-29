@@ -100,6 +100,13 @@ public class ExecuteTool implements AgentTool {
             ProcessBuilder processBuilder = new ProcessBuilder(commandParts);
             processBuilder.redirectErrorStream(true); // 合并标准输出和错误输出
             
+            // 设置工作目录：如果命令包含技能路径，自动切换到技能目录
+            String workingDir = detectSkillWorkingDirectory(command);
+            if (workingDir != null) {
+                processBuilder.directory(new java.io.File(workingDir));
+                log.debug("设置工作目录：{}", workingDir);
+            }
+            
             Process process = processBuilder.start();
             
             // 等待命令执行完成（带超时）
@@ -253,10 +260,39 @@ public class ExecuteTool implements AgentTool {
 
     /**
      * 解析命令为数组
-     * 支持简单的空格分隔
+     * 支持简单的空格分隔，后续可以改进为支持引号等复杂情况
      */
     private String[] parseCommand(String command) {
         // 简单的空格分隔，后续可以改进为支持引号等复杂情况
         return command.split("\\s+");
+    }
+
+    /**
+     * 检测技能工作目录
+     * 根据命令中的路径自动推断技能目录，设置工作目录以支持相对路径
+     * 
+     * @param command 完整命令
+     * @return 工作目录路径，如果无法检测则返回 null
+     */
+    private String detectSkillWorkingDirectory(String command) {
+        // 匹配模式：skills/{skill-name}/scripts/
+        // 例如：skills/file-manager/scripts/file_manager.py
+        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("skills/([^/]+)/scripts/");
+        java.util.regex.Matcher matcher = pattern.matcher(command);
+        
+        if (matcher.find()) {
+            String skillName = matcher.group(1);
+            // 构建技能目录路径（相对于项目根目录）
+            String userDir = System.getProperty("user.dir");
+            String skillDir = userDir + "/agent_skills/" + skillName;
+            
+            // 验证目录是否存在
+            java.io.File dir = new java.io.File(skillDir);
+            if (dir.exists() && dir.isDirectory()) {
+                return skillDir;
+            }
+        }
+        
+        return null;
     }
 }

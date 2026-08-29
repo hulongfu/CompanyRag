@@ -16,41 +16,38 @@ read_when:
 
 ### For Deep Agent (Execute Scripts)
 
-**Script Location:** `skills/read-document/scripts/read_document.py`
+**Script Location:** `scripts/read_document.py` (in skill directory)
 
 **Usage Pattern:**
 ```bash
-execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe skills/read-document/scripts/read_document.py --file 'D:/documents/example.pdf'")
+execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/read_document.py --file 'D:/documents/example.pdf'")
 ```
 
 **Available Commands:**
 - `--file "..."` - 文档文件路径
-- `--sheet "..."` - Excel工作表名称（可选）
-- `--page N` - PDF页码（可选）
+- `--sheet "..."` - Excel 工作表名称（可选）
+- `--page N` - PDF 页码（可选）
 - `--formats` - 列出支持的文件格式
 
 **Example:**
 ```bash
 # Read PDF file
-execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe skills/read-document/scripts/read_document.py --file 'D:/docs/report.pdf'")
+execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/read_document.py --file 'D:/docs/report.pdf'")
 
 # Read specific PDF page
-execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe skills/read-document/scripts/read_document.py --file 'D:/docs/report.pdf' --page 5")
+execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/read_document.py --file 'D:/docs/report.pdf' --page 5")
 
 # Read Word document
-execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe skills/read-document/scripts/read_document.py --file 'D:/docs/contract.docx'")
+execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/read_document.py --file 'D:/docs/contract.docx'")
 
 # Read Excel file
-execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe skills/read-document/scripts/read_document.py --file 'D:/data/sales.xlsx'")
+execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/read_document.py --file 'D:/data/sales.xlsx'")
 
 # Read specific Excel sheet
-execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe skills/read-document/scripts/read_document.py --file 'D:/data/sales.xlsx' --sheet 'Sheet1'")
+execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/read_document.py --file 'D:/data/sales.xlsx' --sheet 'Sheet1'")
 
 # Read PowerPoint
-execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe skills/read-document/scripts/read_document.py --file 'D:/presentations/slides.pptx'")
-
-# List supported formats
-execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe skills/read-document/scripts/read_document.py --file 'dummy' --formats")
+execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/read_document.py --file 'D:/presentations/slides.pptx'")
 ```
 
 ## Supported Formats

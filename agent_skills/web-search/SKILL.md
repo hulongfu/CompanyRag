@@ -16,11 +16,11 @@ read_when:
 
 ### For Deep Agent (Execute Scripts)
 
-**Script Location:** `skills/web-search/scripts/search_tool.py`
+**Script Location:** `scripts/search_tool.py` (in skill directory)
 
 **Usage Pattern:**
 ```bash
-execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe skills/web-search/scripts/search_tool.py '搜索关键词' [options]")
+execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/search_tool.py '搜索关键词' [options]")
 ```
 
 ## Search Engines
@@ -40,29 +40,29 @@ execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe skills/web-sea
 
 ## Examples
 
-### 1. Basic search (使用Tavily)
+### 1. Basic search (使用 Tavily)
 ```bash
-execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe skills/web-search/scripts/search_tool.py 'Python教程'")
+execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/search_tool.py 'Python 教程'")
 ```
 
 ### 2. Specify number of results
 ```bash
-execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe skills/web-search/scripts/search_tool.py 'AI发展趋势' --num-results 10")
+execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/search_tool.py 'AI 发展趋势' --num-results 10")
 ```
 
 ### 3. Use DuckDuckGo directly
 ```bash
-execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe skills/web-search/scripts/search_tool.py '最新新闻' --engine duckduckgo")
+execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/search_tool.py '最新新闻' --engine duckduckgo")
 ```
 
 ### 4. With Tavily API key
 ```bash
-execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe skills/web-search/scripts/search_tool.py '机器学习' --api-key 'tvly-dev-xxx'")
+execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/search_tool.py '机器学习' --api-key 'tvly-dev-xxx'")
 ```
 
 ### 5. Text output format
 ```bash
-execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe skills/web-search/scripts/search_tool.py 'Python最佳实践' --output text")
+execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/search_tool.py 'Python 最佳实践' --output text")
 ```
 
 ## Options

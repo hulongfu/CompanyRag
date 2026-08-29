@@ -16,11 +16,11 @@ read_when:
 
 ### For Deep Agent (Execute Scripts)
 
-**Script Location:** `skills/file-manager/scripts/file_manager.py`
+**Script Location:** `scripts/file_manager.py` (in skill directory)
 
 **Usage Pattern:**
 ```bash
-execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe skills/file-manager/scripts/file_manager.py <operation> [options]")
+execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/file_manager.py <operation> [options]")
 ```
 
 ## Supported Operations
@@ -42,47 +42,47 @@ execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe skills/file-ma
 
 ### 1. Read a file
 ```bash
-execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe skills/file-manager/scripts/file_manager.py read --file 'D:/documents/report.txt'")
+execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/file_manager.py read --file 'D:/documents/report.txt'")
 ```
 
 ### 2. Write to a file
 ```bash
-execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe skills/file-manager/scripts/file_manager.py write --file 'D:/output/result.txt' --content 'Hello World'")
+execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/file_manager.py write --file 'D:/output/result.txt' --content 'Hello World'")
 ```
 
 ### 3. Create a folder
 ```bash
-execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe skills/file-manager/scripts/file_manager.py create-folder --folder 'project/src/components'")
+execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/file_manager.py create-folder --folder 'project/src/components'")
 ```
 
 ### 4. List files in a folder
 ```bash
-execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe skills/file-manager/scripts/file_manager.py list --folder 'D:/project' --recursive")
+execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/file_manager.py list --folder 'D:/project' --recursive")
 ```
 
 ### 5. Search for files
 ```bash
-execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe skills/file-manager/scripts/file_manager.py search --pattern '*.py' --base-folder 'D:/project'")
+execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/file_manager.py search --pattern '*.py' --base-folder 'D:/project'")
 ```
 
 ### 6. Copy a file
 ```bash
-execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe skills/file-manager/scripts/file_manager.py copy --file 'source.txt' --target 'backup.txt'")
+execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/file_manager.py copy --file 'source.txt' --target 'backup.txt'")
 ```
 
 ### 7. Move/rename a file
 ```bash
-execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe skills/file-manager/scripts/file_manager.py move --file 'old_name.txt' --target 'new_name.txt'")
+execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/file_manager.py move --file 'old_name.txt' --target 'new_name.txt'")
 ```
 
 ### 8. Delete a file
 ```bash
-execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe skills/file-manager/scripts/file_manager.py delete-file --file 'temp.txt' --force")
+execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/file_manager.py delete-file --file 'temp.txt' --force")
 ```
 
 ### 9. Get file information
 ```bash
-execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe skills/file-manager/scripts/file_manager.py info --file 'document.pdf'")
+execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/file_manager.py info --file 'document.pdf'")
 ```
 
 ## Common Options
