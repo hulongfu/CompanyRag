@@ -14,10 +14,6 @@
     <dependencies>
         <dependency>
             <groupId>com.company</groupId>
-            <artifactId>company-rag-rag</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>com.company</groupId>
             <artifactId>company-rag-web</artifactId>
         </dependency>
         <dependency>
