@@ -1,12 +1,8 @@
 package com.company.rag.agent.service;
 
-import com.company.rag.agent.config.AgentThreadPoolProperties;
 import com.company.rag.common.tool.ToolCallRecord;
 import com.company.rag.common.tool.ToolCallRecorder;
 import com.company.rag.tenant.context.TenantContext;
-import io.micrometer.core.instrument.Counter;
-import io.micrometer.core.instrument.MeterRegistry;
-import io.micrometer.core.instrument.Timer;
 import lombok.extern.slf4j.Slf4j;
 import com.alibaba.cloud.ai.graph.agent.ReactAgent;
 import com.alibaba.cloud.ai.graph.exception.GraphRunnerException;
@@ -15,13 +11,11 @@ import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.stereotype.Service;
 
-import jakarta.annotation.PreDestroy;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
@@ -29,14 +23,14 @@ import java.util.stream.Collectors;
 /**
  * RAG Agent 服务
  * 基于 Spring AI Alibaba ReactAgent 实现智能工具调用编排
- * 
+ *
  * Agent 模式工作流程：
  * 1. 用户提问 → ReactAgent 分析意图
  * 2. ReactAgent 自主决定是否需要调用工具或技能（ReAct 模式）
  * 3. 如果需要：自主选择 Tool 或 Skill → 执行 → 将结果反馈给 LLM
  * 4. LLM 基于工具结果生成最终回答
  * 5. 返回给用户
- * 
+ *
  * 可解释性日志：
  * - 每次请求生成 traceId，关联所有工具调用
  * - 请求完成后输出 [AGENT] 结构化日志（traceId、工具链路、整体耗时）
@@ -47,105 +41,29 @@ public class RagAgentService {
 
     private final ReactAgent reactAgent;
     private final ToolCallRecorder recorder;
-    private final MeterRegistry meterRegistry;
-    private final AgentThreadPoolProperties threadPoolProperties;
-    
+
     /**
      * Agent 整体超时时间（分钟）
      * 包括所有工具调用和 LLM 响应时间
      */
     private static final int AGENT_TIMEOUT_MINUTES = 5;
-    
+
     /**
      * 用于超时控制的线程池
-     * 使用可配置的 ThreadPoolExecutor 替代 Executors.newCachedThreadPool()
      */
-    private final ExecutorService executorService;
-    
-    // 指标监控
-    private final Timer agentTimer;
-    private final Counter agentTimeouts;
-    private final Counter agentFailures;
-    private final Counter agentSuccess;
+    private final ExecutorService executorService = Executors.newCachedThreadPool();
 
     /**
      * 构造方法，注入 ReactAgent 和 ToolCallRecorder
      */
     public RagAgentService(ReactAgent reactAgent,
-                           ToolCallRecorder recorder,
-                           MeterRegistry meterRegistry,
-                           AgentThreadPoolProperties threadPoolProperties) {
+                           ToolCallRecorder recorder) {
         this.reactAgent = reactAgent;
         this.recorder = recorder;
-        this.meterRegistry = meterRegistry;
-        this.threadPoolProperties = threadPoolProperties;
-        
-        // 初始化线程池
-        this.executorService = createExecutorService();
-        
-        // 初始化指标
-        this.agentTimer = Timer.builder("agent.request.total")
-                .description("Agent 请求总耗时")
-                .register(meterRegistry);
-        this.agentTimeouts = Counter.builder("agent.timeout.count")
-                .description("Agent 超时次数")
-                .register(meterRegistry);
-        this.agentFailures = Counter.builder("agent.failure.count")
-                .description("Agent 失败次数")
-                .register(meterRegistry);
-        this.agentSuccess = Counter.builder("agent.success.count")
-                .description("Agent 成功次数")
-                .register(meterRegistry);
-        
-        log.info("RagAgentService 初始化：reactAgent={}, timeout={} minutes, threadPool=[core={}, max={}, queue={}, prefix={}]", 
+
+        log.info("RagAgentService 初始化：reactAgent={}, timeout={} minutes",
                  reactAgent != null ? reactAgent.getClass().getSimpleName() : "null",
-                 AGENT_TIMEOUT_MINUTES,
-                 threadPoolProperties.getCorePoolSize(),
-                 threadPoolProperties.getMaxPoolSize(),
-                 threadPoolProperties.getQueueCapacity(),
-                 threadPoolProperties.getThreadNamePrefix());
-    }
-    
-    /**
-     * 创建可配置的线程池
-     * 替代 Executors.newCachedThreadPool()，提供更好的资源控制和可观测性
-     */
-    private ExecutorService createExecutorService() {
-        return new ThreadPoolExecutor(
-                threadPoolProperties.getCorePoolSize(),
-                threadPoolProperties.getMaxPoolSize(),
-                threadPoolProperties.getKeepAliveSeconds(),
-                TimeUnit.SECONDS,
-                new LinkedBlockingQueue<>(threadPoolProperties.getQueueCapacity()),
-                r -> {
-                    Thread thread = new Thread(r);
-                    thread.setName(threadPoolProperties.getThreadNamePrefix() + "-" + thread.getId());
-                    thread.setDaemon(true);
-                    return thread;
-                },
-                new ThreadPoolExecutor.CallerRunsPolicy() // 拒绝策略：由调用线程执行任务
-        );
-    }
-    
-    /**
-     * 优雅停机时关闭线程池
-     */
-    @PreDestroy
-    public void shutdown() {
-        if (executorService != null) {
-            log.info("关闭 Agent 线程池...");
-            executorService.shutdown();
-            try {
-                if (!executorService.awaitTermination(60, TimeUnit.SECONDS)) {
-                    log.warn("线程池未能在 60 秒内关闭，强制关闭");
-                    executorService.shutdownNow();
-                }
-            } catch (InterruptedException e) {
-                log.warn("等待线程池关闭时被打断，强制关闭");
-                executorService.shutdownNow();
-                Thread.currentThread().interrupt();
-            }
-        }
+                 AGENT_TIMEOUT_MINUTES);
     }
 
     /**
@@ -160,7 +78,7 @@ public class RagAgentService {
     /**
      * 处理 Agent 请求，带会话历史记忆
      * ReactAgent 会自动管理对话历史和工具调用
-     * 
+     *
      * @param history 历史消息列表（按时间升序）
      * @param userMessage 当前用户消息
      * @return Agent 处理结果（包含回答和工具上下文）
@@ -170,10 +88,10 @@ public class RagAgentService {
         String traceId = recorder.generateTraceId();
         recorder.setTraceId(traceId);
         long requestStart = System.currentTimeMillis();
-        
-        log.info("[AGENT] traceId={}, userMsg=\"{}\", historySize={}", 
+
+        log.info("[AGENT] traceId={}, userMsg=\"{}\", historySize={}",
                 traceId, userMessage, history != null ? history.size() : 0);
-        
+
         try {
             // 构建消息列表
             List<Message> messages = new ArrayList<>();
@@ -181,7 +99,7 @@ public class RagAgentService {
                 messages.addAll(history);
             }
             messages.add(new UserMessage(userMessage));
-            
+
             // 使用 ReactAgent 处理请求（ReAct 模式），带超时保护
             // ReactAgent 会自动：
             // 1. 分析用户意图
@@ -189,9 +107,9 @@ public class RagAgentService {
             // 3. 执行工具/技能并获取结果
             // 4. 基于结果生成最终回答
             AssistantMessage agentResult = callAgentWithTimeout(messages);
-            
+
             String response = agentResult.getText();
-            
+
             // 聚合工具调用记录，输出结构化日志
             long totalMs = System.currentTimeMillis() - requestStart;
             List<ToolCallRecord> records = recorder.getAndClearRecords(traceId);
@@ -199,34 +117,22 @@ public class RagAgentService {
                     .map(r -> String.format("%s(%dms,%s)", r.getToolName(), r.getDurationMs(), r.getStatus()))
                     .collect(Collectors.joining(", "));
             log.info("[AGENT] traceId={}, tools=[{}], total={}ms", traceId, toolsSummary, totalMs);
-            
-            // 记录成功指标
-            agentSuccess.increment();
-            agentTimer.record(totalMs, TimeUnit.MILLISECONDS);
-            
+
             return new AgentResult(response != null ? response : "", traceId);
-            
-        } catch (TimeoutException e) {
-            long totalMs = System.currentTimeMillis() - requestStart;
-            agentTimeouts.increment();
-            agentTimer.record(totalMs, TimeUnit.MILLISECONDS);
-            log.error("[AGENT] traceId={}, total={}ms, error={}", traceId, totalMs, e.getMessage(), e);
-            return new AgentResult("抱歉，系统响应超时，请稍后重试。", "error:timeout:" + e.getMessage());
+
         } catch (Exception e) {
             long totalMs = System.currentTimeMillis() - requestStart;
-            agentFailures.increment();
-            agentTimer.record(totalMs, TimeUnit.MILLISECONDS);
             log.error("[AGENT] traceId={}, total={}ms, error={}", traceId, totalMs, e.getMessage(), e);
             return new AgentResult("抱歉，系统繁忙，请稍后重试。", "error:" + e.getMessage());
         } finally {
             recorder.clearTraceId();
         }
     }
-    
+
     /**
      * 带超时保护的 Agent 调用
      * 使用 CompletableFuture 实现超时控制，避免 LLM 挂起或 ReAct 循环拖垮请求
-     * 
+     *
      * @param messages 消息列表
      * @return Agent 响应结果
      * @throws TimeoutException 超时异常
@@ -241,7 +147,7 @@ public class RagAgentService {
             Long tenantId = TenantContext.getTenantId();
             Long userId = TenantContext.getUserId();
             String tenantCode = TenantContext.getTenantCode();
-            
+
             // 使用 CompletableFuture 包装异步调用，设置超时时间
             // 在 supplyAsync 内部捕获 GraphRunnerException 并包装为 RuntimeException
             CompletableFuture<AssistantMessage> future = CompletableFuture
@@ -260,7 +166,7 @@ public class RagAgentService {
                             if (tenantCode != null) {
                                 TenantContext.setTenantCode(tenantCode);
                             }
-                            
+
                             return reactAgent.call(messages);
                         } catch (GraphRunnerException e) {
                             throw new RuntimeException("Agent 执行失败：" + e.getMessage(), e);
@@ -269,12 +175,13 @@ public class RagAgentService {
                             TenantContext.clear();
                         }
                     }, executorService);
-            
+
             return future.get(AGENT_TIMEOUT_MINUTES, TimeUnit.MINUTES);
-            
+
         } catch (TimeoutException e) {
             log.error("[AGENT] 调用超时：timeout={} minutes，请简化问题或减少工具调用", AGENT_TIMEOUT_MINUTES);
-            throw e;
+            throw new TimeoutException(String.format("Agent 调用超时：%d 分钟，可能原因：1) LLM 响应过慢 2) 工具调用次数过多 3) ReAct 循环",
+                    AGENT_TIMEOUT_MINUTES));
         } catch (Exception e) {
             // 解包装 RuntimeException 中的 GraphRunnerException
             if (e.getCause() instanceof GraphRunnerException) {

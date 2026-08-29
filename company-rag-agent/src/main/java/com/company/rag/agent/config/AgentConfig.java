@@ -21,14 +21,21 @@ import java.util.List;
  * 注意：ToolCallbackProvider 由 company-rag-rag 模块的 AgentToolConfig 统一提供，
  * 使用 AggregatedToolCallbackProvider 聚合所有工具（包括 MCP 工具）
  * 
- * 修复 Skill 调用问题：使用 SkillsAgentHook 加载技能，使 Agent 能自主调用技能
+ * 设计目标（2026-08-29）：
+ * 1. 同时支持 Skills 和 Tools
+ * 2. 优先级：用户问题 → 先匹配 Skills → 执行 Skill（Skill 内部可调用 Tools）
+ * 3. 无匹配 Skill → 直接调用 Tools（如 searchKnowledgeBase）
+ * 
+ * 待调查问题：
+ * - SkillsAgentHook 是否会覆盖 ToolCallbackProvider 提供的工具定义？
+ * - 如何确保 LLM 同时看到 Skills 和 Tools？
  */
 @Slf4j
 @Configuration
 public class AgentConfig {
 
     /**
-     * 配置 ReactAgent Bean，集成 Skills 技能调用
+     * 配置 ReactAgent Bean，同时支持 Skills 和 Tools
      * ReactAgent 提供 ReAct（Reasoning + Acting）模式的 Agent 实现
      * 可自主分析用户问题，决定调用 Skill 或 Tool
      * 
@@ -42,44 +49,26 @@ public class AgentConfig {
             ChatModel chatModel,
             ToolCallbackProvider toolCallbackProvider) {
         
-        // 配置 Skills 注册中心，支持通过环境变量配置技能路径
-        // 默认值：./agent_skills（本地开发）
-        // Docker 环境：通过 SKILLS_PATH 环境变量配置，如 /app/agent_skills
-        String skillsPath = System.getenv("SKILLS_PATH");
-        if (skillsPath == null || skillsPath.isEmpty()) {
-            skillsPath = "./agent_skills";
-        }
-        
-        final String finalSkillsPath = skillsPath;
-        log.info("扫描 Skills 目录内容：{}", finalSkillsPath);
+        // 配置 Skills 注册中心，扫描 ./agent_skills 目录
+        String skillsPath = "./agent_skills";
+        log.info("扫描 Skills 目录内容：{}", skillsPath);
         try {
-            java.nio.file.Path path = java.nio.file.Paths.get(finalSkillsPath);
+            java.nio.file.Path path = java.nio.file.Paths.get(skillsPath);
             if (Files.exists(path)) {
                 Files.list(path).forEach(p ->
                     log.info("  - {}", p.getFileName())
                 );
             } else {
-                log.error("Skills 目录不存在：{}", path.toAbsolutePath());
-                log.error("请检查 SKILLS_PATH 环境变量或确保 {} 目录存在", finalSkillsPath);
+                log.warn("Skills 目录不存在：{}", path.toAbsolutePath());
             }
         } catch (IOException e) {
-            log.error("无法列出 Skills 目录内容：{}", finalSkillsPath, e);
+            log.warn("无法列出 Skills 目录内容", e);
         }
         
         // 创建 FileSystemSkillRegistry，扫描外部文件系统中的技能
-        FileSystemSkillRegistry skillRegistry;
-        try {
-            skillRegistry = FileSystemSkillRegistry.builder()
-                    .userSkillsDirectory(finalSkillsPath)  // 使用 String 参数
-                    .build();
-            log.info("Skills 注册中心初始化成功：{}", finalSkillsPath);
-        } catch (Exception e) {
-            log.error("Skills 注册中心初始化失败：{}", finalSkillsPath, e);
-            // 降级处理：创建空的注册中心，避免应用启动失败
-            skillRegistry = FileSystemSkillRegistry.builder()
-                    .userSkillsDirectory("./agent_skills_empty_fallback")
-                    .build();
-        }
+        FileSystemSkillRegistry skillRegistry = FileSystemSkillRegistry.builder()
+                .userSkillsDirectory(skillsPath)  // 使用 String 参数
+                .build();
         
         /**
          * SkillsAgentHook：在 Agent 启动时，自动从指定的技能注册表（如文件系统或 classpath）加载所有技能描述。
@@ -92,8 +81,25 @@ public class AgentConfig {
                 .skillRegistry(skillRegistry)  // 注入 SkillRegistry
                 .build();
         
+        log.info("SkillsAgentHook 已创建，包含技能注册表：{}", skillRegistry.getClass().getSimpleName());
+        log.info("ToolCallbackProvider 已注入：{}", toolCallbackProvider.getClass().getSimpleName());
+        
         ReactAgent agent = ReactAgent.builder()
                 .name("rag-agent")
+                .systemPrompt("""
+                    你是一个智能助手，通过工具(Tool)和技能(Skill)为用户完成任务。
+            
+                    ## 决策优先级（从高到低）
+                    1. 如果用户请求匹配某个 Skill 的描述，优先使用 Skill（因为 Skill 封装了完整的业务流程）
+                    2. 如果无匹配 Skill，则使用 Tool 直接执行
+                    3. 复杂任务可组合多个 Tool 完成，Skill 本身已包含组合逻辑时无需额外拆解
+            
+                    ## 约束
+                    - 不要主动列出所有 Skill/Tool 清单，直接根据用户请求选择最合适的执行
+                    - 涉及知识查询时，优先使用知识库检索工具
+                    - 调用 Skill 时，无需重复说明 Skill 内部已包含的步骤，直接执行即可
+                    - 如果无法确定用什么，向用户提问澄清，不要猜测
+                    """)
                 .model(chatModel)
                 .toolCallbackProviders(toolCallbackProvider)
                 .hooks(List.of(skillsHook))  // 添加 SkillsAgentHook，使 Agent 能调用技能
@@ -101,7 +107,7 @@ public class AgentConfig {
                 .build();
         
         // 技能加载成功告警
-        log.info("ReactAgent 初始化完成，技能功能已启用");
+        log.info("ReactAgent 初始化完成，Skills 和 Tools 已同时启用");
         
         return agent;
     }
