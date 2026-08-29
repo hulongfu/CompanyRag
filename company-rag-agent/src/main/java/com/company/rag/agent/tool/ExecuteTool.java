@@ -79,6 +79,9 @@ public class ExecuteTool implements AgentTool {
             - 危险命令（rm -rf、del、format 等）被禁止
             - 交互式命令（需要用户输入的）不支持
             - 超时限制：60 秒（网络请求可能需要更长时间）
+            
+            注意：在 Git Bash 环境中，自动将 Windows cmd 命令转换为 Bash 语法
+            （例如：set VAR=value → export VAR=value）
             """
     )
     public String executeCommand(
@@ -93,11 +96,35 @@ public class ExecuteTool implements AgentTool {
         }
         
         try {
-            // 解析命令
-            String[] commandParts = parseCommand(command);
+            // 命令预处理：将 Windows cmd 语法转换为 Unix Shell 语法
+            String processedCommand = preprocessCommand(command);
+            log.debug("预处理后的命令：{}", processedCommand);
             
-            // 执行命令
-            ProcessBuilder processBuilder = new ProcessBuilder(commandParts);
+            // 检测是否需要通过 Shell 执行（包含 &&、||、export 等 Shell 特性）
+            boolean useShell = requiresShellExecution(processedCommand);
+            
+            ProcessBuilder processBuilder;
+            if (useShell) {
+                // 根据操作系统选择正确的 Shell
+                String osName = System.getProperty("os.name").toLowerCase();
+                boolean isWindows = osName.contains("win");
+                
+                if (isWindows) {
+                    // Windows: 使用 cmd.exe /c 执行
+                    log.info("检测到 Windows 环境，使用 cmd.exe /c 执行");
+                    processBuilder = new ProcessBuilder("cmd.exe", "/c", processedCommand);
+                } else {
+                    // Linux/macOS: 使用 /bin/sh -c 执行
+                    log.info("检测到 Unix 环境，使用 /bin/sh -c 执行");
+                    processBuilder = new ProcessBuilder("/bin/sh", "-c", processedCommand);
+                }
+            } else {
+                // 直接执行可执行文件（简单命令）
+                String[] commandParts = parseCommand(processedCommand);
+                log.info("直接执行命令：{}", String.join(" ", commandParts));
+                processBuilder = new ProcessBuilder(commandParts);
+            }
+            
             processBuilder.redirectErrorStream(true); // 合并标准输出和错误输出
             
             // 设置工作目录：如果命令包含技能路径，自动切换到技能目录
@@ -140,6 +167,94 @@ public class ExecuteTool implements AgentTool {
             log.error("命令执行被中断：{}", command, e);
             return "命令执行被中断";
         }
+    }
+
+    /**
+     * 预处理命令：根据操作系统转换命令语法
+     * 
+     * Windows (cmd.exe) 转换规则：
+     * 1. set VAR=value → set VAR=value（保持不变）
+     * 2. export VAR=value → set VAR=value
+     * 3. chcp 65001 && → （移除，不需要）
+     * 
+     * Unix (bash/sh) 转换规则：
+     * 1. set VAR=value → export VAR=value
+     * 2. chcp 65001 && → （移除，默认 UTF-8）
+     * 
+     * @param command 原始命令
+     * @return 转换后的命令
+     */
+    private String preprocessCommand(String command) {
+        if (command == null || command.isEmpty()) {
+            return command;
+        }
+        
+        String processed = command;
+        String osName = System.getProperty("os.name").toLowerCase();
+        boolean isWindows = osName.contains("win");
+        
+        if (isWindows) {
+            // Windows 环境：转换为 cmd.exe 语法
+            
+            // 1. 移除 chcp 65001 &&
+            processed = processed.replaceAll("chcp\\s+65001\\s*&&\\s*", "");
+            
+            // 2. export VAR=value → set VAR=value
+            processed = processed.replaceAll("\\bexport\\s+([a-zA-Z_][a-zA-Z0-9_]*)=", "set $1=");
+            
+            log.debug("Windows 命令预处理：{} → {}", command, processed);
+        } else {
+            // Unix 环境：转换为 bash/sh 语法
+            
+            // 1. 移除 chcp 65001 &&
+            processed = processed.replaceAll("chcp\\s+65001\\s*&&\\s*", "");
+            
+            // 2. set VAR=value → export VAR=value
+            processed = processed.replaceAll("\\bset\\s+([a-zA-Z_][a-zA-Z0-9_]*)=", "export $1=");
+            
+            log.debug("Unix 命令预处理：{} → {}", command, processed);
+        }
+        
+        return processed;
+    }
+
+    /**
+     * 判断命令是否需要通过 Shell 执行
+     * 
+     * ProcessBuilder 直接执行可执行文件，不支持：
+     * - Shell 内建命令（export, cd, source, alias 等）
+     * - 管道（|）
+     * - 重定向（>, <, >>）
+     * - 逻辑运算符（&&, ||）
+     * - 通配符展开（*, ?）
+     * 
+     * @param command 命令
+     * @return true 如果需要 Shell 执行
+     */
+    private boolean requiresShellExecution(String command) {
+        if (command == null || command.isEmpty()) {
+            return false;
+        }
+        
+        // 检查是否包含 Shell 特性
+        String[] shellFeatures = {
+            "&&", "||", "|",  // 逻辑运算符和管道
+            ">", "<", ">>", "2>", "&>",  // 重定向
+            ";",  // 命令分隔符
+            "$(", "`",  // 命令替换
+            "${",  // 变量展开
+            "*", "?", "[",  // 通配符（简单检查）
+            "export ", "cd ", "source ", "alias ",  // Shell 内建命令
+            "echo ", "printf "  // 可能需要 Shell 展开
+        };
+        
+        for (String feature : shellFeatures) {
+            if (command.contains(feature)) {
+                return true;
+            }
+        }
+        
+        return false;
     }
 
     /**

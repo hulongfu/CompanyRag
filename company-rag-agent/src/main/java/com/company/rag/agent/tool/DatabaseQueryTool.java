@@ -473,8 +473,19 @@ public class DatabaseQueryTool implements AgentTool {
 
     /**
      * 为 SQL 中的所有表名添加当前租户的 schema 前缀
+     * 
+     * 注意：PostgreSQL 系统 schema（information_schema、pg_catalog 等）不会被添加租户前缀
      */
     private String addSchemaPrefix(String sql, String schema) {
+        // PostgreSQL 系统 schema 白名单（不应该添加租户前缀）
+        Set<String> systemSchemas = Set.of(
+            "information_schema",
+            "pg_catalog",
+            "pg_toast",
+            "pg_temp_1",
+            "pg_toast_temp_1"
+        );
+        
         Matcher matcher = TABLE_PATTERN.matcher(sql);
         StringBuilder result = new StringBuilder();
         int lastEnd = 0;
@@ -483,22 +494,34 @@ public class DatabaseQueryTool implements AgentTool {
             String keyword = matcher.group(1);
             String tableName = matcher.group(2);
             
-            // 如果表名已经有 public. 前缀，替换为当前租户 schema
-            if (tableName.startsWith("public.")) {
-                String actualTable = tableName.substring(7);
-                result.append(sql, lastEnd, matcher.start(2));
-                result.append(schema).append(".").append(actualTable);
+            // 如果表名已经有 schema 前缀，检查是否是系统 schema
+            if (tableName.contains(".")) {
+                String[] parts = tableName.split("\\.", 2);
+                String schemaPart = parts[0];
+                
+                // 如果是系统 schema，保持不变
+                if (systemSchemas.contains(schemaPart)) {
+                    continue;
+                }
+                
+                // 如果是 public.前缀，替换为当前租户 schema
+                if ("public".equals(schemaPart)) {
+                    String actualTable = parts[1];
+                    result.append(sql, lastEnd, matcher.start(2));
+                    result.append(schema).append(".").append(actualTable);
+                    lastEnd = matcher.end(2);
+                }
+                // 其他情况保持原样（理论上不会发生，因为 containsExplicitSchema 已经检查过）
+                else {
+                    continue;
+                }
             }
             // 如果表名没有 schema 前缀，添加当前租户 schema
-            else if (!tableName.contains(".")) {
+            else {
                 result.append(sql, lastEnd, matcher.start(2));
                 result.append(schema).append(".").append(tableName);
+                lastEnd = matcher.end(2);
             }
-            // 其他情况保持原样（理论上不会发生，因为 containsExplicitSchema 已经检查过）
-            else {
-                continue;
-            }
-            lastEnd = matcher.end(2);
         }
         
         if (lastEnd > 0) {
