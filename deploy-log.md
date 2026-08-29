@@ -1,30 +1,33 @@
 ## Git Push
 
-### 2026-08-28: 安全加固修复（Grafana 密码/MyBatis 日志/Swagger/Prometheus/Agent 超时）
+### 2026-08-29: Agent 技能路径优化与代码清理
 
-- commit_type:            BugFix
+- commit_type:            Fix
 - task_id:                0000
-- task_name:              security-hardening-fixes
-- commit_hash:            319fcca6e33920fa648cd563cd3f6995166ad0fa
-- short_hash:             319fcca
+- task_name:              Agent 技能路径优化与代码清理
+- commit_hash:            a16145c88425e5ce1d8fc4512b454f837b014c86
+- short_hash:             a16145c
 - branch:                 main
-- remote:                 gitee & github
+- remote:                 gitee (GitHub 网络失败)
 - staged_files:
-  - .env.example
+  - company-rag-agent/src/main/java/com/company/rag/agent/config/AgentConfig.java
   - company-rag-agent/src/main/java/com/company/rag/agent/service/RagAgentService.java
-  - company-rag-bootstrap/src/main/java/com/company/rag/bootstrap/config/SecurityConfig.java
-  - company-rag-bootstrap/src/main/resources/application-prod.yml
-  - docker-compose.yml
-  - docs/security-fixes/2026-08-28-security-hardening-fixes.md
-- commit_message:         Task:0000_security-hardening-fixes：fix Grafana default password, MyBatis SQL logging, Swagger exposure, Prometheus metrics security, and Agent timeout protection
-- commit_command:         git commit -m "Task:0000_security-hardening-fixes：fix Grafana default password, MyBatis SQL logging, Swagger exposure, Prometheus metrics security, and Agent timeout protection"
+  - company-rag-agent/src/main/java/com/company/rag/agent/tool/ExecuteTool.java
+  - company-rag-agent/src/main/java/com/company/rag/agent/tool/CodeSearchTool.java
+  - agent_skills/file-manager/SKILL.md
+  - agent_skills/web-search/SKILL.md
+  - agent_skills/read-document/SKILL.md
+  - company-rag-bootstrap/src/main/resources/application-dev.yml
+  - company-rag-bootstrap/src/main/resources/application.yml
+- commit_message:         Fix:0000_Agent 技能路径优化与代码清理：优化技能脚本相对路径支持 + 清理冗余代码
+- commit_command:         git commit -m "Fix:0000_Agent 技能路径优化与代码清理：优化技能脚本相对路径支持 + 清理冗余代码"
 - commit_exit_code:       0
-- push_command:           git push gitee main && git push origin main
-- push_exit_code:         0
-- remote_head_check_command: git ls-remote gitee main && git ls-remote origin main
-- remote_head:            319fcca6e33920fa648cd563cd3f6995166ad0fa
-- result:                 推送成功，Gitee 和 GitHub 远端 HEAD 与本地提交哈希一致
-- notes:                  修复 5 个安全问题：1) Grafana 默认密码 admin123 → 移除 docker-compose.yml 默认值，强制部署时配置 2) MyBatis SQL 日志生产未关闭 → application-prod.yml 添加 log-impl: null 3) Swagger API 文档生产公开 → SecurityConfig 改为仅 dev/test 环境放行 4) Actuator Prometheus 无保护 → 需要认证访问 5) Agent 无超时保护 → RagAgentService 添加 5 分钟 CompletableFuture 超时。编译验证通过（mvn clean compile）
+- push_command:           git push gitee main (成功) && git push origin main (失败：Connection was reset)
+- push_exit_code:         0 (gitee) / 128 (github)
+- remote_head_check_command: git ls-remote gitee main
+- remote_head:            a16145c88425e5ce1d8fc4512b454f837b014c86
+- result:                 Gitee 推送成功，GitHub 因网络原因失败
+- notes:                  核心优化：1) ExecuteTool 新增 detectSkillWorkingDirectory() 方法，自动检测技能目录并设置工作目录 2) 所有技能 SKILL.md 改用相对路径 scripts/xxx.py 3) CodeSearchTool 修复 Files.lines() UTF-8 编码问题 4) ExecuteTool 支持安全系统命令 (mkdir/copy/move 等)。编译验证通过（mvn clean compile）
 
 ---
 
