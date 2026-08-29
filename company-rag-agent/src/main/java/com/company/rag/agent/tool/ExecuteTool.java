@@ -144,7 +144,7 @@ public class ExecuteTool implements AgentTool {
         
         // 禁止的危险命令列表
         String[] dangerousCommands = {
-            "rm -rf", "rm -r", "rm ",
+            "rm -rf", "rm -r", "rm ",  // 允许 rm 但禁止递归删除
             "del ", "deltree ",
             "format ", "mkfs",
             "dd ",
@@ -170,7 +170,59 @@ public class ExecuteTool implements AgentTool {
             return true;
         }
         
-        log.warn("不允许的命令前缀，只允许执行 python/python3 命令或 Python 可执行文件路径：{}", command);
+        // 允许 file-manager 技能需要的安全系统命令
+        if (isSafeSystemCommand(lowerCommand)) {
+            return true;
+        }
+        
+        log.warn("不允许的命令前缀，只允许执行 python/python3 命令、Python 可执行文件路径或安全的系统命令：{}", command);
+        return false;
+    }
+
+    /**
+     * 判断是否为安全的系统命令
+     * 支持 file-manager 技能需要的命令
+     */
+    private boolean isSafeSystemCommand(String command) {
+        // 允许 mkdir 命令（创建文件夹）
+        if (command.startsWith("mkdir ")) {
+            // 但要禁止危险参数
+            if (command.contains("sudo") || command.contains("rm -rf") || command.contains("del ")) {
+                return false;
+            }
+            return true;
+        }
+        
+        // 允许 copy 命令（复制文件）
+        if (command.startsWith("copy ") || command.startsWith("xcopy ")) {
+            return true;
+        }
+        
+        // 允许 move 命令（移动/重命名文件）
+        if (command.startsWith("move ")) {
+            return true;
+        }
+        
+        // 允许 dir 命令（列出目录）
+        if (command.startsWith("dir ")) {
+            return true;
+        }
+        
+        // 允许 cd 命令（切换目录）
+        if (command.startsWith("cd ")) {
+            return true;
+        }
+        
+        // 允许 echo 命令（输出文本）
+        if (command.startsWith("echo ")) {
+            return true;
+        }
+        
+        // 允许 type 命令（查看文件内容，Windows）
+        if (command.startsWith("type ")) {
+            return true;
+        }
+        
         return false;
     }
 

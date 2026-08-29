@@ -114,7 +114,7 @@ public class CodeSearchTool implements AgentTool {
                     // 按文件扩展名过滤
                     .filter(p -> fileExtension == null || p.toString().endsWith(fileExtension))
                     .forEach(p -> {
-                        try (Stream<String> lines = Files.lines(p)) {
+                        try (Stream<String> lines = Files.lines(p, java.nio.charset.StandardCharsets.UTF_8)) {
                             lines.filter(line -> line.toLowerCase().contains(keyword.toLowerCase()))
                                     .findFirst()
                                     .ifPresent(line -> {
