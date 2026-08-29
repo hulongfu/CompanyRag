@@ -1,5 +1,30 @@
 ## Git Push
 
+### 2026-08-29: Agent 工具优化（ExecuteTool & DatabaseQueryTool）
+
+- commit_type:            Task
+- task_id:                0000
+- task_name:              Agent 工具优化
+- commit_hash:            865941b81f263a0861cd767a9d1842ba43553676
+- short_hash:             865941b
+- branch:                 main
+- remote:                 gitee & github (双远端推送成功)
+- staged_files:
+  - company-rag-agent/src/main/java/com/company/rag/agent/tool/ExecuteTool.java
+  - company-rag-agent/src/main/java/com/company/rag/agent/tool/DatabaseQueryTool.java
+- commit_message:         Task:0000_Agent 工具优化：enhance ExecuteTool and DatabaseQueryTool capabilities
+- commit_command:         git commit -m "Task:0000_Agent 工具优化：enhance ExecuteTool and DatabaseQueryTool capabilities"
+- commit_exit_code:       0
+- push_command:           git push gitee main && git push origin main
+- push_exit_code:         0 (双远端均成功)
+- remote_head_check_command: git ls-remote gitee main && git ls-remote origin main
+- remote_head:            865941b81f263a0861cd767a9d1842ba43553676 (双远端一致)
+- result:                 Gitee 和 GitHub 推送均成功，远端 HEAD 验证一致
+- notes:                  ExecuteTool 增强：1) 新增命令预处理，将 Windows cmd 语法转换为 Unix Shell 语法 2) 自动检测 Shell 执行需求（&&、||、export 等）3) 根据操作系统自动选择 cmd.exe 或 /bin/sh。DatabaseQueryTool 增强：优化租户隔离和 SQL 前缀处理。两个工具共新增 153 行代码，优化 15 行。
+
+---
+
+
 ### 2026-08-29: Parallel MCP 接入
 
 - commit_type:            Task
