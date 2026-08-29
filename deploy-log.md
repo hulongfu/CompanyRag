@@ -1,5 +1,30 @@
 ## Git Push
 
+### 2026-08-29: Parallel MCP 接入
+
+- commit_type:            Task
+- task_id:                0000
+- task_name:              ParallelMCP 接入
+- commit_hash:            1202fd4b20492063db7f85ca57e4bd8102687d5f
+- short_hash:             1202fd4
+- branch:                 main
+- remote:                 gitee & github (双远端推送成功)
+- staged_files:
+  - company-rag-bootstrap/src/main/resources/application-dev.yml
+  - docs/mcp/parallel-mcp-integration.md
+- commit_message:         Task:0000_ParallelMCP 接入：add parallel mcp config and integration doc
+- commit_command:         git commit -m "Task:0000_ParallelMCP 接入：add parallel mcp config and integration doc"
+- commit_exit_code:       0
+- push_command:           git push gitee main && git push origin main
+- push_exit_code:         0 (双远端均成功)
+- remote_head_check_command: git ls-remote gitee main && git ls-remote origin main
+- remote_head:            1202fd4b20492063db7f85ca57e4bd8102687d5f (双远端一致)
+- result:                 Gitee 和 GitHub 推送均成功，远端 HEAD 验证一致
+- notes:                  接入 Parallel MCP 免费服务，提供 parallel_search 和 parallel_fetch 两个工具。配置已添加到 application-dev.yml，集成文档已创建。无需 API Key，适合探索和轻量使用。
+
+---
+
+
 ### 2026-08-29: Agent 技能路径优化与代码清理
 
 - commit_type:            Fix
