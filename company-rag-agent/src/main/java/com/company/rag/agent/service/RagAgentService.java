@@ -2,6 +2,7 @@ package com.company.rag.agent.service;
 
 import com.company.rag.common.tool.ToolCallRecord;
 import com.company.rag.common.tool.ToolCallRecorder;
+import com.company.rag.tenant.context.TenantContext;
 import lombok.extern.slf4j.Slf4j;
 import com.alibaba.cloud.ai.graph.agent.ReactAgent;
 import com.alibaba.cloud.ai.graph.exception.GraphRunnerException;
@@ -140,14 +141,38 @@ public class RagAgentService {
      */
     private AssistantMessage callAgentWithTimeout(List<Message> messages) throws GraphRunnerException, Exception {
         try {
+            // 在提交异步任务前，捕获当前线程的租户上下文
+            // 因为 ThreadLocal 不会自动传递给子线程，需要手动传递
+            String tenantSchema = TenantContext.getSchema();
+            Long tenantId = TenantContext.getTenantId();
+            Long userId = TenantContext.getUserId();
+            String tenantCode = TenantContext.getTenantCode();
+            
             // 使用 CompletableFuture 包装异步调用，设置超时时间
             // 在 supplyAsync 内部捕获 GraphRunnerException 并包装为 RuntimeException
             CompletableFuture<AssistantMessage> future = CompletableFuture
                     .supplyAsync(() -> {
                         try {
+                            // 在子线程中恢复租户上下文
+                            if (tenantSchema != null) {
+                                TenantContext.setSchema(tenantSchema);
+                            }
+                            if (tenantId != null) {
+                                TenantContext.setTenantId(tenantId);
+                            }
+                            if (userId != null) {
+                                TenantContext.setUserId(userId);
+                            }
+                            if (tenantCode != null) {
+                                TenantContext.setTenantCode(tenantCode);
+                            }
+                            
                             return reactAgent.call(messages);
                         } catch (GraphRunnerException e) {
                             throw new RuntimeException("Agent 执行失败：" + e.getMessage(), e);
+                        } finally {
+                            // 清理线程上下文，避免线程池复用时的数据污染
+                            TenantContext.clear();
                         }
                     }, executorService);
             
