@@ -176,3 +176,17 @@ logging:
   level:
     com.company.rag: DEBUG
     org.springframework.ai: INFO
+
+# Agent 线程池配置
+agent:
+  thread-pool:
+    # 核心线程数（默认 4）
+    core-pool-size: 4
+    # 最大线程数（默认 20）
+    max-pool-size: 20
+    # 线程空闲超时时间（秒，默认 60）
+    keep-alive-seconds: 60
+    # 队列容量（默认 100）
+    queue-capacity: 100
+    # 线程名称前缀（默认 agent-timeout）
+    thread-name-prefix: agent-timeout
