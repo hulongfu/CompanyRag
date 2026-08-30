@@ -388,13 +388,13 @@ public class ExecuteTool implements AgentTool {
      * 检测模式：
      * 1. python 开头（系统 PATH 中的 Python）
      * 2. python3 开头（系统 PATH 中的 Python3）
-     * 3. Windows 绝对路径：D:/**/**/python.exe 或 D:/**/**/pythonw.exe
-     * 4. Unix 绝对路径：/usr/**/python 或 /**/venv/bin/python
+     * 3. Windows 绝对路径：D:/path/to/python.exe 或 D:/path/to/pythonw.exe
+     * 4. Unix 绝对路径：/usr/bin/python 或 /home/user/venv/bin/python
      * 
      * @param command 原始命令
      * @return 替换后的命令
      */
-    private String normalizePythonPath(String command) {
+    String normalizePythonPath(String command) {
         if (command == null || command.isEmpty()) {
             return command;
         }
