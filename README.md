@@ -174,6 +174,9 @@ POSTGRES_PASSWORD=your_strong_database_password
 
 # 【必须配置】Grafana 管理员密码（生产环境必须修改）
 GRAFANA_ADMIN_PASSWORD=your_grafana_admin_password
+
+# 【可选】代码搜索根目录（默认使用项目根目录）
+# CODE_SEARCH_SRC_BASE=/path/to/your/source/code
 ```
 
 **重要提示**：
@@ -652,7 +655,11 @@ Token 通过登录接口 `/api/auth/login` 获取，有效期 2 小时。过期�
 
 - **位置**：`company-rag-agent/.../tool/CodeSearchTool.java`
 - **@Tool 名称**：`code_search`
-- **搜索范围**：`${app.code-search.src-base}`（默认 `./src`）
+- **搜索范围**：`${app.code-search.src-base}`（默认项目根目录 `user.dir`）
+- **配置说明**：
+  - 默认值：项目根目录（应用启动时的工作目录）
+  - 自定义路径：通过环境变量 `CODE_SEARCH_SRC_BASE` 或配置文件 `app.code-search.src-base` 指定
+  - 适用场景：Docker 部署、特殊项目结构、多代码仓库联合搜索
 
 #### 使用场景
 

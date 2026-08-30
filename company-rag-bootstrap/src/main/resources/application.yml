@@ -178,6 +178,16 @@ agent:
   # 生产环境：/usr/bin/python3 或 /opt/venv/bin/python
   python-exec-path: ${PYTHON_EXEC_PATH:D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe}
 
+# 代码搜索工具配置
+app:
+  code-search:
+    # 代码搜索根目录（可选，默认使用项目根目录 user.dir）
+    # 适用场景：
+    # - Docker 部署时指定容器内源码路径
+    # - 特殊项目结构需要自定义搜索范围
+    # - 多代码仓库联合搜索
+    src-base: ${CODE_SEARCH_SRC_BASE:}
+
 # 日志
 logging:
   level:
