@@ -1,0 +1,6 @@
+tree db7b89c865029bc745948a668821b697e21479b0
+parent f58866043b75f163b541bb068542d24d6548c2ba
+author longfuh <2772739989@qq.com> 1787662999 +0800
+committer longfuh <2772739989@qq.com> 1787662999 +0800
+
+BugFix:0000_MCP 工具无法调用修复：use @DependsOn to fix Bean initialization order
