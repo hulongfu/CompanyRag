@@ -1,28 +1,40 @@
 spring:
   datasource:
-    # 移除 currentSchema=public，让 TenantSchemaInterceptor 动态设置 search_path
-    url: jdbc:postgresql://postgres:5433/company_rag
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:company_rag}
   ai:
+    # Spring AI Alibaba Agent Framework 配置
+    alibaba:
+      agent:
+        # 启用 ReactAgent
+        enabled: true
+        # Skill Registry 配置
+        skill:
+          registry:
+            # 文件系统扫描配置
+            file-system:
+              enabled: true
+              paths:
+                - ./agent_skills
     # 统一使用 OpenAI 兼容接口，chat 用通义千问，embedding/rerank 用硅基流动
     openai:
       # Chat 模型配置（通义千问 - OpenAI 兼容模式）
       chat:
-        api-key: ${DASHSCOPE_API_KEY:you_dashscope_api_key}
+        api-key: ${DASHSCOPE_API_KEY:default_dashscope_api_key}
         base-url: https://dashscope.aliyuncs.com/compatible-mode
         options:
-          model: qwen-max
+          model: glm-5.2
           temperature: 0.7
           # 注意：不能在这里配置 timeout，OpenAiChatOptions 没有 timeout 属性
           # 超时配置在 SpringAiTimeoutConfig 类中，通过 RestClient.Builder 实现
       # Embedding 模型配置（硅基流动 - OpenAI 兼容模式）
       embedding:
-        api-key: ${SILICONFLOW_API_KEY:you_siliconflow_api_key}
+        api-key: ${SILICONFLOW_API_KEY:default_siliconflow_api_key}
         base-url: https://api.siliconflow.cn
         options:
           model: BAAI/bge-large-zh-v1.5
       # Rerank 模型配置（硅基流动 - 专用 Rerank API）
       rerank:
-        api-key: ${SILICONFLOW_API_KEY:you_siliconflow_api_key}
+        api-key: ${SILICONFLOW_API_KEY:default_siliconflow_api_key}
         base-url: https://api.siliconflow.cn
         options:
           model: BAAI/bge-reranker-v2-m3
@@ -42,21 +54,57 @@ spring:
       - com.alibaba.cloud.ai.autoconfigure.dashscope.DashScopeVideoAutoConfiguration
   data:
     redis:
-      host: redis
-      port: 6379
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
 
-# MyBatis 配置：生产环境关闭 SQL 日志，避免性能开销和敏感数据泄露
-mybatis-plus:
-  configuration:
-    # 关闭 SQL 日志（覆盖 application.yml 中的 StdOutImpl 配置）
-    log-impl: org.apache.ibatis.logging.nologging.NoLoggingImpl
+# JWT 配置（生产环境通过环境变量注入）
+jwt:
+  secret: ${JWT_SECRET:}
+
+# 多路检索配置
+rag:
+  retrieval:
+    # 多路检索配置
+    vector-top-k: 50
+    fulltext-top-k: 50
+    fuzzy-top-k: 30
+    
+    # 融合配置
+    score-threshold: 0.3
+    fusion-top-k: 50
+
+# MCP Client 配置：连接外部 MCP Server
+mcp:
+  enabled: true
+  clients:
+    # Parallel MCP Server（官方免费服务，无需 API Key）
+    # 提供 parallel_search 和 parallel_fetch 两个工具
+    # 文档：https://parallel.ai/
+    # 注意：Parallel 使用 HTTP + SSE 传输，当前 HttpMcpClient 已支持
+    - id: parallel
+      name: Parallel MCP Server
+      url: https://search.parallel.ai/mcp
+      enabled: true
+      timeout: 60000  # 网络请求建议设置较长超时
 
 logging:
   level:
     com.company.rag: INFO
-    # 关闭 JDBC SQL 日志（避免泄露敏感数据）
-    jdbc.sqlonly: WARN
-    jdbc.sqltiming: WARN
-    jdbc.audit: WARN
-    jdbc.resultset: WARN
-    jdbc.resultsettable: WARN
+
+# Flyway 配置（生产环境也启用，确保数据库结构一致性）
+flyway:
+  enabled: true
+  # 迁移脚本位置
+  locations: classpath:db/migration
+  # 编码
+  encoding: UTF-8
+  # 基础线版本（如果已有数据库）
+  baseline-on-migrate: true
+  baseline-version: 0
+  # 是否自动调用 migrate
+  migrate-at-startup: true
+  # 校验迁移脚本
+  validate-on-migrate: true
+  # 禁止无序迁移（生产环境）
+  out-of-order: false

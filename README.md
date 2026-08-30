@@ -369,6 +369,328 @@ export SILICONFLOW_API_KEY=sk-your-siliconflow-key
 docker compose up -d
 ```
 
+## Docker 部署指南
+
+### 前置条件
+
+- Docker 20.10+
+- Docker Compose 2.0+
+- 至少 4GB 可用内存
+- 模型 API Key（DashScope、SiliconFlow）
+
+### 部署步骤
+
+#### 1. 克隆项目
+
+```bash
+git clone https://github.com/your-org/CompanyRag.git
+cd CompanyRag
+```
+
+#### 2. 配置环境变量
+
+**方式一：使用 .env.docker 文件（推荐）**
+
+```bash
+# 复制 Docker 部署环境变量模板
+copy company-rag-bootstrap\.env.docker company-rag-bootstrap\.env  # Windows
+cp company-rag-bootstrap/.env.docker company-rag-bootstrap/.env    # Linux/Mac
+```
+
+编辑 `company-rag-bootstrap/.env` 文件，配置以下必需变量：
+
+```bash
+# 【必须配置】API Keys
+DASHSCOPE_API_KEY=sk-your-dashscope-api-key
+SILICONFLOW_API_KEY=sk-your-siliconflow-api-key
+
+# 【必须配置】数据库配置（容器间通信使用容器名称）
+POSTGRES_HOST=docker-pgvector-1
+POSTGRES_PORT=5432
+POSTGRES_DB=company_rag
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=your_strong_password_here
+
+# 【必须配置】Redis 配置
+REDIS_HOST=docker-redis-1
+REDIS_PORT=6379
+REDIS_PASSWORD=your_strong_password_here
+
+# 【必须配置】JWT 密钥（Base64 编码）
+# 生成方法：openssl rand -base64 32 | tr -d '\n'
+JWT_SECRET=Y29tcGFueS1yYWctZG9ja2VyLWRlcGxveW1lbnQtc2VjcmV0LWtleS1mb3Itand0LXRva2VuLTIwMjY=
+
+# 【可选】服务端口
+SERVER_PORT=8080
+SPRING_PROFILES_ACTIVE=prod
+```
+
+**方式二：使用 docker-compose.yml 的环境变量**
+
+```bash
+# 设置环境变量
+export DASHSCOPE_API_KEY=sk-your-api-key
+export SILICONFLOW_API_KEY=sk-your-siliconflow-api-key
+export POSTGRES_PASSWORD=your_strong_password
+export REDIS_PASSWORD=your_strong_password
+export JWT_SECRET=$(openssl rand -base64 32 | tr -d '\n')
+
+# 启动容器
+docker compose up -d
+```
+
+#### 3. 启动基础设施容器
+
+```bash
+# 启动 PostgreSQL (PGVector) + Redis
+docker compose up -d postgres redis
+
+# 验证容器状态
+docker ps
+
+# 预期输出：
+# CONTAINER ID   IMAGE                    STATUS         PORTS                    NAMES
+# xxxxxxx        redis:7-alpine           Up 10 seconds  0.0.0.0:6379->6379/tcp   docker-redis-1
+# xxxxxxx        pgvector/pgvector:pg16   Up 10 seconds  0.0.0.0:5433->5432/tcp   docker-pgvector-1
+```
+
+#### 4. 构建应用镜像
+
+**方式一：本地 Maven 构建 + Docker 打包（推荐，利用本地缓存）**
+
+```bash
+# 本地 Maven 构建（约 1-2 分钟）
+mvn clean package -DskipTests -pl company-rag-bootstrap -am
+
+# 构建 Docker 镜像（约 2-3 分钟）
+docker build -t company-rag:latest .
+```
+
+**方式二：Docker 多阶段构建（无需本地 Maven）**
+
+```bash
+# 直接在 Docker 内完成 Maven 构建和打包（首次约 10-15 分钟）
+docker build -t company-rag:latest --target full-build .
+```
+
+#### 5. 部署应用容器
+
+```bash
+# 创建 Docker 网络（如果不存在）
+docker network create my-ai-network
+
+# 启动应用容器
+docker run -d \
+  --name company-rag-1 \
+  --network my-ai-network \
+  -p 8080:8080 \
+  --env-file company-rag-bootstrap/.env \
+  -e PYTHON_EXEC_PATH=/usr/bin/python \
+  company-rag:latest
+```
+
+**Windows PowerShell 示例：**
+
+```powershell
+docker run -d `
+  --name company-rag-1 `
+  --network my-ai-network `
+  -p 8080:8080 `
+  --env-file company-rag-bootstrap/.env `
+  -e PYTHON_EXEC_PATH=/usr/bin/python `
+  company-rag:latest
+```
+
+#### 6. 验证部署
+
+```bash
+# 查看容器状态
+docker ps | grep company-rag
+
+# 查看应用日志
+docker logs -f company-rag-1
+
+# 预期看到以下日志表示启动成功：
+# CompanyRagApplication - Started CompanyRagApplication in XX.XXX seconds
+# o.s.b.w.embedded.tomcat.TomcatWebServer - Tomcat started on port(s): 8080 (http)
+```
+
+#### 7. 访问系统
+
+| 服务 | 地址 | 说明 |
+|------|------|------|
+| 应用 | http://localhost:8080 | 知识库首页 |
+| PostgreSQL | localhost:5433 | 数据库（外部访问） |
+| Redis | localhost:6379 | 缓存（外部访问） |
+| Prometheus | http://localhost:9090 | 监控指标 |
+| Grafana | http://localhost:3000 | 可视化（admin/admin） |
+
+**首次登录：**
+- 用户名：`admin`
+- 密码：`admin123`
+- ⚠️ 首次登录后请立即修改密码
+
+### 容器网络配置
+
+**容器间通信拓扑：**
+
+```
+┌─────────────────┐      my-ai-network      ┌─────────────────┐
+│  company-rag-1  │ ◄────────────────────► │  docker-pgvector-1│
+│   (应用容器)     │                         │   (PostgreSQL)    │
+│                 │                         │                   │
+│                 │ ◄────────────────────► │  docker-redis-1   │
+│                 │                         │   (Redis)         │
+└─────────────────┘                         └─────────────────┘
+```
+
+**关键配置说明：**
+
+1. **容器名称**：
+   - PostgreSQL: `docker-pgvector-1`
+   - Redis: `docker-redis-1`
+   - 应用：`company-rag-1`
+
+2. **网络模式**：
+   - 所有容器连接到 `my-ai-network` 专用网络
+   - 容器间通过容器名称直接通信（DNS 解析）
+
+3. **环境变量传递**：
+   - `.env` 文件中的 `POSTGRES_HOST=docker-pgvector-1` 指向 PostgreSQL 容器
+   - `.env` 文件中的 `REDIS_HOST=docker-redis-1` 指向 Redis 容器
+
+### 常见问题排查
+
+#### 1. 容器启动失败
+
+**问题：** `Error creating bean with name 'redisson'`
+
+**原因：** Redis 容器名称或网络配置不匹配
+
+**解决：**
+```bash
+# 检查容器网络
+docker network inspect my-ai-network
+
+# 确认 Redis 容器名称
+docker ps | grep redis
+
+# 修改 .env 中的 REDIS_HOST 与实际容器名称一致
+```
+
+#### 2. JWT_SECRET 格式错误
+
+**问题：** `Illegal base64 character 2d`
+
+**原因：** JWT_SECRET 不是有效的 Base64 编码
+
+**解决：**
+```bash
+# 重新生成 Base64 编码的密钥
+openssl rand -base64 32 | tr -d '\n'
+
+# 更新 .env 文件
+JWT_SECRET=生成的 Base64 字符串
+```
+
+#### 3. 数据库连接失败
+
+**问题：** `Failed to resolve 'docker-pgvector-1'`
+
+**原因：** 容器不在同一网络
+
+**解决：**
+```bash
+# 将容器连接到同一网络
+docker network connect my-ai-network docker-pgvector-1
+docker network connect my-ai-network company-rag-1
+```
+
+#### 4. 内存不足
+
+**问题：** 容器启动后自动退出，日志显示 OOM
+
+**解决：**
+```bash
+# 增加 Docker 内存限制（Windows/Mac）
+# Docker Desktop → Settings → Resources → Memory → 调整为 4GB+
+
+# 或者限制 JVM 堆内存
+docker run -d \
+  -e JAVA_TOOL_OPTIONS="-Xmx2g" \
+  company-rag:latest
+```
+
+#### 5. Python 依赖安装失败
+
+**问题：** Docker 构建时 numpy 等包编译失败
+
+**原因：** 缺少编译工具或 PEP 668 限制
+
+**解决：** Dockerfile 已包含以下配置：
+- 安装 `build-essential` 编译工具
+- 使用 `--break-system-packages` 绕过 PEP 668
+- 使用清华镜像源加速下载
+
+### 清理和重置
+
+```bash
+# 停止所有容器
+docker compose down
+
+# 删除应用容器
+docker stop company-rag-1
+docker rm company-rag-1
+
+# 删除所有容器和网络（谨慎操作）
+docker compose down -v
+docker network prune -f
+
+# 删除镜像
+docker rmi company-rag:latest
+```
+
+### 生产环境建议
+
+1. **使用 Docker Compose 管理所有容器**（推荐）
+2. **环境变量加密存储**（使用 Docker Secrets 或 Vault）
+3. **定期备份数据库**
+4. **配置日志收集**（ELK Stack 或 Loki）
+5. **启用 HTTPS**（使用 Nginx 反向代理 + Let's Encrypt）
+6. **配置健康检查和自动重启**
+7. **使用固定版本镜像标签**（避免 `latest` 标签的不确定性）
+
+### 性能调优
+
+**JVM 参数优化：**
+```bash
+docker run -d \
+  -e JAVA_TOOL_OPTIONS="-Xms2g -Xmx4g -XX:+UseG1GC" \
+  company-rag:latest
+```
+
+**数据库连接池优化：**
+```yaml
+# application-prod.yml
+spring:
+  datasource:
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 30000
+```
+
+**Redis 连接池优化：**
+```yaml
+spring:
+  redis:
+    lettuce:
+      pool:
+        max-active: 20
+        max-idle: 10
+        min-idle: 5
+```
+
 ## API文档
 
 ### 统一对话（Agent 模式，推荐）
