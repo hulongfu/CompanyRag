@@ -392,9 +392,15 @@ cd CompanyRag
 **方式一：使用 .env.docker 文件（推荐）**
 
 ```bash
-# 复制 Docker 部署环境变量模板
+# 步骤 1：复制 Docker 部署环境变量模板
 copy company-rag-bootstrap\.env.docker.example company-rag-bootstrap\.env.docker  # Windows
 cp company-rag-bootstrap/.env.docker.example company-rag-bootstrap/.env.docker    # Linux/Mac
+
+# 步骤 2：编辑 .env.docker 文件，填写真实配置（见下方变量说明）
+
+# 步骤 3（可选）：如果需要使用 .env 文件，复制一份
+copy company-rag-bootstrap\.env.docker company-rag-bootstrap\.env  # Windows
+cp company-rag-bootstrap/.env.docker company-rag-bootstrap/.env    # Linux/Mac
 ```
 
 编辑 `company-rag-bootstrap/.env.docker` 文件，配置以下必需变量：
