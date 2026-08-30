@@ -393,11 +393,11 @@ cd CompanyRag
 
 ```bash
 # 复制 Docker 部署环境变量模板
-copy company-rag-bootstrap\.env.docker company-rag-bootstrap\.env  # Windows
-cp company-rag-bootstrap/.env.docker company-rag-bootstrap/.env    # Linux/Mac
+copy company-rag-bootstrap\.env.docker.example company-rag-bootstrap\.env.docker  # Windows
+cp company-rag-bootstrap/.env.docker.example company-rag-bootstrap/.env.docker    # Linux/Mac
 ```
 
-编辑 `company-rag-bootstrap/.env` 文件，配置以下必需变量：
+编辑 `company-rag-bootstrap/.env.docker` 文件，配置以下必需变量：
 
 ```bash
 # 【必须配置】API Keys
