@@ -81,4 +81,17 @@ class ExecuteToolTest {
         String result = executeTool.normalizePythonPath(null);
         assertNull(result);
     }
+
+    @Test
+    void testExecuteCommand_CalculatorSkill() {
+        // 测试执行 calculator 技能（实际执行需要 Python 环境）
+        // 这里只测试命令格式是否正确
+        String command = "python scripts/calculator.py 50 + 50";
+        String result = executeTool.normalizePythonPath(command);
+        
+        // 验证命令被正确替换
+        assertTrue(result.startsWith("D:/test/venv/Scripts/python.exe"));
+        assertTrue(result.contains("scripts/calculator.py"));
+        assertTrue(result.contains("50 + 50"));
+    }
 }
