@@ -378,6 +378,65 @@ public class ExecuteTool implements AgentTool {
     }
 
     /**
+     * 替换命令中的 Python 路径为配置路径
+     * 统一将所有 Python 命令替换为配置的 python-exec-path
+     * 
+     * 检测模式：
+     * 1. python 开头（系统 PATH 中的 Python）
+     * 2. python3 开头（系统 PATH 中的 Python3）
+     * 3. Windows 绝对路径：D:/**/**/python.exe 或 D:/**/**/pythonw.exe
+     * 4. Unix 绝对路径：/usr/**/python 或 /**/venv/bin/python
+     * 
+     * @param command 原始命令
+     * @return 替换后的命令
+     */
+    private String normalizePythonPath(String command) {
+        if (command == null || command.isEmpty()) {
+            return command;
+        }
+        
+        String normalized = command;
+        
+        // 模式 1: python 或 python3 开头（后面跟空格）
+        if (normalized.startsWith("python ") || normalized.startsWith("python3 ")) {
+            // 移除 python/python3 及其后的空格，保留脚本路径和参数
+            String scriptAndArgs = normalized.substring(normalized.indexOf(' ') + 1);
+            normalized = pythonExecPath + " " + scriptAndArgs;
+            log.debug("替换 Python 命令：{} → {}", command, normalized);
+            return normalized;
+        }
+        
+        // 模式 2: Windows Python 可执行文件路径（包含 python.exe 或 pythonw.exe）
+        // 匹配 D:/path/to/python.exe 或 D:\path\to\python.exe
+        if (normalized.matches("^[A-Za-z]:.*python[w]?\\.exe\\s+.*")) {
+            // 提取脚本路径和参数
+            int firstSpace = normalized.indexOf(' ');
+            if (firstSpace > 0) {
+                String scriptAndArgs = normalized.substring(firstSpace + 1);
+                normalized = pythonExecPath + " " + scriptAndArgs;
+                log.debug("替换 Windows Python 路径：{} → {}", command, normalized);
+                return normalized;
+            }
+        }
+        
+        // 模式 3: Unix Python 路径（以 /python 或 /python3 结尾的路径）
+        // 例如：/usr/bin/python3, /home/user/.venv/bin/python
+        if (normalized.matches("^[/\\\\].*python3?[w]?\\s+.*")) {
+            // 提取脚本路径和参数
+            int firstSpace = normalized.indexOf(' ');
+            if (firstSpace > 0) {
+                String scriptAndArgs = normalized.substring(firstSpace + 1);
+                normalized = pythonExecPath + " " + scriptAndArgs;
+                log.debug("替换 Unix Python 路径：{} → {}", command, normalized);
+                return normalized;
+            }
+        }
+        
+        // 不匹配任何模式，保持原样
+        return command;
+    }
+
+    /**
      * 解析命令为数组
      * 支持简单的空格分隔，后续可以改进为支持引号等复杂情况
      */
