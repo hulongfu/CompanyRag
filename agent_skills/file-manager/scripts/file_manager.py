@@ -2,6 +2,14 @@
 文件管理技能 - 统一的文件操作工具
 支持：读取、写入、创建、删除、移动、复制、列表、搜索等操作
 """
+
+# ========== 编码设置：解决 Windows 控制台 GBK 编码问题 ==========
+# 设置标准输出为标准 UTF-8，避免输出 Unicode 字符（如 ✅）时编码失败
+import io
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+# ================================================================
+
 import argparse
 import json
 import logging
