@@ -171,6 +171,13 @@ management:
   security:
     enabled: true
 
+# Agent 配置
+agent:
+  # Python 可执行文件路径（支持多环境配置）
+  # 开发环境：D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe
+  # 生产环境：/usr/bin/python3 或 /opt/venv/bin/python
+  python-exec-path: ${PYTHON_EXEC_PATH:D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe}
+
 # 日志
 logging:
   level:
