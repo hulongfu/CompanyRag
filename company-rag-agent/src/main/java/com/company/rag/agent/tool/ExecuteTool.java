@@ -100,8 +100,12 @@ public class ExecuteTool implements AgentTool {
         }
         
         try {
+            // 路径归一化：将所有 Python 命令替换为配置路径
+            String normalizedCommand = normalizePythonPath(command);
+            log.debug("归一化后的命令：{}", normalizedCommand);
+            
             // 命令预处理：将 Windows cmd 语法转换为 Unix Shell 语法
-            String processedCommand = preprocessCommand(command);
+            String processedCommand = preprocessCommand(normalizedCommand);
             log.debug("预处理后的命令：{}", processedCommand);
             
             // 检测是否需要通过 Shell 执行（包含 &&、||、export 等 Shell 特性）
