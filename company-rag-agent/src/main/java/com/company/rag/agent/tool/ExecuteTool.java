@@ -3,6 +3,7 @@ package com.company.rag.agent.tool;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.io.BufferedReader;
@@ -26,6 +27,9 @@ public class ExecuteTool implements AgentTool {
     // 命令超时时间（秒）
     // web-search 等网络请求需要更长时间，设置为 60 秒
     private static final int COMMAND_TIMEOUT_SECONDS = 60;
+
+    @Value("${agent.python-exec-path:D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe}")
+    private String pythonExecPath;
 
     @Override
     public String getName() {
