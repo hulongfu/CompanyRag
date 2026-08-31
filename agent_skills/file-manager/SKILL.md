@@ -58,6 +58,9 @@ execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/file_m
 
 # 自定义大小阈值（5000 字符）
 execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/file_manager.py write-large --file 'api.md' --content '...' --size-threshold 5000")
+
+# 从文件读取内容（推荐方式，避免命令行参数传递大内容时的截断问题）
+execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/file_manager.py write-large --file 'D:/output/api_doc.md' --content-file 'D:/temp/api_content.txt'")
 ```
 
 ### 3. Create a folder
@@ -106,6 +109,7 @@ execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/file_m
   - `downloads` - 下载目录
   - 或绝对路径
 - `--content` - 文件内容（写入操作）
+- `--content-file` - 内容文件路径（write-large 操作专用，从文件读取内容，避免命令行参数传递大内容时的截断问题）
 - `--encoding` - 文件编码（默认：utf-8）
 - `--target` - 目标路径（移动/复制操作）
 - `--size-threshold` - 大文件大小阈值（字符数，仅用于 write-large 操作，默认：10000）

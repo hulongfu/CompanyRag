@@ -173,29 +173,52 @@ def write_file(file_path: str, content: str, base_folder: str = "shared",
         }
 
 
-def write_large_content(file_path: str, content: str, base_folder: str = "shared",
+def write_large_content(file_path: str, content: str = None, base_folder: str = "shared",
                         encoding: str = "utf-8", overwrite: bool = True,
-                        size_threshold: int = 10000) -> Dict[str, Any]:
-    """写入大文件内容（自动判断是否使用分块写入）
+                        size_threshold: int = 10000, content_file: str = None) -> Dict[str, Any]:
+    """写入大文件内容（支持从文件或内容字符串读取）
     
     设计目的：
     1. 解决 LLM 生成大文件时输出 token 过多的问题
     2. 自动判断内容大小，超过阈值时使用优化策略
     3. 减少 LLM 需要输出的 token 数量（只需提供文件路径和内容）
+    4. 支持从文件读取内容，避免命令行参数传递大内容时的截断问题
     
     Args:
         file_path: 文件路径
-        content: 文件内容
+        content: 文件内容（字符串，与 content_file 二选一）
         base_folder: 基础文件夹
         encoding: 文件编码
         overwrite: 是否覆盖现有文件
         size_threshold: 大小阈值（字符数），超过此值视为大文件
+        content_file: 内容文件路径（与 content 二选一，优先使用）
     
     Returns:
         操作结果字典
     """
     try:
         full_path = resolve_path(base_folder, file_path)
+        
+        # 确定内容来源：优先使用 content_file，其次使用 content
+        if content_file:
+            logger.info(f"从文件读取内容：{content_file}")
+            content_file_path = resolve_path(base_folder, content_file)
+            if not content_file_path.exists():
+                return {
+                    "success": False,
+                    "error": f"内容文件不存在：{content_file}"
+                }
+            with open(content_file_path, 'r', encoding=encoding) as f:
+                content = f.read()
+            logger.info(f"从文件读取内容成功：{len(content)} 字符")
+        elif content:
+            logger.info(f"使用传入的内容字符串")
+        else:
+            return {
+                "success": False,
+                "error": "必须提供 --content 或 --content-file 参数之一"
+            }
+        
         content_size = len(content)
         
         # 判断是否为大文件
@@ -228,6 +251,7 @@ def write_large_content(file_path: str, content: str, base_folder: str = "shared
             "size": content_size,
             "is_large_file": is_large_file,
             "threshold": size_threshold,
+            "content_source": "file" if content_file else "string",
             "message": f"文件已写入：{file_path}（{'大文件' if is_large_file else '普通文件'}，{content_size} 字符）"
         }
     except Exception as e:
@@ -637,6 +661,7 @@ def main():
     
     # 操作特定参数
     parser.add_argument("--content", help="文件内容（写入操作）")
+    parser.add_argument("--content-file", help="内容文件路径（write-large 操作，从文件读取内容）")
     parser.add_argument("--encoding", default="utf-8", help="文件编码")
     parser.add_argument("--target", help="目标路径（移动/复制操作）")
     parser.add_argument("--pattern", default="*", help="文件匹配模式")
@@ -656,10 +681,10 @@ def main():
         else:
             result = write_file(args.file, args.content, args.base_folder, args.encoding, args.overwrite)
     elif args.operation == "write-large":
-        if not args.content:
-            result = {"success": False, "error": "缺少 --content 参数"}
+        if not args.content and not args.content_file:
+            result = {"success": False, "error": "缺少 --content 或 --content-file 参数（二选一）"}
         else:
-            result = write_large_content(args.file, args.content, args.base_folder, args.encoding, args.overwrite)
+            result = write_large_content(args.file, args.content, args.base_folder, args.encoding, args.overwrite, content_file=args.content_file)
     elif args.operation == "create-folder":
         result = create_folder(args.folder, args.base_folder, args.parents)
     elif args.operation == "delete-file":
