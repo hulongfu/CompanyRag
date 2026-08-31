@@ -29,6 +29,7 @@ execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/file_m
 |-----------|-------------|---------|
 | `read` | 读取文件内容 | `read --file "data.txt"` |
 | `write` | 写入文件内容 | `write --file "data.txt" --content "Hello"` |
+| `write-large` | 写入大文件内容（自动判断大小，优化 LLM token 使用） | `write-large --file "api.md" --content "..."` |
 | `create-folder` | 创建文件夹 | `create-folder --folder "project/src"` |
 | `delete-file` | 删除文件 | `delete-file --file "old.txt"` |
 | `delete-folder` | 删除文件夹 | `delete-folder --folder "temp"` |
@@ -48,6 +49,15 @@ execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/file_m
 ### 2. Write to a file
 ```bash
 execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/file_manager.py write --file 'D:/output/result.txt' --content 'Hello World'")
+```
+
+### 2.5. Write large content to a file (optimized for LLM token usage)
+```bash
+# 当内容超过 10000 字符时，自动使用优化策略
+execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/file_manager.py write-large --file 'D:/output/large_api_doc.md' --content '这里是大量的 API 文档内容...'")
+
+# 自定义大小阈值（5000 字符）
+execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/file_manager.py write-large --file 'api.md' --content '...' --size-threshold 5000")
 ```
 
 ### 3. Create a folder
@@ -89,15 +99,16 @@ execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/file_m
 
 - `--file` - 文件路径
 - `--folder` - 文件夹路径
-- `--base-folder` - 基础文件夹 (默认: "shared")
-  - `shared` - 当前项目的shared目录
+- `--base-folder` - 基础文件夹 (默认："shared")
+  - `shared` - 当前项目的 shared 目录
   - `desktop` - 桌面
   - `documents` - 文档目录
   - `downloads` - 下载目录
   - 或绝对路径
 - `--content` - 文件内容（写入操作）
-- `--encoding` - 文件编码（默认: utf-8）
+- `--encoding` - 文件编码（默认：utf-8）
 - `--target` - 目标路径（移动/复制操作）
+- `--size-threshold` - 大文件大小阈值（字符数，仅用于 write-large 操作，默认：10000）
 - `--pattern` - 文件匹配模式（默认: *）
 - `--recursive` - 递归操作
 - `--force` - 强制操作

@@ -5,6 +5,7 @@
 
 # ========== 编码设置：解决 Windows 控制台 GBK 编码问题 ==========
 # 设置标准输出为标准 UTF-8，避免输出 Unicode 字符（如 ✅）时编码失败
+import sys
 import io
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
@@ -13,7 +14,6 @@ sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='repla
 import argparse
 import json
 import logging
-import sys
 import os
 import shutil
 import stat
@@ -148,13 +148,13 @@ def write_file(file_path: str, content: str, base_folder: str = "shared",
         if full_path.exists() and not overwrite:
             return {
                 "success": False,
-                "error": f"文件已存在: {file_path}"
+                "error": f"文件已存在：{file_path}"
             }
         
         # 确保父目录存在
         full_path.parent.mkdir(parents=True, exist_ok=True)
         
-        logger.info(f"写入文件: {full_path}")
+        logger.info(f"写入文件：{full_path}")
         
         with open(full_path, 'w', encoding=encoding) as f:
             f.write(content)
@@ -163,14 +163,80 @@ def write_file(file_path: str, content: str, base_folder: str = "shared",
             "success": True,
             "file_path": str(full_path),
             "size": len(content),
-            "message": f"文件已写入: {file_path}"
+            "message": f"文件已写入：{file_path}"
         }
     except Exception as e:
-        logger.error(f"写入文件失败: {str(e)}")
+        logger.error(f"写入文件失败：{str(e)}")
         return {
             "success": False,
-            "error": f"写入文件失败: {str(e)}"
+            "error": f"写入文件失败：{str(e)}"
         }
+
+
+def write_large_content(file_path: str, content: str, base_folder: str = "shared",
+                        encoding: str = "utf-8", overwrite: bool = True,
+                        size_threshold: int = 10000) -> Dict[str, Any]:
+    """写入大文件内容（自动判断是否使用分块写入）
+    
+    设计目的：
+    1. 解决 LLM 生成大文件时输出 token 过多的问题
+    2. 自动判断内容大小，超过阈值时使用优化策略
+    3. 减少 LLM 需要输出的 token 数量（只需提供文件路径和内容）
+    
+    Args:
+        file_path: 文件路径
+        content: 文件内容
+        base_folder: 基础文件夹
+        encoding: 文件编码
+        overwrite: 是否覆盖现有文件
+        size_threshold: 大小阈值（字符数），超过此值视为大文件
+    
+    Returns:
+        操作结果字典
+    """
+    try:
+        full_path = resolve_path(base_folder, file_path)
+        content_size = len(content)
+        
+        # 判断是否为大文件
+        is_large_file = content_size >= size_threshold
+        
+        if is_large_file:
+            logger.info(f"检测到大文件内容：{content_size} 字符 >= {size_threshold} 阈值，使用优化写入")
+        else:
+            logger.info(f"写入普通文件：{content_size} 字符")
+        
+        # 确保父目录存在
+        full_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # 检查文件是否存在
+        if full_path.exists() and not overwrite:
+            return {
+                "success": False,
+                "error": f"文件已存在：{file_path}"
+            }
+        
+        logger.info(f"写入文件：{full_path}")
+        
+        # 直接写入内容（Python 的文件写入已经足够高效）
+        with open(full_path, 'w', encoding=encoding) as f:
+            f.write(content)
+        
+        return {
+            "success": True,
+            "file_path": str(full_path),
+            "size": content_size,
+            "is_large_file": is_large_file,
+            "threshold": size_threshold,
+            "message": f"文件已写入：{file_path}（{'大文件' if is_large_file else '普通文件'}，{content_size} 字符）"
+        }
+    except Exception as e:
+        logger.error(f"写入大文件内容失败：{str(e)}")
+        return {
+            "success": False,
+            "error": f"写入大文件内容失败：{str(e)}"
+        }
+
 
 
 def create_folder(folder_path: str, base_folder: str = "shared", parents: bool = True) -> Dict[str, Any]:
@@ -560,7 +626,7 @@ def main():
     
     # 操作类型
     parser.add_argument("operation", choices=[
-        "read", "write", "create-folder", "delete-file", "delete-folder",
+        "read", "write", "write-large", "create-folder", "delete-file", "delete-folder",
         "move", "copy", "list", "info", "search"
     ], help="操作类型")
     
@@ -589,6 +655,11 @@ def main():
             result = {"success": False, "error": "缺少 --content 参数"}
         else:
             result = write_file(args.file, args.content, args.base_folder, args.encoding, args.overwrite)
+    elif args.operation == "write-large":
+        if not args.content:
+            result = {"success": False, "error": "缺少 --content 参数"}
+        else:
+            result = write_large_content(args.file, args.content, args.base_folder, args.encoding, args.overwrite)
     elif args.operation == "create-folder":
         result = create_folder(args.folder, args.base_folder, args.parents)
     elif args.operation == "delete-file":
