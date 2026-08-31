@@ -52,16 +52,46 @@ execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/file_m
 ```
 
 ### 2.5. Write large content to a file (optimized for LLM token usage)
+
+**⚠️ 重要：当内容超过 1000 字符时，请使用 `--content-file` 参数，避免命令行参数截断问题！**
+
+#### 方式 1：从文件读取内容（推荐，适用于大内容）
 ```bash
+# 步骤 1：先将内容写入临时文件（使用 Python 或其他工具）
+execute("python -c \"f=open('temp_content.txt','w',encoding='utf-8'); f.write('大量内容...'); f.close()\"")
+
+# 步骤 2：使用 write-large --content-file 从临时文件读取并写入目标文件
+execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/file_manager.py write-large --file 'D:/output/api_doc.md' --content-file 'temp_content.txt'")
+```
+
+#### 方式 2：直接传递内容字符串（仅适用于小内容 < 1000 字符）
+```bash
+# 当内容较小时，可直接使用 --content 参数
+execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/file_manager.py write-large --file 'D:/output/small_doc.md' --content '内容...'")
+
 # 当内容超过 10000 字符时，自动使用优化策略
 execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/file_manager.py write-large --file 'D:/output/large_api_doc.md' --content '这里是大量的 API 文档内容...'")
 
 # 自定义大小阈值（5000 字符）
 execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/file_manager.py write-large --file 'api.md' --content '...' --size-threshold 5000")
-
-# 从文件读取内容（推荐方式，避免命令行参数传递大内容时的截断问题）
-execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/file_manager.py write-large --file 'D:/output/api_doc.md' --content-file 'D:/temp/api_content.txt'")
 ```
+
+#### ❌ 错误恢复指南
+
+**如果 `write` 或 `write-large --content` 失败（内容被截断）：**
+
+1. **不要** 尝试多次重试 `--content` 参数
+2. **不要** 改用 Python 原生 `open()` 写入
+3. **应该** 使用 `--content-file` 方式：
+   ```bash
+   # 正确做法：
+   # 1. 先创建临时文件
+   execute("python -c \"f=open('temp.txt','w',encoding='utf-8'); f.write('大量内容'); f.close()\"")
+   # 2. 使用 --content-file 参数
+   execute("python scripts/file_manager.py write-large --file 'output.md' --content-file 'temp.txt'")
+   # 3. 清理临时文件（可选）
+   execute("python scripts/file_manager.py delete-file --file 'temp.txt'")
+   ```
 
 ### 3. Create a folder
 ```bash
@@ -155,11 +185,17 @@ The `--base-folder` parameter supports special keywords:
 ## Notes
 
 - **Safety**: 所有操作都有错误处理和日志记录
-- **Encoding**: 自动尝试UTF-8和GBK编码
+- **Encoding**: 自动尝试 UTF-8 和 GBK 编码
 - **Path Resolution**: 支持相对路径和绝对路径
+  - 相对路径会相对于 `--base-folder` 解析
+  - 绝对路径直接使用
 - **Recursive Operations**: 列表和删除支持递归
 - **Force Delete**: 强制删除会修改文件权限
 - **Auto Create Parents**: 创建文件夹时自动创建父目录
+- **Large Content Writing**: 
+  - 内容 > 1000 字符时，请使用 `--content-file` 参数
+  - 避免通过命令行参数传递大内容（会被 shell 截断）
+  - 参考上方"错误恢复指南"
 
 ## Security Considerations
 
