@@ -1,10 +1,10 @@
 package com.company.rag.agent.service;
 
+import com.company.rag.agent.executor.StreamingAgentExecutor;
 import com.company.rag.common.tool.ToolCallRecord;
 import com.company.rag.common.tool.ToolCallRecorder;
 import com.company.rag.tenant.context.TenantContext;
 import lombok.extern.slf4j.Slf4j;
-import com.alibaba.cloud.ai.graph.agent.ReactAgent;
 import com.alibaba.cloud.ai.graph.exception.GraphRunnerException;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
@@ -39,7 +39,7 @@ import java.util.stream.Collectors;
 @Service
 public class RagAgentService {
 
-    private final ReactAgent reactAgent;
+    private final StreamingAgentExecutor streamingAgentExecutor;
     private final ToolCallRecorder recorder;
 
     /**
@@ -54,15 +54,15 @@ public class RagAgentService {
     private final ExecutorService executorService = Executors.newCachedThreadPool();
 
     /**
-     * 构造方法，注入 ReactAgent 和 ToolCallRecorder
+     * 构造方法，注入 StreamingAgentExecutor 和 ToolCallRecorder
      */
-    public RagAgentService(ReactAgent reactAgent,
+    public RagAgentService(StreamingAgentExecutor streamingAgentExecutor,
                            ToolCallRecorder recorder) {
-        this.reactAgent = reactAgent;
+        this.streamingAgentExecutor = streamingAgentExecutor;
         this.recorder = recorder;
 
-        log.info("RagAgentService 初始化：reactAgent={}, timeout={} minutes",
-                 reactAgent != null ? reactAgent.getClass().getSimpleName() : "null",
+        log.info("RagAgentService 初始化：streamingAgentExecutor={}, timeout={} minutes",
+                 streamingAgentExecutor != null ? streamingAgentExecutor.getClass().getSimpleName() : "null",
                  AGENT_TIMEOUT_MINUTES);
     }
 
@@ -100,8 +100,8 @@ public class RagAgentService {
             }
             messages.add(new UserMessage(userMessage));
 
-            // 使用 ReactAgent 处理请求（ReAct 模式），带超时保护
-            // ReactAgent 会自动：
+            // 使用 StreamingAgentExecutor 处理请求，带超时保护
+            // StreamingAgentExecutor 会自动：
             // 1. 分析用户意图
             // 2. 自主决定调用 Tool 或 Skill
             // 3. 执行工具/技能并获取结果
@@ -167,7 +167,9 @@ public class RagAgentService {
                                 TenantContext.setTenantCode(tenantCode);
                             }
 
-                            return reactAgent.call(messages);
+                            // 使用 StreamingAgentExecutor 执行 Agent 调用
+                            AgentResult result = streamingAgentExecutor.execute(messages);
+                            return new AssistantMessage(result.getAnswer());
                         } catch (GraphRunnerException e) {
                             throw new RuntimeException("Agent 执行失败：" + e.getMessage(), e);
                         } finally {

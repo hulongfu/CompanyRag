@@ -26,9 +26,10 @@ import java.util.List;
  * 2. 优先级：用户问题 → 先匹配 Skills → 执行 Skill（Skill 内部可调用 Tools）
  * 3. 无匹配 Skill → 直接调用 Tools（如 searchKnowledgeBase）
  * 
- * 待调查问题：
- * - SkillsAgentHook 是否会覆盖 ToolCallbackProvider 提供的工具定义？
- * - 如何确保 LLM 同时看到 Skills 和 Tools？
+ * 架构说明（2026-08-30 优化后）：
+ * - ReactAgent 作为底层 Agent 引擎，由 StreamingAgentExecutor 封装调用
+ * - RagAgentService 不直接使用 ReactAgent，而是通过 StreamingAgentExecutor 间接使用
+ * - 这样设计便于未来扩展流式调用、重试策略等功能
  */
 @Slf4j
 @Configuration

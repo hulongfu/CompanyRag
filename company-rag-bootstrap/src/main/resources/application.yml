@@ -8,10 +8,11 @@ spring:
     name: company-rag
   # HTTP 客户端超时配置（Spring Boot 3.2+）
   # 适用于 RestClient 和 WebClient（包括流式响应）
+  # 注意：read-timeout 需要足够大以支持慢模型生成（默认 120s，优化后 300s）
   http:
     client:
       connect-timeout: 10s
-      read-timeout: 120s
+      read-timeout: 300s
   lifecycle:
     # 优雅停机超时时间
     timeout-per-shutdown-phase: 30s
