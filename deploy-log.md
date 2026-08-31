@@ -2,7 +2,31 @@
 
 ## Git Push
 
-### 最新推送（2026-08-30）
+### 最新推送（2026-08-31 P0 阶段）
+
+- commit_type: Task
+- task_id: 0001
+- task_name: API 文档生成超时问题优化
+- commit_hash: 9a9af71
+- branch: main
+- remote: gitee & origin
+- staged_files:
+  - company-rag-agent/src/main/java/com/company/rag/agent/executor/StreamingAgentExecutor.java（新建）
+  - company-rag-agent/src/main/java/com/company/rag/agent/service/RagAgentService.java（修改）
+  - company-rag-agent/src/main/java/com/company/rag/agent/config/AgentConfig.java（修改注释）
+  - company-rag-bootstrap/src/main/resources/application.yml（修改超时配置）
+  - company-rag-agent/src/test/java/com/company/rag/agent/executor/StreamingAgentExecutorTest.java（新建）
+  - verification-result.md（更新验证记录）
+- commit_message: Task:0001_API 文档生成超时问题优化：add P0 streaming executor and increase timeout to 300s
+- commit_command: git commit -m "Task:0001_API 文档生成超时问题优化：add P0 streaming executor and increase timeout to 300s"
+- commit_exit_code: 0
+- push_command: git push gitee main && git push origin main
+- push_exit_code: 0
+- remote_head_check_command: git ls-remote origin main && git ls-remote gitee main
+- remote_head: 9a9af71e6fd5e628aae6d44c395f5bce73f89567
+- result: ✅ 推送成功，Gitee 和 GitHub 远端 HEAD 与本地一致（P0 阶段完成：流式调用支持 + 超时配置优化）
+
+### 上次推送（2026-08-30）
 
 - commit_type: Task
 - task_id: 0000
