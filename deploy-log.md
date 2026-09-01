@@ -2,7 +2,57 @@
 
 ## Git Push
 
-### 最新推送（2026-08-31 下载工具架构简化重构）
+### 最新推送（2026-09-01 下载工具 sessionId 跨线程传递修复）
+
+- commit_type: Task
+- task_id: 0002
+- task_name: 下载工具 sessionId 跨线程传递修复
+- commit_hash: ea894ab
+- branch: main
+- remote: gitee & origin (均成功)
+- staged_files:
+  - company-rag-agent/src/main/java/com/company/rag/agent/config/DownloadConfig.java（修改 - 移除无用配置）
+  - company-rag-agent/src/main/java/com/company/rag/agent/service/DownloadService.java（修改 - 使用固定缓存 key + 添加 sessionId 参数）
+  - company-rag-agent/src/main/java/com/company/rag/agent/service/RagAgentService.java（修改 - 捕获并恢复 sessionId 到异步线程）
+  - company-rag-agent/src/main/java/com/company/rag/agent/tool/DownloadTool.java（修改 - 从 TenantContext 获取 sessionId）
+  - company-rag-agent/src/test/java/com/company/rag/agent/tool/DownloadToolTest.java（修改 - 适配新方法签名）
+  - company-rag-bootstrap/src/main/resources/application.yml（修改 - 移除 cleanup-expire-hours 配置）
+  - company-rag-rag/src/main/java/com/company/rag/rag/config/RagCacheConfig.java（修改 - 更新注释）
+  - company-rag-tenant/src/main/java/com/company/rag/tenant/context/TenantContext.java（修改 - 添加 sessionId 支持）
+  - company-rag-web/src/main/java/com/company/rag/web/controller/ChatController.java（修改 - 设置和清理 sessionId 上下文）
+- commit_message: Task:0002_下载工具 sessionId 跨线程传递修复：fix sessionId propagation to async agent thread
+- commit_command: git commit -m "Task:0002_下载工具 sessionId 跨线程传递修复：fix sessionId propagation to async agent thread"
+- commit_exit_code: 0
+- push_command: git push origin main && git push gitee main
+- push_exit_code: 0
+- remote_head_check_command: git ls-remote origin main && git ls-remote gitee main
+- remote_head: ea894abcd68401086b71a4411d155fdbd31bb52e
+- result: ✅ 推送成功，Gitee 和 GitHub 远端 HEAD 与本地一致。修复内容：1) 移除无用配置 cleanup-expire-hours；2) 使用固定缓存 key "downloadCleanFlag"；3) 添加 sessionId 目录隔离避免文件覆盖；4) 修复 RagAgentService 中 sessionId 跨线程传递问题（ThreadLocal 无法自动传递给异步线程）
+
+### 上次推送（2026-09-01 下载工具链接问题修复）
+
+- commit_type: BugFix
+- task_id: download_tool
+- task_name: 下载工具链接不可点击问题调试与 CDN 修复
+- commit_hash: 8fdbe29
+- branch: main
+- remote: gitee (成功), origin (失败 - 网络原因)
+- staged_files:
+  - company-rag-agent/src/main/java/com/company/rag/agent/tool/DownloadTool.java（修改 - Markdown 链接格式）
+  - company-rag-bootstrap/src/main/java/com/company/rag/bootstrap/config/SecurityConfig.java（修改 - 下载接口白名单）
+  - company-rag-web/src/main/java/com/company/rag/web/controller/DownloadFileController.java（修改 - fileId 提取逻辑）
+  - company-rag-web/src/main/resources/templates/index.html（修改 - Markdown 渲染 + CDN 源）
+  - deploy-log.md（修改 - 日志记录）
+- commit_message: BugFix:download_tool_下载工具链接不可点击问题调试与 CDN 修复：fix download link markdown rendering, CDN source, security config and fileId extraction
+- commit_command: git commit -m "BugFix:download_tool_下载工具链接不可点击问题调试与 CDN 修复：fix download link markdown rendering, CDN source, security config and fileId extraction"
+- commit_exit_code: 0
+- push_command: git push gitee main
+- push_exit_code: 0
+- remote_head_check_command: git ls-remote gitee main
+- remote_head: 8fdbe296b95e7780d1110ececd4a506fea6e5cb4
+- result: ✅ Gitee 推送成功，GitHub 推送失败（网络原因：Failed to connect to github.com port 443）。修复内容：1) Markdown 渲染支持链接和内联代码；2) CDN 切换为国内镜像；3) 安全配置放行下载接口；4) 修复 fileId 提取逻辑（移除错误的 HandlerMapping 属性使用）
+
+### 上次推送（2026-08-31 下载工具架构简化重构）
 
 - commit_type: Task
 - task_id: 0001
