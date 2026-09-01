@@ -22,7 +22,7 @@ spring:
         api-key: ${DASHSCOPE_API_KEY:default_dashscope_api_key}
         base-url: https://dashscope.aliyuncs.com/compatible-mode
         options:
-          model: glm-5.2
+          model: qwen3.7-flash
           temperature: 0.7
           # 注意：不能在这里配置 timeout，OpenAiChatOptions 没有 timeout 属性
           # 超时配置在 SpringAiTimeoutConfig 类中，通过 RestClient.Builder 实现

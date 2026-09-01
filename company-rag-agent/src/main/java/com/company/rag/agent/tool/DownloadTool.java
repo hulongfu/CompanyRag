@@ -1,18 +1,16 @@
 package com.company.rag.agent.tool;
 
-import com.company.rag.agent.service.DownloadRecord;
 import com.company.rag.agent.service.DownloadService;
 import com.company.rag.tenant.context.TenantContext;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
-import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.Map;
 
 /**
- * 下载工具
+ * 下载工具（简化版）
  * 
  * 提供文件下载能力，将内容写入文件并生成下载链接
  * 适用于：
@@ -22,15 +20,18 @@ import java.util.Map;
  * - 导出代码文件
  * 
  * 实现 AgentTool 接口以被 AgentToolRegistry 自动注册
+ * 
+ * 参数说明：
+ * - content: 文件内容（必填）
+ * - filename: 文件名（可选，未指定则自动生成）
+ * - contentType: 文件类型（可选，未指定则根据扩展名推断）
  */
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class DownloadTool implements AgentTool {
     
-    @Autowired
-    private DownloadService downloadService;
-    
-    private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    private final DownloadService downloadService;
     
     @Override
     public String getName() {
@@ -39,7 +40,8 @@ public class DownloadTool implements AgentTool {
     
     @Override
     public String getDescription() {
-        return "将内容写入文件并生成下载链接，用户可点击下载获取文件。适用于导出 API 文档、检索结果、分析报告、代码文件等场景。";
+        return "将内容写入文件并生成下载链接，用户可点击下载获取文件。适用于导出 API 文档、检索结果、分析报告、代码文件等场景。" +
+               "filename 参数可选，未指定则自动生成文件名（时间戳 + 随机数）。";
     }
     
     @Override
@@ -53,14 +55,14 @@ public class DownloadTool implements AgentTool {
                 ),
                 "filename", Map.of(
                         "type", "string",
-                        "description", "文件名，如 report.md、data.csv、code.py"
+                        "description", "文件名（可选），如 report.md、data.csv、code.py。未指定则自动生成"
                 ),
                 "contentType", Map.of(
                         "type", "string",
                         "description", "文件类型（可选），如 text/markdown、text/plain、application/json"
                 )
         ));
-        schema.put("required", new String[]{"content", "filename"});
+        schema.put("required", new String[]{"content"});
         return schema;
     }
     
@@ -85,52 +87,47 @@ public class DownloadTool implements AgentTool {
                 return "❌ 文件生成失败：内容不能为空";
             }
             
-            if (filename == null || filename.isEmpty()) {
-                return "❌ 文件生成失败：文件名不能为空";
-            }
-            
-            // 1. 获取当前租户 ID
+            // 1. 获取当前租户 ID 和用户 ID
             Long tenantId = TenantContext.getTenantId();
             if (tenantId == null) {
-                log.warn("未找到租户上下文，使用默认租户 ID=1");
-                tenantId = 1L;
+                log.error("租户上下文缺失，无法创建下载文件");
+                throw new IllegalStateException("租户上下文缺失，无法创建下载文件");
             }
+            
+            // 用户 ID 暂时不传（简化版本不使用用户目录）
+            Long userId = null;
             
             log.info("创建下载文件：tenantId={}, filename={}, contentType={}, contentLength={}",
                 tenantId, filename, contentType, content.length());
             
             // 2. 调用 Service 生成文件
-            DownloadRecord record = downloadService.createDownloadFile(
+            String fileId = downloadService.createDownloadFile(
                 tenantId,
+                userId,
                 content,
                 filename,
                 contentType
             );
             
-            // 3. 返回下载信息（自然语言格式，方便 Agent 理解）
+            // 3. 构建下载链接
+            String downloadUrl = "/api/download/" + fileId;
+            
+            // 4. 返回下载信息（自然语言格式，方便 Agent 理解）
             return String.format("""
                 ✅ 文件已生成成功！
                 
                 **文件信息**：
                 - 文件名：%s
-                - 大小：%d 字节（%.2f KB）
                 - 类型：%s
-                - 创建时间：%s
-                - 过期时间：%s
                 
                 **下载链接**：
                 %s
                 
-                用户可点击下载链接获取文件。文件将在 %s 小时后自动删除。
+                用户可点击下载链接获取文件。文件将在明天自动删除（过期目录清理）。
                 """,
-                record.getFilename(),
-                record.getSize(),
-                record.getSize() / 1024.0,
-                record.getContentType(),
-                record.getCreatedAt().format(FORMATTER),
-                record.getExpiresAt().format(FORMATTER),
-                record.getDownloadUrl(),
-                record.getExpiresAt().getHour() - record.getCreatedAt().getHour()
+                filename != null ? filename : "自动生成",
+                contentType != null ? contentType : "自动推断",
+                downloadUrl
             );
             
         } catch (IllegalArgumentException e) {

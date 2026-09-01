@@ -11,6 +11,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.cloud.function.context.config.ContextFunctionCatalogAutoConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
+import org.springframework.scheduling.annotation.EnableAsync;
 
 import java.util.List;
 
@@ -28,6 +29,7 @@ import java.util.List;
 })
 @ComponentScan(basePackages = "com.company.rag")
 @MapperScan({"com.company.rag.tenant.mapper", "com.company.rag.document.mapper", "com.company.rag.rag.mapper"})
+@EnableAsync  // 启用异步方法支持（用于下载工具的异步清理）
 public class CompanyRagApplication {
 
     public static void main(String[] args) {

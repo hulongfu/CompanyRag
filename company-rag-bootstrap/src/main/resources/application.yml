@@ -178,6 +178,17 @@ agent:
   # 开发环境：D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe
   # 生产环境：/usr/bin/python3 或 /opt/venv/bin/python
   python-exec-path: ${PYTHON_EXEC_PATH:D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe}
+  
+  # 下载工具配置
+  download:
+    # 文件存储根目录（可配置，支持不同环境）
+    # Windows 默认：D:/downloads
+    # Linux 默认：/tmp/downloads
+    base-dir: ${DOWNLOAD_BASE_DIR:D:/downloads}
+    # 单个文件最大大小（字节），默认 50MB
+    max-file-size: ${DOWNLOAD_MAX_FILE_SIZE:52428800}
+    # 清理标识过期时间（小时），默认 24 小时（每天清理一次）
+    cleanup-expire-hours: ${DOWNLOAD_CLEANUP_EXPIRE_HOURS:24}
 
 # 代码搜索工具配置
 app:

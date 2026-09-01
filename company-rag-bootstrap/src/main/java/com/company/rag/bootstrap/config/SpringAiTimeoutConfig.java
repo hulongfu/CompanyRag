@@ -1,5 +1,6 @@
 package com.company.rag.bootstrap.config;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.ClientHttpRequestFactory;
@@ -26,12 +27,18 @@ import java.time.Duration;
 public class SpringAiTimeoutConfig {
 
     /**
-     * LLM 调用超时时间（秒）
+     * LLM 调用超时时间（从配置文件读取）
      * - 连接超时：建立 TCP 连接的时间
      * - 读取超时：等待 LLM 响应的时间（包括流式响应）
+     * 
+     * 配置项：spring.http.client.connect-timeout / read-timeout
+     * 格式：数字 + 单位（如 10s, 300s, 2m）
      */
-    private static final int CONNECT_TIMEOUT_SECONDS = 10;
-    private static final int READ_TIMEOUT_SECONDS = 120; // 2 分钟，给 LLM 充足的响应时间
+    @Value("${spring.http.client.connect-timeout:10s}")
+    private String connectTimeoutStr;
+    
+    @Value("${spring.http.client.read-timeout:300s}")
+    private String readTimeoutStr;
 
     /**
      * 配置 RestClient 的超时（用于非流式响应）
@@ -39,10 +46,10 @@ public class SpringAiTimeoutConfig {
      */
     @Bean
     public RestClient.Builder restClientBuilder() {
-        ClientHttpRequestFactory requestFactory = createRequestFactory(
-            Duration.ofSeconds(CONNECT_TIMEOUT_SECONDS),
-            Duration.ofSeconds(READ_TIMEOUT_SECONDS)
-        );
+        Duration connectTimeout = parseDuration(connectTimeoutStr);
+        Duration readTimeout = parseDuration(readTimeoutStr);
+        
+        ClientHttpRequestFactory requestFactory = createRequestFactory(connectTimeout, readTimeout);
         
         return RestClient.builder()
                 .requestFactory(requestFactory);
@@ -59,5 +66,39 @@ public class SpringAiTimeoutConfig {
         factory.setConnectTimeout((int) connectTimeout.toMillis());
         factory.setReadTimeout((int) readTimeout.toMillis());
         return factory;
+    }
+    
+    /**
+     * 解析时间字符串为 Duration
+     * 支持格式：数字 + 单位（如 "10s", "300s", "2m", "1h"）
+     * 
+     * @param timeStr 时间字符串
+     * @return Duration 对象
+     */
+    private Duration parseDuration(String timeStr) {
+        if (timeStr == null || timeStr.trim().isEmpty()) {
+            return Duration.ofSeconds(10); // 默认 10 秒
+        }
+        
+        timeStr = timeStr.trim().toLowerCase();
+        
+        try {
+            // 支持 Spring Boot 的时间格式：数字 + 单位
+            if (timeStr.endsWith("ms")) {
+                return Duration.ofMillis(Long.parseLong(timeStr.substring(0, timeStr.length() - 2)));
+            } else if (timeStr.endsWith("s")) {
+                return Duration.ofSeconds(Long.parseLong(timeStr.substring(0, timeStr.length() - 1)));
+            } else if (timeStr.endsWith("m")) {
+                return Duration.ofMinutes(Long.parseLong(timeStr.substring(0, timeStr.length() - 1)));
+            } else if (timeStr.endsWith("h")) {
+                return Duration.ofHours(Long.parseLong(timeStr.substring(0, timeStr.length() - 1)));
+            } else {
+                // 纯数字，默认按秒处理
+                return Duration.ofSeconds(Long.parseLong(timeStr));
+            }
+        } catch (NumberFormatException e) {
+            // 解析失败时返回默认值
+            return Duration.ofSeconds(10);
+        }
     }
 }
