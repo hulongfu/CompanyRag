@@ -4,7 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CompanyRag - 企业知识库</title>
-    <link rel="stylesheet" href="https://unpkg.com/element-plus@2.4.4/dist/index.css">
+    <!-- 使用国内 CDN 镜像，提高加载速度和稳定性 -->
+    <link rel="stylesheet" href="https://cdn.staticfile.net/element-plus/2.6.1/index.css">
+    <script src="https://cdn.staticfile.net/vue/3.4.21/vue.global.prod.min.js"></script>
+    <script src="https://cdn.staticfile.net/element-plus/2.6.1/index.full.min.js"></script>
+    <!-- Element Plus Icons 使用独立的包 -->
+    <script src="https://cdn.staticfile.net/element-plus-icons-vue/2.3.1/global.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         html, body { overflow-x: hidden; width: 100%; }
@@ -544,9 +549,6 @@
 })();
 </script>
 
-<script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
-<script src="https://unpkg.com/element-plus@2.4.4/dist/index.full.min.js"></script>
-<script src="https://unpkg.com/@element-plus/icons-vue"></script>
 <script>
 const { createApp, ref, nextTick, onMounted } = Vue;
 
@@ -671,6 +673,10 @@ createApp({
             if (!text) return '';
             return text.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre style="background:#f5f5f5;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>$2</code></pre>')
                        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                       // 处理内联代码 `text` (必须在链接之前处理，否则会破坏链接语法)
+                       .replace(/`([^`]+)`/g, '<code style="background:#f5f5f5;padding:2px 6px;border-radius:3px;font-size:13px;">$1</code>')
+                       // 处理 Markdown 链接 [text](url) - 使用 Unicode 转义避免 Thymeleaf 误解析
+                       .replace(/\u005B([^\u005D]+)\u005D\u0028([^)]+)\u0029/g, '<a href="$2" target="_blank" style="color:#1a73e8;text-decoration:underline;">$1</a>')
                        .replace(/\n/g, '<br>');
         }
 

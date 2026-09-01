@@ -2,7 +2,38 @@
 
 ## Git Push
 
-### 最新推送（2026-08-31 P0 阶段）
+### 最新推送（2026-08-31 下载工具架构简化重构）
+
+- commit_type: Task
+- task_id: 0001
+- task_name: 下载工具架构简化重构
+- commit_hash: bf0a42a
+- branch: main
+- remote: gitee & origin
+- staged_files:
+  - company-rag-agent/src/main/java/com/company/rag/agent/config/DownloadConfig.java（修改）
+  - company-rag-agent/src/main/java/com/company/rag/agent/service/DownloadService.java（修改）
+  - company-rag-agent/src/main/java/com/company/rag/agent/tool/DownloadTool.java（修改）
+  - company-rag-bootstrap/src/main/java/com/company/rag/bootstrap/CompanyRagApplication.java（修改）
+  - company-rag-bootstrap/src/main/java/com/company/rag/bootstrap/config/SpringAiTimeoutConfig.java（修改）
+  - company-rag-bootstrap/src/main/resources/application-dev.yml（修改）
+  - company-rag-bootstrap/src/main/resources/application-prod.yml（修改）
+  - company-rag-bootstrap/src/main/resources/application.yml（修改）
+  - company-rag-rag/src/main/java/com/company/rag/rag/config/RagCacheConfig.java（修改）
+  - company-rag-web/src/main/java/com/company/rag/web/controller/DownloadFileController.java（修改）
+  - company-rag-agent/src/main/java/com/company/rag/agent/service/DownloadRecord.java（删除）
+  - company-rag-common/src/main/java/com/company/rag/common/request/DownloadRequest.java（删除）
+  - company-rag-common/src/main/java/com/company/rag/common/response/DownloadResponse.java（删除）
+- commit_message: Task:0001_下载工具架构简化重构：优化 CacheManager 配置和路径穿越防护
+- commit_command: git commit -m "Task:0001_下载工具架构简化重构：优化 CacheManager 配置和路径穿越防护"
+- commit_exit_code: 0
+- push_command: git push gitee main && git push origin main
+- push_exit_code: 0
+- remote_head_check_command: git ls-remote gitee main
+- remote_head: bf0a42aa059abbb918afae04219514790903ae6d
+- result: ✅ 推送成功，Gitee 和 GitHub 远端 HEAD 与本地一致（下载工具架构简化完成：CacheManager 独立配置 + 路径穿越防护）
+
+### 上次推送（2026-08-31 P0 阶段）
 
 - commit_type: Task
 - task_id: 0001

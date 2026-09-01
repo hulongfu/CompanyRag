@@ -109,25 +109,27 @@ public class DownloadTool implements AgentTool {
                 contentType
             );
             
-            // 3. 构建下载链接
+            // 3. 构建下载链接 (使用 Markdown 链接格式，前端可渲染为可点击链接)
             String downloadUrl = "/api/download/" + fileId;
+            String markdownLink = String.format("[📥 点击下载 `%s`](%s)", 
+                filename != null ? filename : "下载文件", downloadUrl);
             
-            // 4. 返回下载信息（自然语言格式，方便 Agent 理解）
+            // 4. 返回下载信息 (自然语言格式，方便 Agent 理解)
             return String.format("""
                 ✅ 文件已生成成功！
                 
-                **文件信息**：
+                **文件信息**:
                 - 文件名：%s
                 - 类型：%s
                 
-                **下载链接**：
+                **下载链接**:
                 %s
                 
-                用户可点击下载链接获取文件。文件将在明天自动删除（过期目录清理）。
+                > ⏰ 提示：文件将在明天自动清理 (过期目录机制),请及时下载保存。
                 """,
                 filename != null ? filename : "自动生成",
                 contentType != null ? contentType : "自动推断",
-                downloadUrl
+                markdownLink
             );
             
         } catch (IllegalArgumentException e) {

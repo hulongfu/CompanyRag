@@ -103,6 +103,9 @@ public class SecurityConfig {
                 // 放行 MCP 端点（MCP Server 需要被外部 AI 应用/框架调用）
                 .requestMatchers(new AntPathRequestMatcher("/mcp/**")).permitAll()
                 
+                // 放行下载接口（下载链接是临时生成的，包含租户信息，且有安全检查）
+                .requestMatchers(new AntPathRequestMatcher("/api/download/**")).permitAll()
+                
                 // 其他所有请求需要认证
                 .anyRequest().authenticated()
             )

@@ -55,17 +55,11 @@ public class DownloadFileController {
     public ResponseEntity<Resource> downloadFile(HttpServletRequest request) {
         // 1. 从请求 URI 中提取 fileId
         // URI 格式：/api/download/20260831/tenant-1/user-100/report.md
-        // 使用 bestMatchingUri 获取实际匹配的路径模式
         String requestUri = request.getRequestURI();
         
         // 从 URI 中提取 fileId：移除 /api/download 前缀
-        // 使用 Spring 的 HandlerMapping 属性获取匹配模式后的路径
-        String fileId = (String) request.getAttribute(org.springframework.web.servlet.HandlerMapping.PATH_WITHIN_HANDLER_MAPPING_ATTRIBUTE);
-        
-        // 如果无法从属性获取，则手动提取（防御性处理）
-        if (fileId == null || fileId.isEmpty()) {
-            fileId = extractFileIdFromUri(requestUri, "/api/download");
-        }
+        // fileId 格式：20260831/tenant-1/user-100/report.md
+        String fileId = extractFileIdFromUri(requestUri, "/api/download");
         
         // 【安全检查】验证 fileId 是否包含路径穿越字符
         if (!validateFileId(fileId)) {
