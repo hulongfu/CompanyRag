@@ -16,8 +16,9 @@ import java.util.concurrent.TimeUnit;
  * TTL=5 分钟，最大 100 条
  * 
  * 同时配置下载清理标识缓存（downloadCleanup）：
- * - 用于标识日期目录已清理，避免重复清理
+ * - 用于标识已执行过清理，避免重复清理
  * - TTL=24 小时，最大 1000 条
+ * - 使用固定 key（downloadCleanFlag），利用缓存过期机制实现每天清理一次
  */
 @Configuration
 @EnableCaching
@@ -42,6 +43,7 @@ public class RagCacheConfig {
      * 下载清理标识缓存
      * TTL=24 小时，最大 1000 条
      * 注意：缓存名称必须与 @Cacheable 的 value 对应
+     * 使用固定 key（downloadCleanFlag），缓存过期后可再次执行清理
      */
     @Bean
     public CacheManager downloadCleanupCacheManager() {

@@ -1,6 +1,8 @@
 package com.company.rag.agent.tool;
 
 import com.company.rag.agent.service.DownloadService;
+import com.company.rag.tenant.context.TenantContext;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InjectMocks;
@@ -29,6 +31,14 @@ class DownloadToolTest {
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
+        // 设置测试上下文
+        TenantContext.setTenantId(1L);
+        TenantContext.setSessionId("test-session-123");
+    }
+    
+    @AfterEach
+    void tearDown() {
+        TenantContext.clear();
     }
 
     @Test
@@ -61,9 +71,8 @@ class DownloadToolTest {
         @SuppressWarnings("unchecked")
         String[] required = (String[]) schema.get("required");
         assertNotNull(required);
-        assertEquals(2, required.length);
+        assertEquals(1, required.length);  // 只有 content 是必需的
         assertEquals("content", required[0]);
-        assertEquals("filename", required[1]);
     }
 
     @Test
@@ -74,20 +83,10 @@ class DownloadToolTest {
         params.put("filename", "test.md");
         params.put("contentType", "text/markdown");
         
-        // Mock Service 返回
+        // Mock Service 返回（现在返回 String 文件 ID）
         when(downloadService.createDownloadFile(
-            anyLong(), anyString(), anyString(), anyString()
-        )).thenAnswer(invocation -> {
-            com.company.rag.agent.service.DownloadRecord record = 
-                new com.company.rag.agent.service.DownloadRecord();
-            record.setFileId("test123");
-            record.setFilename("test.md");
-            record.setSize(100L);
-            record.setContentType("text/markdown");
-            record.setCreatedAt(java.time.LocalDateTime.now());
-            record.setExpiresAt(java.time.LocalDateTime.now().plusHours(24));
-            return record;
-        });
+            anyLong(), anyString(), anyString(), anyString(), anyString()
+        )).thenReturn("test-file-id-123");
         
         // 执行测试
         String result = downloadTool.execute(params);
@@ -97,11 +96,11 @@ class DownloadToolTest {
         assertTrue(result.contains("✅"));
         assertTrue(result.contains("文件已生成成功"));
         assertTrue(result.contains("test.md"));
-        assertTrue(result.contains("/api/download/test123"));
+        assertTrue(result.contains("/api/download/test-file-id-123"));
         
         // 验证 Service 被调用
         verify(downloadService, times(1)).createDownloadFile(
-            anyLong(), anyString(), anyString(), anyString()
+            anyLong(), anyString(), anyString(), anyString(), anyString()
         );
     }
 
@@ -129,15 +128,21 @@ class DownloadToolTest {
 
     @Test
     void testExecute_NullFilename() {
+        // 空文件名时会自动生成文件名，不会报错
         Map<String, Object> params = new HashMap<>();
         params.put("content", "Test content");
         params.put("filename", "");
         
+        // Mock Service 返回
+        when(downloadService.createDownloadFile(
+            anyLong(), anyString(), anyString(), anyString(), anyString()
+        )).thenReturn("auto-generated-file-id");
+        
         String result = downloadTool.execute(params);
         
         assertNotNull(result);
-        assertTrue(result.contains("❌"));
-        assertTrue(result.contains("文件名不能为空"));
+        assertTrue(result.contains("✅"));  // 空文件名会成功，自动生成文件名
+        assertTrue(result.contains("文件已生成成功"));
     }
 
     @Test
@@ -146,14 +151,16 @@ class DownloadToolTest {
         params.put("content", "Test content");
         params.put("filename", "test.md");
         
+        // Mock 抛出异常（使用更通用的 any() 匹配器）
         when(downloadService.createDownloadFile(
-            anyLong(), anyString(), anyString(), anyString()
-        )).thenThrow(new RuntimeException("Test exception"));
+            any(), any(), any(), any(), any()
+        )).thenThrow(new IllegalArgumentException("文件大小超过限制"));
         
         String result = downloadTool.execute(params);
         
         assertNotNull(result);
         assertTrue(result.contains("❌"));
         assertTrue(result.contains("文件生成失败"));
+        // 不检查具体异常消息，因为可能被包装或转换
     }
 }

@@ -29,14 +29,15 @@ import java.util.UUID;
  * 2. 清理策略：异步清理过期目录（> 昨天的目录）
  * 3. 无内存依赖：不存储 DownloadRecord，基于文件系统
  * 4. 智能清理：使用 Caffeine 缓存清理标识，避免重复清理
+ * 5. 会话隔离：按会话 ID 分目录，避免同名文件覆盖
  * 
  * 目录结构：
  * ${agent.download.base-dir}/
  * ├── 20260831/                # 日期目录
  * │   ├── tenant-1/            # 租户目录
- * │   │   ├── user-100/        # 用户目录
+ * │   │   ├── session-xxx/     # 会话目录（隔离不同会话的文件）
  * │   │   │   └── api-doc.md   # 文件
- * │   │   └── user-101/
+ * │   │   └── session-yyy/
  * │   └── tenant-2/
  * └── 20260830/                # 昨天的目录（明天清理）
  */
@@ -72,8 +73,7 @@ public class DownloadService {
                 Files.createDirectories(baseDir);
                 log.info("创建下载文件根目录：{}", baseDir.toAbsolutePath());
             }
-            log.info("下载服务初始化完成，根目录：{}, 清理标识过期时间：{}小时", 
-                downloadConfig.getBaseDir(), downloadConfig.getCleanupExpireHours());
+            log.info("下载服务初始化完成，根目录：{}", downloadConfig.getBaseDir());
         } catch (IOException e) {
             log.error("创建下载文件根目录失败：{}", downloadConfig.getBaseDir(), e);
             throw new RuntimeException("下载服务初始化失败", e);
@@ -84,15 +84,15 @@ public class DownloadService {
      * 创建下载文件
      * 
      * @param tenantId 租户 ID
-     * @param userId 用户 ID（可选，null 则不使用用户目录）
+     * @param sessionId 会话 ID（用于隔离不同会话的文件，避免覆盖）
      * @param content 文件内容
-     * @param filename 文件名（用户指定或 null 使用自动生成）
+     * @param filename 文件名（可选，null 则不使用用户目录）
      * @param contentType MIME 类型（可选，null 则自动推断）
      * @return 文件 ID（用于下载）
      */
     public String createDownloadFile(
         Long tenantId,
-        Long userId,
+        String sessionId,
         String content,
         String filename,
         String contentType
@@ -101,7 +101,7 @@ public class DownloadService {
         validateFilename(filename);
         String safeFilename = sanitizeFilename(filename);
         
-        // 2. 如果用户未指定文件名，自动生成
+        // 2. 如果用户未指定文件名，自动生成（带随机数避免重复）
         if (safeFilename == null || safeFilename.isEmpty()) {
             safeFilename = generateFilename(contentType);
         }
@@ -118,12 +118,13 @@ public class DownloadService {
             contentType = inferContentType(safeFilename);
         }
         
-        // 5. 构建文件路径（按日期 + 租户 + 用户分目录）
+        // 5. 构建文件路径（按日期 + 租户 + 会话分目录）
+        // 目录结构：baseDir/yyyyMMdd/tenant-xxx/session-xxx/filename
         String dateDir = LocalDate.now().format(DATE_FORMATTER);
         String tenantDir = "tenant-" + tenantId;
-        String userDir = (userId != null) ? "user-" + userId : null;
+        String sessionDir = (sessionId != null && !sessionId.isEmpty()) ? "session-" + sessionId : null;
         
-        Path filePath = buildFilePath(dateDir, tenantDir, userDir, safeFilename);
+        Path filePath = buildFilePath(dateDir, tenantDir, sessionDir, safeFilename);
         
         // 6. 写入文件
         try {
@@ -142,8 +143,8 @@ public class DownloadService {
         }
         
         // 7. 返回文件 ID（文件路径相对于 baseDir 的相对路径作为 ID）
-        // 格式：dateDir/tenantDir/[userDir]/filename
-        String fileId = buildFileId(dateDir, tenantDir, userDir, safeFilename);
+        // 格式：dateDir/tenantDir/[sessionDir]/filename
+        String fileId = buildFileId(dateDir, tenantDir, sessionDir, safeFilename);
         log.debug("生成文件 ID: {}", fileId);
         
         return fileId;
@@ -203,11 +204,14 @@ public class DownloadService {
     /**
      * 异步清理过期目录
      * 使用 Spring CacheManager 管理清理标识，避免重复清理
+     * 
+     * 清理策略：
+     * - 使用固定 key（downloadCleanFlag）记录清理标识
+     * - 缓存 TTL=24 小时，过期后可再次清理
+     * - 清理早于昨天（> 当前日期 -1 天）的目录
      */
     @Async
     public void cleanupOldDirectoriesAsync() {
-        String todayKey = LocalDate.now().format(DATE_FORMATTER);
-        
         // 从指定的 CacheManager 获取缓存
         org.springframework.cache.Cache cleanupCache = cleanupCacheManager.getCache("downloadCleanup");
         if (cleanupCache == null) {
@@ -217,18 +221,18 @@ public class DownloadService {
             return;
         }
         
-        // 检查今天是否已清理
-        if (cleanupCache.get(todayKey) != null) {
-            log.debug("今天已执行过清理，跳过：{}", todayKey);
+        // 使用固定 key 检查是否已清理（利用缓存 24 小时过期机制）
+        if (cleanupCache.get("downloadCleanFlag") != null) {
+            log.debug("今天已执行过清理，跳过");
             return;
         }
         
         // 执行清理
         cleanupOldDirectories();
         
-        // 标记已清理
-        cleanupCache.put(todayKey, Boolean.TRUE);
-        log.info("标记清理完成：{}", todayKey);
+        // 标记已清理（24 小时后缓存过期，可再次清理）
+        cleanupCache.put("downloadCleanFlag", Boolean.TRUE);
+        log.info("标记清理完成，下次清理将在 24 小时后");
     }
     
     /**
@@ -424,11 +428,11 @@ public class DownloadService {
     /**
      * 构建文件路径
      */
-    private Path buildFilePath(String dateDir, String tenantDir, String userDir, String filename) {
+    private Path buildFilePath(String dateDir, String tenantDir, String sessionDir, String filename) {
         Path path = Paths.get(downloadConfig.getBaseDir(), dateDir, tenantDir);
         
-        if (userDir != null) {
-            path = path.resolve(userDir);
+        if (sessionDir != null) {
+            path = path.resolve(sessionDir);
         }
         
         return path.resolve(filename);
@@ -437,9 +441,9 @@ public class DownloadService {
     /**
      * 构建文件 ID（相对路径）
      */
-    private String buildFileId(String dateDir, String tenantDir, String userDir, String filename) {
-        if (userDir != null) {
-            return String.format("%s/%s/%s/%s", dateDir, tenantDir, userDir, filename);
+    private String buildFileId(String dateDir, String tenantDir, String sessionDir, String filename) {
+        if (sessionDir != null) {
+            return String.format("%s/%s/%s/%s", dateDir, tenantDir, sessionDir, filename);
         } else {
             return String.format("%s/%s/%s", dateDir, tenantDir, filename);
         }

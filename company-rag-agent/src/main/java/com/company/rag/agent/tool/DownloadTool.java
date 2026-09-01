@@ -41,7 +41,8 @@ public class DownloadTool implements AgentTool {
     @Override
     public String getDescription() {
         return "将内容写入文件并生成下载链接，用户可点击下载获取文件。适用于导出 API 文档、检索结果、分析报告、代码文件等场景。" +
-               "filename 参数可选，未指定则自动生成文件名（时间戳 + 随机数）。";
+               "filename 参数可选，未指定则自动生成文件名（时间戳 + 随机数）。" +
+               "sessionId 由系统自动从当前会话上下文获取，无需手动传递。";
     }
     
     @Override
@@ -82,28 +83,27 @@ public class DownloadTool implements AgentTool {
             String content = (String) params.get("content");
             String filename = (String) params.get("filename");
             String contentType = (String) params.get("contentType");
+            // 从上下文获取 sessionId（不是从 LLM 参数获取，因为那是不可信输入）
+            String sessionId = TenantContext.getSessionId();
             
             if (content == null || content.isEmpty()) {
                 return "❌ 文件生成失败：内容不能为空";
             }
             
-            // 1. 获取当前租户 ID 和用户 ID
+            // 1. 获取当前租户 ID
             Long tenantId = TenantContext.getTenantId();
             if (tenantId == null) {
                 log.error("租户上下文缺失，无法创建下载文件");
                 throw new IllegalStateException("租户上下文缺失，无法创建下载文件");
             }
             
-            // 用户 ID 暂时不传（简化版本不使用用户目录）
-            Long userId = null;
+            log.info("创建下载文件：tenantId={}, sessionId={}, filename={}, contentType={}, contentLength={}",
+                tenantId, sessionId, filename, contentType, content.length());
             
-            log.info("创建下载文件：tenantId={}, filename={}, contentType={}, contentLength={}",
-                tenantId, filename, contentType, content.length());
-            
-            // 2. 调用 Service 生成文件
+            // 2. 调用 Service 生成文件（传递 sessionId 用于隔离不同会话的文件）
             String fileId = downloadService.createDownloadFile(
                 tenantId,
-                userId,
+                sessionId,
                 content,
                 filename,
                 contentType
