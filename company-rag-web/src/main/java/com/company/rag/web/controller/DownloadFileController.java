@@ -25,9 +25,9 @@ import java.nio.file.Path;
  * ${agent.download.base-dir}/
  * ├── 20260831/                # 日期目录（yyyyMMdd）
  * │   ├── tenant-1/            # 租户目录
- * │   │   ├── user-100/        # 用户目录
+ * │   │   ├── session-xxx/     # 会话目录
  * │   │   │   └── api-doc.md   # 文件
- * │   │   └── user-101/
+ * │   │   └── session-yyy/
  * │   └── tenant-2/
  * └── 20260830/                # 昨天的目录（明天清理）
  */
@@ -39,18 +39,18 @@ public class DownloadFileController {
     
     private final DownloadService downloadService;
     
-    /**
-     * 下载文件
-     * 
-     * 下载时触发异步清理：
-     * - 使用 Caffeine 缓存标识，避免重复清理
-     * - 清理过期目录（日期 < 当前日期 -1 天）
-     * 
-     * 使用 /** 匹配多段路径（fileId 包含日期/租户/用户/文件名）
-     * 
-     * @param request HTTP 请求（用于提取 fileId）
-     * @return 文件流（Content-Disposition: attachment）
-     */
+     /**
+      * 下载文件
+      * 
+      * 下载时触发异步清理：
+      * - 使用 Caffeine 缓存标识，避免重复清理
+      * - 清理过期目录（日期 < 当前日期 -1 天）
+      * 
+      * 使用 /** 匹配多段路径（fileId 包含日期/租户/会话/文件名）
+      * 
+      * @param request HTTP 请求（用于提取 fileId）
+      * @return 文件流（Content-Disposition: attachment）
+      */
     @GetMapping("/**")
     public ResponseEntity<Resource> downloadFile(HttpServletRequest request) {
         // 1. 从请求 URI 中提取 fileId
@@ -107,7 +107,7 @@ public class DownloadFileController {
     /**
      * 从 URI 中提取 fileId（防御性方法，优先使用 HandlerMapping 属性）
      * URI 格式：/api/download/{fileId}
-     * fileId 格式：dateDir/tenantDir/[userDir]/filename
+     * fileId 格式：dateDir/tenantDir/[sessionDir]/filename
      * 
      * @param requestUri 完整请求 URI
      * @param contextPath 上下文路径（如 /api/download）
@@ -192,7 +192,7 @@ public class DownloadFileController {
     
     /**
      * 从文件 ID 中提取文件名
-     * 文件 ID 格式：dateDir/tenantDir/[userDir]/filename
+     * 文件 ID 格式：dateDir/tenantDir/[sessionDir]/filename
      */
     private String extractFilename(String fileId) {
         int lastSlashIndex = fileId.lastIndexOf('/');

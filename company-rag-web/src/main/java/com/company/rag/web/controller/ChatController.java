@@ -60,13 +60,25 @@ public class ChatController {
                 request.setTenantId(tenantId);
             }
             
-            // 从 SecurityContext 获取当前用户 ID
+            // 【关键校验】租户 ID 必须存在，这是多租户隔离的底线
+            if (request.getTenantId() == null) {
+                log.error("租户 ID 缺失，拒绝服务：query={}", request.getQuery());
+                throw new IllegalArgumentException("租户 ID 不能为空，请确认请求头 X-Tenant-Id 或请求体 tenantId 已设置");
+            }
+            TenantContext.setTenantId(request.getTenantId());
+            
+            // 【关键校验】用户 ID 必须存在，这是审计追踪的底线
             if (request.getUserId() == null) {
                 Object principal = SecurityContextHolder.getContext().getAuthentication().getPrincipal();
                 if (principal instanceof SecurityUser) {
                     request.setUserId(((SecurityUser) principal).getUserId());
                 }
             }
+            if (request.getUserId() == null) {
+                log.error("用户 ID 缺失，拒绝服务：userId={}, tenantId={}", request.getUserId(), request.getTenantId());
+                throw new IllegalStateException("用户 ID 不能为空，请确认用户已正确登录");
+            }
+            TenantContext.setUserId(request.getUserId());
             
             // 使用 RagAgentService 处理（Agent 模式，LLM 自动决定调用工具）
             // 如果有 sessionId 和 tenantId，读取历史会话记录并传入
@@ -97,9 +109,8 @@ public class ChatController {
             // 保存会话和聊天记录（包含自动重命名逻辑）
             // 如果有 sessionId，无论 tenantId 是否为空都保存（为空时使用默认租户 1）
             if (request.getSessionId() != null) {
-                Long effectiveTenantId = request.getTenantId() != null ? request.getTenantId() : 1L;
                 ragSessionService.saveConversation(
-                        effectiveTenantId,
+                        request.getTenantId(),
                         request.getSessionId(),
                         request.getUserId(),
                         request.getQuery(),
@@ -107,8 +118,8 @@ public class ChatController {
                         result.getToolContext(),
                         null, null, null
                 );
-                log.debug("保存会话记录：sessionId={}, tenantId={}", 
-                        request.getSessionId(), effectiveTenantId);
+                log.debug("保存会话记录：sessionId={}, tenantId={}, userId={}", 
+                        request.getSessionId(), request.getTenantId(), request.getUserId());
             }
             
             ChatResponse response = ChatResponse.builder()
