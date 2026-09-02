@@ -6,6 +6,7 @@ import com.company.rag.common.tool.ToolCallRecorder;
 import com.company.rag.tenant.context.TenantContext;
 import lombok.extern.slf4j.Slf4j;
 import com.alibaba.cloud.ai.graph.exception.GraphRunnerException;
+import io.micrometer.context.ContextSnapshot;
 import org.slf4j.MDC;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
@@ -14,7 +15,6 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -138,8 +138,11 @@ public class RagAgentService {
      */
     private AssistantMessage callAgentWithTimeout(List<Message> messages) throws GraphRunnerException, Exception {
         try {
-            // 捕获当前线程的 MDC（含 traceId/spanId）与租户上下文，因 ThreadLocal 不自动传给子线程
-            Map<String, String> mdcContext = MDC.getCopyOfContextMap();
+            // 捕获当前线程全部上下文（含 Observation span 与 MDC，Micrometer 自动注入 traceId/spanId），
+            // 用 ContextSnapshot 整体传播可确保父 span 的 ObservationScope 在子线程激活，
+            // 否则仅复制 MDC 字符串无父 scope，LLM 子 span 关闭时 MDC 会被清空
+            ContextSnapshot snapshot = ContextSnapshot.captureAll();
+            // 租户上下文是自定义 ThreadLocal，ContextSnapshot 无法捕获，需手动传递
             String tenantSchema = TenantContext.getSchema();
             Long tenantId = TenantContext.getTenantId();
             Long userId = TenantContext.getUserId();
@@ -150,11 +153,9 @@ public class RagAgentService {
             // 在 supplyAsync 内部捕获 GraphRunnerException 并包装为 RuntimeException
             CompletableFuture<AssistantMessage> future = CompletableFuture
                     .supplyAsync(() -> {
-                        try {
-                            // 在子线程中恢复 MDC 与租户上下文和会话上下文
-                            if (mdcContext != null) {
-                                MDC.setContextMap(mdcContext);
-                            }
+                        // 在子线程中恢复 Observation span + MDC 上下文（返回的 Scope 在 try-with-resources 结束时自动还原/清理）
+                        try (ContextSnapshot.Scope ignored = snapshot.setThreadLocals()) {
+                            // 恢复租户上下文和会话上下文（自定义 ThreadLocal，需手动传递）
                             if (tenantSchema != null) {
                                 TenantContext.setSchema(tenantSchema);
                             }
@@ -177,8 +178,7 @@ public class RagAgentService {
                         } catch (GraphRunnerException e) {
                             throw new RuntimeException("Agent 执行失败：" + e.getMessage(), e);
                         } finally {
-                            // 清理线程上下文，避免线程池复用时的数据污染
-                            MDC.clear();
+                            // 组件执行结束后，仅清理自定义租户上下文；MDC/Observation 由上面的 Scope.close() 自动还原，避免线程池复用污染
                             TenantContext.clear();
                         }
                     }, executorService);
