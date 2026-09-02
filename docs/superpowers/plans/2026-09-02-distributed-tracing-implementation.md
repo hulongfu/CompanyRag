@@ -30,7 +30,7 @@
 **Files:**
 - Modify: `company-rag-bootstrap/pom.xml`
 
-- [ ] **Step 1: 在 `pom.xml` 中添加依赖**
+- [x] **Step 1: 在 `pom.xml` 中添加依赖**
 
 在 `company-rag-bootstrap/pom.xml` 的 `<dependencies>` 中，紧邻 `micrometer-registry-prometheus` 依赖（约第 73 行）之后加入：
 
@@ -46,12 +46,12 @@
         </dependency>
 ```
 
-- [ ] **Step 2: 编译验证依赖可解析**
+- [x] **Step 2: 编译验证依赖可解析**
 
 Run: `mvn -q -pl company-rag-bootstrap -am -DskipTests compile`
 Expected: `BUILD SUCCESS`（版本由 Spring Boot 3.4.4 BOM 管理）
 
-- [ ] **Step 3: 提交**
+- [x] **Step 3: 提交**
 
 ```bash
 git add company-rag-bootstrap/pom.xml
@@ -65,7 +65,7 @@ git commit -m "feat(tracing): 引入 micrometer-tracing-bridge-otel 依赖"
 **Files:**
 - Modify: `company-rag-bootstrap/src/main/resources/logback-spring.xml`
 
-- [ ] **Step 1: 替换三处 pattern**
+- [x] **Step 1: 替换三处 pattern**
 
 将文件中 3 个 appender（CONSOLE、FILE、ERROR_FILE）的 `<pattern>` 从：
 ```xml
@@ -76,7 +76,7 @@ git commit -m "feat(tracing): 引入 micrometer-tracing-bridge-otel 依赖"
 <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - traceId=%X{traceId} spanId=%X{spanId} - %msg%n</pattern>
 ```
 
-- [ ] **Step 2: 提交**
+- [x] **Step 2: 提交**
 
 ```bash
 git add company-rag-bootstrap/src/main/resources/logback-spring.xml
@@ -93,7 +93,7 @@ git commit -m "feat(tracing): logback pattern 输出 traceId/spanId"
 
 > 说明：删除 `generateTraceId/setTraceId/getTraceId/clearTraceId`，`recordStart/recordEnd` 改为从 `MDC.get("traceId")` 读取；`getAndClearRecords()` 去掉 traceId 参数。
 
-- [ ] **Step 1: 更新单元测试（红）**
+- [x] **Step 1: 更新单元测试（红）**
 
 将 `ToolCallRecorderTest.java` 的测试改为针对新签名与 MDC 集成，完整内容如下：
 
@@ -182,12 +182,12 @@ class ToolCallRecorderTest {
 }
 ```
 
-- [ ] **Step 2: 运行测试确认失败（红）**
+- [x] **Step 2: 运行测试确认失败（红）**
 
 Run: `mvn -q -pl company-rag-common -Dtest=ToolCallRecorderTest test`
 Expected: 编译失败（`ToolCallRecorder` 无无参构造、`getAndClearRecords()` 无参、`recorder.recordStart(String, Map)` 无法解析）
 
-- [ ] **Step 3: 重写 ToolCallRecorder**
+- [x] **Step 3: 重写 ToolCallRecorder**
 
 用以下内容整体替换 `ToolCallRecorder.java`：
 
@@ -287,12 +287,12 @@ public class ToolCallRecorder {
 }
 ```
 
-- [ ] **Step 4: 运行测试确认通过（绿）**
+- [x] **Step 4: 运行测试确认通过（绿）**
 
 Run: `mvn -q -pl company-rag-common -Dtest=ToolCallRecorderTest test`
 Expected: `BUILD SUCCESS`，全部测试通过
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add company-rag-common/src/main/java/com/company/rag/common/tool/ToolCallRecorder.java company-rag-common/src/test/java/com/company/rag/common/tool/ToolCallRecorderTest.java
@@ -309,7 +309,7 @@ git commit -m "refactor(tracing): ToolCallRecorder 改为从 MDC 读取 traceId"
 
 > 说明：主代码 `KnowledgeBaseTool.java:63-95` 需删除 `recorder.getTraceId()`，并将 `recordStart/recordEnd` 调用改为无 traceId 的新签名。`KnowledgeBaseToolEndToEndTest.java` 的 verify 已是新签名（`recordStart("searchKnowledgeBase", any(), any())`），本任务需保证编译一致。
 
-- [ ] **Step 1: 更新 `searchKnowledgeBase` 方法**
+- [x] **Step 1: 更新 `searchKnowledgeBase` 方法**
 
 将 `KnowledgeBaseTool.java` 方法体内（第 56-96 行）的工具调用记录逻辑替换：
 
@@ -356,16 +356,16 @@ git commit -m "refactor(tracing): ToolCallRecorder 改为从 MDC 读取 traceId"
         }
 ```
 
-- [ ] **Step 2: 检查 EndToEndTest 的 verify 新签名**
+- [x] **Step 2: 检查 EndToEndTest 的 verify 新签名**
 
 读取 `KnowledgeBaseToolEndToEndTest.java` 第 60-120 行，确认 verify 调用为 `recordStart("searchKnowledgeBase", any(), any())` 与 `recordEnd("searchKnowledgeBase", "success"/"failed", any(), any())`。若存在任何旧 4 参数 `recordStart`/`recordEnd` 调用，也一并改为新签名。
 
-- [ ] **Step 3: 编译 + 运行模块测试（绿）**
+- [x] **Step 3: 编译 + 运行模块测试（绿）**
 
 Run: `mvn -q -pl company-rag-rag -am -Dtest=KnowledgeBaseToolEndToEndTest,KnowledgeBaseToolTest test`
 Expected: `BUILD SUCCESS`，测试通过（会连带编译 company-rag-common）
 
-- [ ] **Step 4: 提交**
+- [x] **Step 4: 提交**
 
 ```bash
 git add company-rag-rag/src/main/java/com/company/rag/rag/tools/KnowledgeBaseTool.java company-rag-rag/src/test/java/com/company/rag/rag/tools/KnowledgeBaseToolEndToEndTest.java
@@ -381,7 +381,7 @@ git commit -m "refactor(tracing): KnowledgeBaseTool 适配 ToolCallRecorder 新�
 
 > 说明：删除 `recorder.generateTraceId()/setTraceId()/clearTraceId()` 调用与 `[AGENT] traceId=` 手动输出；在 `callAgentWithTimeout` 异步提交前捕获 MDC，子线程恢复。沿用 `TenantContext` 传递模式，并用 `MDC.clear()` 兜底清理线程池复用污染。
 
-- [ ] **Step 1: 增加 import**
+- [x] **Step 1: 增加 import**
 
 在 `RagAgentService.java` import 区加入：
 
@@ -390,7 +390,7 @@ import org.slf4j.MDC;
 import java.util.Map;
 ```
 
-- [ ] **Step 2: 重写 `processWithHistory` 的工具记录部分**
+- [x] **Step 2: 重写 `processWithHistory` 的工具记录部分**
 
 将 `processWithHistory` 方法（第 86-130 行）改为：
 
@@ -432,7 +432,7 @@ import java.util.Map;
     }
 ```
 
-- [ ] **Step 3: 重写 `callAgentWithTimeout` 实现 MDC 传递**
+- [x] **Step 3: 重写 `callAgentWithTimeout` 实现 MDC 传递**
 
 将 `callAgentWithTimeout` 方法（第 142-199 行）中的异步提交部分改为在提交前捕获 MDC，在子线程恢复并兜底清理：
 
@@ -499,12 +499,12 @@ import java.util.Map;
 
 > 注意：`MDC.get("traceId")` 在 `processWithHistory` 主线程中调用（该线程由 Spring Web 持有了 trace）。若主线程 traceId 恰为空串，`AgentResult` 的 traceId 字段即为空——不影响功能（该字段仅作返回给前端的标识）。
 
-- [ ] **Step 4: 编译验证**
+- [x] **Step 4: 编译验证**
 
 Run: `mvn -q -pl company-rag-agent -am -DskipTests compile`
 Expected: `BUILD SUCCESS`
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add company-rag-agent/src/main/java/com/company/rag/agent/service/RagAgentService.java
@@ -518,12 +518,12 @@ git commit -m "feat(tracing): RagAgentService 移除手动 traceId 并传递异�
 **Files:**
 - None（仅验证）
 
-- [ ] **Step 1: 编译全模块（跳过测试）**
+- [x] **Step 1: 编译全模块（跳过测试）**
 
 Run: `mvn -q -DskipTests compile`
 Expected: `BUILD SUCCESS`（验证所有模块适配新签名，无编译残留）
 
-- [ ] **Step 2: 运行受影响模块的测试**
+- [x] **Step 2: 运行受影响模块的测试**
 
 Run: `mvn -q -pl company-rag-common,company-rag-rag,company-rag-agent -am -Dtest='ToolCallRecorderTest,KnowledgeBaseToolTest,KnowledgeBaseToolEndToEndTest,DownloadToolTest,DatabaseQueryToolTest,ExecuteToolTest' test`
 Expected: `BUILD SUCCESS`，所有测试通过
