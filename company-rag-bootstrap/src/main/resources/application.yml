@@ -152,6 +152,9 @@ resilience4j:
 
 # Actuator / Prometheus
 management:
+  # 启用 Micrometer Tracing，将 traceId/spanId 自动写入日志 MDC
+  tracing:
+    enabled: true
   endpoints:
     web:
       exposure:
