@@ -2,7 +2,27 @@
 
 ## Git Push
 
-### 最新推送（2026-09-01 下载工具 sessionId 跨线程传递修复）
+### 最新推送（2026-09-01 控制器注释修复与租户校验强化）
+
+- commit_type: Task
+- task_id: 0003
+- task_name: 控制器注释修复与租户校验强化
+- commit_hash: efec973
+- branch: main
+- remote: gitee (成功), origin (失败 - 网络原因)
+- staged_files:
+  - company-rag-web/src/main/java/com/company/rag/web/controller/DownloadFileController.java（修改 - 修复 4 处注释，userDir 改为 sessionDir）
+  - company-rag-web/src/main/java/com/company/rag/web/controller/ChatController.java（修改 - 添加租户 ID 和用户 ID 强制校验）
+- commit_message: Task:0003_控制器注释修复与租户校验强化：fix DownloadFileController comments and add tenant/user validation
+- commit_command: git commit -m "Task:0003_控制器注释修复与租户校验强化：fix DownloadFileController comments and add tenant/user validation"
+- commit_exit_code: 0
+- push_command: git push gitee main
+- push_exit_code: 0
+- remote_head_check_command: git ls-remote gitee main
+- remote_head: efec9733eb3df72259bc5f897a4ff017480dee84
+- result: ✅ Gitee 推送成功，GitHub 推送失败（网络原因：Recv failure: Connection was reset）。修复内容：1) DownloadFileController 注释修复 4 处（类 Javadoc、方法注释），将 userDir 改为 sessionDir；2) ChatController 添加租户 ID 和用户 ID 强制校验，缺失时抛异常拒绝服务，移除默认租户 1 逻辑
+
+### 上次推送（2026-09-01 下载工具 sessionId 跨线程传递修复）
 
 - commit_type: Task
 - task_id: 0002

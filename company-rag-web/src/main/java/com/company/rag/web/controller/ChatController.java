@@ -47,38 +47,46 @@ public class ChatController {
     @PostMapping("/chat")
     @PreAuthorize("isAuthenticated()")
     public R<ChatResponse> chat(@RequestBody ChatRequest request,
-                                @RequestHeader(value = "X-Tenant-Id", required = false) Long tenantId) {
-        log.info("收到聊天请求：query={}, sessionId={}, tenantId={}", 
-                request.getQuery(), request.getSessionId(), tenantId);
+                                @RequestHeader(value = "X-Tenant-Id", required = false) Long headerTenantId) {
+        log.info("收到聊天请求：query={}, sessionId={}, headerTenantId={}", 
+                request.getQuery(), request.getSessionId(), headerTenantId);
         
         // 1. 设置租户和会话上下文（用于工具调用时获取）
         TenantContext.setSessionId(request.getSessionId());
         
         try {
-            // 如果请求体中没有设置 tenantId，从请求头获取
-            if (request.getTenantId() == null && tenantId != null) {
-                request.setTenantId(tenantId);
-            }
+            // 【安全关键】必须使用请求头中的租户 ID（已经过 JwtAuthenticationFilter 验证）
+            // 请求体中的 tenantId 是客户端可控的，完全不可信任，直接忽略
+            Long verifiedTenantId = headerTenantId;
             
             // 【关键校验】租户 ID 必须存在，这是多租户隔离的底线
-            if (request.getTenantId() == null) {
+            if (verifiedTenantId == null) {
                 log.error("租户 ID 缺失，拒绝服务：query={}", request.getQuery());
-                throw new IllegalArgumentException("租户 ID 不能为空，请确认请求头 X-Tenant-Id 或请求体 tenantId 已设置");
+                throw new IllegalArgumentException("租户 ID 不能为空，请确认请求头 X-Tenant-Id 已设置");
             }
-            TenantContext.setTenantId(request.getTenantId());
+            
+            // 将已验证的租户 ID 设置到请求对象中（供后续使用）
+            request.setTenantId(verifiedTenantId);
+            TenantContext.setTenantId(verifiedTenantId);
+            
+            // 【安全关键】用户 ID 必须从已认证的安全上下文中获取，不能信任请求体
+            Object principal = SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+            Long verifiedUserId = null;
+            if (principal instanceof SecurityUser) {
+                verifiedUserId = ((SecurityUser) principal).getUserId();
+            }
             
             // 【关键校验】用户 ID 必须存在，这是审计追踪的底线
-            if (request.getUserId() == null) {
-                Object principal = SecurityContextHolder.getContext().getAuthentication().getPrincipal();
-                if (principal instanceof SecurityUser) {
-                    request.setUserId(((SecurityUser) principal).getUserId());
-                }
-            }
-            if (request.getUserId() == null) {
-                log.error("用户 ID 缺失，拒绝服务：userId={}, tenantId={}", request.getUserId(), request.getTenantId());
+            if (verifiedUserId == null) {
+                log.error("用户 ID 缺失，拒绝服务：principal={}, tenantId={}", 
+                        principal != null ? principal.getClass().getSimpleName() : "null", 
+                        verifiedTenantId);
                 throw new IllegalStateException("用户 ID 不能为空，请确认用户已正确登录");
             }
-            TenantContext.setUserId(request.getUserId());
+            
+            // 将已验证的用户 ID 设置到请求对象中（供后续使用）
+            request.setUserId(verifiedUserId);
+            TenantContext.setUserId(verifiedUserId);
             
             // 使用 RagAgentService 处理（Agent 模式，LLM 自动决定调用工具）
             // 如果有 sessionId 和 tenantId，读取历史会话记录并传入
@@ -149,13 +157,18 @@ public class ChatController {
     @PreAuthorize("isAuthenticated()")
     @Deprecated
     public R<RagResult> ragSearch(@RequestBody RagQuery query,
-                                   @RequestHeader(value = "X-Tenant-Id", required = false) Long tenantId) {
-        log.info("收到 RAG 检索请求：query={}, tenantId={}", query.getQuery(), tenantId);
+                                   @RequestHeader(value = "X-Tenant-Id", required = false) Long headerTenantId) {
+        log.info("收到 RAG 检索请求：query={}, headerTenantId={}", query.getQuery(), headerTenantId);
         
-        // 如果请求体中没有设置 tenantId，从请求头获取
-        if (query.getTenantId() == null && tenantId != null) {
-            query.setTenantId(tenantId);
+        // 【安全关键】必须使用请求头中的租户 ID（已经过 JwtAuthenticationFilter 验证）
+        // 请求体中的 tenantId 是客户端可控的，完全不可信任，直接忽略
+        if (headerTenantId == null) {
+            log.error("租户 ID 缺失，拒绝服务：query={}", query.getQuery());
+            throw new IllegalArgumentException("租户 ID 不能为空，请确认请求头 X-Tenant-Id 已设置");
         }
+        
+        // 将已验证的租户 ID 设置到请求对象中（供后续使用）
+        query.setTenantId(headerTenantId);
         
         RagResult result = ragSearchService.search(query);
         

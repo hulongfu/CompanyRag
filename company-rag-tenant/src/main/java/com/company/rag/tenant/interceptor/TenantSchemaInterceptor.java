@@ -29,7 +29,13 @@ import java.sql.Statement;
  * <strong>实现细节：</strong>
  * <ul>
  *   <li>使用 {@code SET}（非 {@code SET LOCAL}）：因为 Schema 隔离不依赖事务，每次查询前设置立即可用</li>
- *   <li>连接池清理：HikariCP 会在连接归还时重置会话状态，避免 GUC 残留</li>
+ *   <li>安全机制：每条 SQL 执行前都会重新设置租户上下文，确保即使连接池复用也不会残留其他租户的 schema</li>
+ *   <li>双模式设计：
+ *     <ul>
+ *       <li>租户上下文已设置：设置租户专属 schema，允许访问租户表和系统表</li>
+ *       <li>租户上下文未设置（如登录）：设置 search_path TO public，只能访问系统表，无法访问租户表</li>
+ *     </ul>
+ *   </li>
  *   <li>100% 覆盖：所有 MyBatis 查询/更新都会经过此拦截器，确保租户上下文正确设置</li>
  * </ul>
  * <p>
@@ -38,6 +44,11 @@ import java.sql.Statement;
  *   <li>✅ Schema 隔离：绝对可靠，物理隔离保证</li>
  *   <li>⚠️ RLS 隔离：最佳努力（best-effort），作为深度防御的补充</li>
  * </ul>
+ * 
+ * @implNote 关于连接池会话状态清理的说明：
+ * <p>
+ * 本拦截器不依赖 HikariCP 在连接归还时重置会话状态（HikariCP 默认不做此操作）。
+ * 安全性由"每条 SQL 执行前重设租户上下文"保证，这是更可靠的防御策略。
  */
 @Slf4j
 public class TenantSchemaInterceptor implements InnerInterceptor {
@@ -61,31 +72,43 @@ public class TenantSchemaInterceptor implements InnerInterceptor {
     private void applyTenantContext(Executor executor) {
         String schema = TenantContext.getSchema();
         Long tenantId = TenantContext.getTenantId();
-        if (schema == null || schema.isBlank() || tenantId == null) {
-            return;
-        }
-        // 校验 schema 名称，防止 SQL 注入
-        if (!schema.matches("^[a-zA-Z_][a-zA-Z0-9_]*$")) {
-            log.warn("非法 Schema 名称，跳过租户上下文设置：{}", schema);
-            return;
-        }
+        
         Connection connection;
         try {
             connection = executor.getTransaction().getConnection();
         } catch (SQLException e) {
-            log.warn("获取 MyBatis 连接失败，跳过租户上下文设置", e);
+            // 【安全关键】连接获取失败必须抛异常，不能在未知连接上执行 SQL
+            throw new IllegalStateException("获取数据库连接失败，无法设置租户上下文", e);
+        }
+        
+        if (connection == null) {
             return;
         }
-        if (connection != null) {
-            try (Statement stmt = connection.createStatement()) {
+        
+        try (Statement stmt = connection.createStatement()) {
+            // 场景 1：租户上下文已设置 → 设置租户专属 schema
+            if (schema != null && !schema.isBlank() && tenantId != null) {
+                // 校验 schema 名称，防止 SQL 注入
+                if (!schema.matches("^[a-zA-Z_][a-zA-Z0-9_]*$")) {
+                    throw new IllegalStateException("非法 Schema 名称：" + schema);
+                }
                 // 设置 search_path：主隔离（Schema 隔离），100% 可靠
                 stmt.execute("SET search_path TO " + schema + ", public");
                 // 设置 app.tenant_id：辅助隔离（RLS），深度防御
                 stmt.execute("SET app.tenant_id = " + tenantId);
                 log.trace("设置租户上下文：schema={}, tenantId={}", schema, tenantId);
-            } catch (SQLException e) {
-                log.warn("设置租户上下文失败：{}", e.getMessage());
+                
+            } else {
+                // 场景 2：租户上下文未设置（如登录认证）→ 设置 search_path TO public
+                // 这样只能访问 public schema 下的系统表（如 sys_user），无法访问租户专属表
+                // 这是安全的 fail-closed 设计
+                stmt.execute("SET search_path TO public");
+                stmt.execute("SET app.tenant_id = 0");
+                log.trace("未设置租户上下文，使用 public schema（登录场景）");
             }
+        } catch (SQLException e) {
+            // 【安全关键】设置失败必须抛异常，不能在不安全的连接上执行 SQL
+            throw new IllegalStateException("设置租户上下文失败：" + e.getMessage(), e);
         }
     }
 }
