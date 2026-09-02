@@ -76,7 +76,22 @@ git commit -m "feat(tracing): 引入 micrometer-tracing-bridge-otel 依赖"
 <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - traceId=%X{traceId} spanId=%X{spanId} - %msg%n</pattern>
 ```
 
-- [x] **Step 2: 提交**
+- [x] **Step 2（补充，本次运行时验证发现）: 启用 MDC 关联**
+
+仅加 logback pattern 不会自动生效 —— traceId 需由 Micrometer Tracing 写入 MDC。必须在 `application.yml` 开启 `management.tracing.enabled=true`，否则 `%X{traceId}` 恒为空：
+
+```yaml
+management:
+  tracing:
+    enabled: true
+```
+
+```bash
+git add company-rag-bootstrap/src/main/resources/application.yml
+git commit -m "feat(tracing): 启用 management.tracing.enabled 注入 traceId 到 MDC"
+```
+
+- [x] **Step 3: 提交**
 
 ```bash
 git add company-rag-bootstrap/src/main/resources/logback-spring.xml
