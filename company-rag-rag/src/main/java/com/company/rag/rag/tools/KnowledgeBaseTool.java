@@ -60,13 +60,12 @@ public class KnowledgeBaseTool implements AgentTool {
         if (topK != null) {
             args.put("topK", topK);
         }
-        String traceId = recorder.getTraceId();
-        long startTime = recorder.recordStart(traceId, "searchKnowledgeBase", args);
+        long startTime = recorder.recordStart("searchKnowledgeBase", args);
         
         try {
             // 参数校验
             if (question == null || question.trim().isEmpty()) {
-                recorder.recordEnd(traceId, "searchKnowledgeBase", startTime, "failed");
+                recorder.recordEnd("searchKnowledgeBase", startTime, "failed");
                 return KnowledgeBaseResult.failed("问题不能为空");
             }
             
@@ -82,16 +81,16 @@ public class KnowledgeBaseTool implements AgentTool {
             KnowledgeBaseResult response = convertToKnowledgeBaseResult(result);
             
             if (response.isSuccess()) {
-                recorder.recordEnd(traceId, "searchKnowledgeBase", startTime, "success");
+                recorder.recordEnd("searchKnowledgeBase", startTime, "success");
             } else {
-                recorder.recordEnd(traceId, "searchKnowledgeBase", startTime, "failed");
+                recorder.recordEnd("searchKnowledgeBase", startTime, "failed");
             }
             
             return response;
             
         } catch (Exception e) {
             log.error("知识库工具调用失败：question={}, err={}", question, e.getMessage());
-            recorder.recordEnd(traceId, "searchKnowledgeBase", startTime, "failed", e.getMessage());
+            recorder.recordEnd("searchKnowledgeBase", startTime, "failed", e.getMessage());
             return KnowledgeBaseResult.failed("工具调用失败：" + e.getMessage());
         }
     }

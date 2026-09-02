@@ -15,6 +15,8 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 /**
@@ -62,8 +64,8 @@ class KnowledgeBaseToolEndToEndTest {
         
         // 验证调用了 RAG 服务
         verify(ragSearchService, times(1)).search(any(RagQuery.class));
-        verify(recorder, times(1)).recordStart("searchKnowledgeBase", any(), any());
-        verify(recorder, times(1)).recordEnd("searchKnowledgeBase", "success", any(), any());
+        verify(recorder, times(1)).recordStart(eq("searchKnowledgeBase"), any());
+        verify(recorder, times(1)).recordEnd(eq("searchKnowledgeBase"), anyLong(), eq("success"));
     }
     
     @Test
@@ -77,7 +79,7 @@ class KnowledgeBaseToolEndToEndTest {
         // Then: 应该返回错误
         assertFalse(result.isSuccess());
         assertEquals("问题不能为空", result.getError());
-        verify(recorder, times(1)).recordEnd("searchKnowledgeBase", "failed", any(), any());
+        verify(recorder, times(1)).recordEnd(eq("searchKnowledgeBase"), anyLong(), eq("failed"));
     }
     
     @Test
@@ -110,7 +112,7 @@ class KnowledgeBaseToolEndToEndTest {
         // Then: 应该捕获异常并返回友好错误
         assertFalse(result.isSuccess());
         assertTrue(result.getError().contains("工具调用失败"));
-        verify(recorder, times(1)).recordEnd("searchKnowledgeBase", "failed", any(), any());
+        verify(recorder, times(1)).recordEnd(eq("searchKnowledgeBase"), anyLong(), eq("failed"), any());
     }
     
     @Test
