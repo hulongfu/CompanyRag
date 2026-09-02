@@ -2,7 +2,29 @@
 
 ## Git Push
 
-### 最新推送（2026-09-01 控制器注释修复与租户校验强化）
+### 最新推送（2026-09-02 安全漏洞修复）
+
+- commit_type: BugFix
+- task_id: 0004
+- task_name: 安全漏洞修复
+- commit_hash: 8c9c1dc
+- branch: main
+- remote: gitee & origin (均成功)
+- staged_files:
+  - company-rag-web/src/main/java/com/company/rag/web/controller/ChatController.java（修改 - 修复租户越权漏洞，强制使用已验证的 header，忽略请求体）
+  - company-rag-rag/src/main/java/com/company/rag/rag/service/RagCircuitBreakerConfig.java（修改 - 删除手动 Bean 让 YAML 配置生效）
+  - company-rag-tenant/src/main/java/com/company/rag/tenant/interceptor/TenantSchemaInterceptor.java（修改 - 改为双模式设计，支持登录场景）
+  - deploy-log.md（修改 - 日志记录）
+- commit_message: BugFix:0004_安全漏洞修复：fix tenant bypass, circuit breaker config override, and interceptor fail-open issues
+- commit_command: git commit -m "BugFix:0004_安全漏洞修复：fix tenant bypass, circuit breaker config override, and interceptor fail-open issues"
+- commit_exit_code: 0
+- push_command: git push origin main && git push gitee main
+- push_exit_code: 0
+- remote_head_check_command: git ls-remote origin main
+- remote_head: 8c9c1dc171f50260b9d09fc02e01079e2636abac
+- result: ✅ 推送成功，Gitee 和 GitHub 远端 HEAD 与本地一致。修复内容：1) ChatController 租户越权漏洞（请求体 tenantId 覆盖已验证 header）；2) RagCircuitBreakerConfig 配置失效（手动 Bean 覆盖自动配置）；3) TenantSchemaInterceptor fail-open 隐患（改为双模式：登录时 public schema，业务时租户 schema）
+
+### 上次推送（2026-09-01 控制器注释修复与租户校验强化）
 
 - commit_type: Task
 - task_id: 0003
