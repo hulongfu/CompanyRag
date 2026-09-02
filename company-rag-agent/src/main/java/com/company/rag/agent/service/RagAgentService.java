@@ -6,6 +6,7 @@ import com.company.rag.common.tool.ToolCallRecorder;
 import com.company.rag.tenant.context.TenantContext;
 import lombok.extern.slf4j.Slf4j;
 import com.alibaba.cloud.ai.graph.exception.GraphRunnerException;
+import org.slf4j.MDC;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
@@ -13,6 +14,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -32,8 +34,8 @@ import java.util.stream.Collectors;
  * 5. 返回给用户
  *
  * 可解释性日志：
- * - 每次请求生成 traceId，关联所有工具调用
- * - 请求完成后输出 [AGENT] 结构化日志（traceId、工具链路、整体耗时）
+ * - traceId 由 Micrometer Tracing 自动写入 MDC，关联所有工具调用
+ * - 请求完成后输出 [AGENT] 结构化日志（工具链路、整体耗时）
  */
 @Slf4j
 @Service
@@ -84,13 +86,10 @@ public class RagAgentService {
      * @return Agent 处理结果（包含回答和工具上下文）
      */
     public AgentResult processWithHistory(List<Message> history, String userMessage) {
-        // 生成 traceId 并设置到当前线程
-        String traceId = recorder.generateTraceId();
-        recorder.setTraceId(traceId);
         long requestStart = System.currentTimeMillis();
 
-        log.info("[AGENT] traceId={}, userMsg=\"{}\", historySize={}",
-                traceId, userMessage, history != null ? history.size() : 0);
+        log.info("[AGENT] userMsg=\"{}\", historySize={}",
+                userMessage, history != null ? history.size() : 0);
 
         try {
             // 构建消息列表
@@ -112,20 +111,18 @@ public class RagAgentService {
 
             // 聚合工具调用记录，输出结构化日志
             long totalMs = System.currentTimeMillis() - requestStart;
-            List<ToolCallRecord> records = recorder.getAndClearRecords(traceId);
+            List<ToolCallRecord> records = recorder.getAndClearRecords();
             String toolsSummary = records.stream()
                     .map(r -> String.format("%s(%dms,%s)", r.getToolName(), r.getDurationMs(), r.getStatus()))
                     .collect(Collectors.joining(", "));
-            log.info("[AGENT] traceId={}, tools=[{}], total={}ms", traceId, toolsSummary, totalMs);
+            log.info("[AGENT] tools=[{}], total={}ms", toolsSummary, totalMs);
 
-            return new AgentResult(response != null ? response : "", traceId);
+            return new AgentResult(response != null ? response : "", MDC.get("traceId"));
 
         } catch (Exception e) {
             long totalMs = System.currentTimeMillis() - requestStart;
-            log.error("[AGENT] traceId={}, total={}ms, error={}", traceId, totalMs, e.getMessage(), e);
+            log.error("[AGENT] total={}ms, error={}", totalMs, e.getMessage(), e);
             return new AgentResult("抱歉，系统繁忙，请稍后重试。", "error:" + e.getMessage());
-        } finally {
-            recorder.clearTraceId();
         }
     }
 
@@ -141,8 +138,8 @@ public class RagAgentService {
      */
     private AssistantMessage callAgentWithTimeout(List<Message> messages) throws GraphRunnerException, Exception {
         try {
-            // 在提交异步任务前，捕获当前线程的租户上下文和会话上下文
-            // 因为 ThreadLocal 不会自动传递给子线程，需要手动传递
+            // 捕获当前线程的 MDC（含 traceId/spanId）与租户上下文，因 ThreadLocal 不自动传给子线程
+            Map<String, String> mdcContext = MDC.getCopyOfContextMap();
             String tenantSchema = TenantContext.getSchema();
             Long tenantId = TenantContext.getTenantId();
             Long userId = TenantContext.getUserId();
@@ -154,7 +151,10 @@ public class RagAgentService {
             CompletableFuture<AssistantMessage> future = CompletableFuture
                     .supplyAsync(() -> {
                         try {
-                            // 在子线程中恢复租户上下文和会话上下文
+                            // 在子线程中恢复 MDC 与租户上下文和会话上下文
+                            if (mdcContext != null) {
+                                MDC.setContextMap(mdcContext);
+                            }
                             if (tenantSchema != null) {
                                 TenantContext.setSchema(tenantSchema);
                             }
@@ -178,6 +178,7 @@ public class RagAgentService {
                             throw new RuntimeException("Agent 执行失败：" + e.getMessage(), e);
                         } finally {
                             // 清理线程上下文，避免线程池复用时的数据污染
+                            MDC.clear();
                             TenantContext.clear();
                         }
                     }, executorService);
