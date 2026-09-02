@@ -1,7 +1,9 @@
 package com.company.rag.common.tool;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.MDC;
 
 import java.util.List;
 import java.util.Map;
@@ -17,65 +19,64 @@ class ToolCallRecorderTest {
         recorder = new ToolCallRecorder();
     }
 
-    @Test
-    void shouldGenerateTraceId() {
-        String traceId = recorder.generateTraceId();
-        assertNotNull(traceId);
-        assertEquals(8, traceId.length());
+    @AfterEach
+    void tearDown() {
+        MDC.clear();
     }
 
     @Test
-    void shouldRecordToolCall() {
-        String traceId = "test123";
-        recorder.setTraceId(traceId);
+    void recordStart_getsTraceIdFromMdc() {
+        MDC.put("traceId", "trace-1");
+        long start = recorder.recordStart("testTool", Map.of("key", "value"));
+        assertTrue(start > 0);
+    }
 
-        long startTime = recorder.recordStart(traceId, "testTool", Map.of("key", "value"));
+    @Test
+    void recordStart_withNullArgs_returnsPositiveStart() {
+        MDC.put("traceId", "trace-1");
+        long start = recorder.recordStart("testTool", null);
+        assertTrue(start > 0);
+    }
 
-        recorder.recordEnd(traceId, "testTool", startTime, "success");
+    @Test
+    void recordEnd_aggregatesRecordWithMdcTraceId() {
+        MDC.put("traceId", "trace-1");
+        long start = recorder.recordStart("testTool", Map.of("k", "v"));
+        recorder.recordEnd("testTool", start, "success");
 
-        List<ToolCallRecord> records = recorder.getAndClearRecords(traceId);
+        List<ToolCallRecord> records = recorder.getAndClearRecords();
         assertEquals(1, records.size());
-        assertEquals("testTool", records.get(0).getToolName());
-        assertEquals("success", records.get(0).getStatus());
-        assertTrue(records.get(0).getDurationMs() >= 0);
+        ToolCallRecord rec = records.get(0);
+        assertEquals("trace-1", rec.getTraceId());
+        assertEquals("testTool", rec.getToolName());
+        assertEquals("success", rec.getStatus());
     }
 
     @Test
-    void shouldRecordMultipleTools() {
-        String traceId = "test456";
-        recorder.setTraceId(traceId);
+    void recordEnd_withErrorMessage_recordsWarn() {
+        MDC.put("traceId", "trace-2");
+        long start = recorder.recordStart("testTool", null);
+        recorder.recordEnd("testTool", start, "failed", "boom");
 
-        long start1 = recorder.recordStart(traceId, "tool1", null);
-        recorder.recordEnd(traceId, "tool1", start1, "success");
-
-        long start2 = recorder.recordStart(traceId, "tool2", null);
-        recorder.recordEnd(traceId, "tool2", start2, "failed", "error msg");
-
-        List<ToolCallRecord> records = recorder.getAndClearRecords(traceId);
-        assertEquals(2, records.size());
-        assertEquals("tool1", records.get(0).getToolName());
-        assertEquals("tool2", records.get(1).getToolName());
-        assertEquals("error msg", records.get(1).getErrorMessage());
+        List<ToolCallRecord> records = recorder.getAndClearRecords();
+        assertEquals(1, records.size());
+        assertEquals("boom", records.get(0).getErrorMessage());
+        assertEquals("failed", records.get(0).getStatus());
     }
 
     @Test
-    void shouldReturnEmptyListWhenNoRecords() {
-        List<ToolCallRecord> records = recorder.getAndClearRecords("notrace");
-        assertTrue(records.isEmpty());
+    void getAndClearRecords_clearsAfterRetrieve() {
+        MDC.put("traceId", "trace-3");
+        long start = recorder.recordStart("testTool", null);
+        recorder.recordEnd("testTool", start, "success");
+
+        List<ToolCallRecord> first = recorder.getAndClearRecords();
+        assertEquals(1, first.size());
+        assertTrue(recorder.getAndClearRecords().isEmpty());
     }
 
     @Test
-    void shouldClearRecordsAfterGet() {
-        String traceId = "test789";
-        recorder.setTraceId(traceId);
-
-        long start = recorder.recordStart(traceId, "tool", null);
-        recorder.recordEnd(traceId, "tool", start, "success");
-
-        recorder.getAndClearRecords(traceId);
-
-        // 再次获取应该为空
-        List<ToolCallRecord> records = recorder.getAndClearRecords(traceId);
-        assertTrue(records.isEmpty());
+    void getAndClearRecords_noMdcReturnsEmpty() {
+        assertTrue(recorder.getAndClearRecords().isEmpty());
     }
 }
