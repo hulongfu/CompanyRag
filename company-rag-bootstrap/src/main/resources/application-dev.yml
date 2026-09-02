@@ -106,20 +106,3 @@ mcp:
 logging:
   level:
     com.company.rag: DEBUG
-
-# Flyway 配置（开发环境也启用，确保数据库结构一致性）
-flyway:
-  enabled: true
-  # 迁移脚本位置
-  locations: classpath:db/migration
-  # 编码
-  encoding: UTF-8
-  # 基础线版本（如果已有数据库）
-  baseline-on-migrate: true
-  baseline-version: 0
-  # 是否自动调用 migrate
-  migrate-at-startup: true
-  # 校验迁移脚本
-  validate-on-migrate: true
-  # 允许无序迁移（开发环境可用）
-  out-of-order: true

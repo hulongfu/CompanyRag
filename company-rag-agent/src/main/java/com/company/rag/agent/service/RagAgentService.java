@@ -15,9 +15,10 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
@@ -51,21 +52,55 @@ public class RagAgentService {
     private static final int AGENT_TIMEOUT_MINUTES = 5;
 
     /**
-     * 用于超时控制的线程池
+     * Agent 核心线程数（可配置）
      */
-    private final ExecutorService executorService = Executors.newCachedThreadPool();
+    private final int corePoolSize;
+
+    /**
+     * Agent 最大线程数（可配置）
+     */
+    private final int maxPoolSize;
+
+    /**
+     * Agent 任务队列容量（可配置）
+     */
+    private final int queueCapacity;
+
+    /**
+     * 用于超时控制的线程池
+     * 有界线程池：核心/最大/队列均受控，采用 AbortPolicy 拒绝策略降级
+     */
+    private ExecutorService executorService;
 
     /**
      * 构造方法，注入 StreamingAgentExecutor 和 ToolCallRecorder
      */
     public RagAgentService(StreamingAgentExecutor streamingAgentExecutor,
-                           ToolCallRecorder recorder) {
+                           ToolCallRecorder recorder,
+                           @org.springframework.beans.factory.annotation.Value("${rag.agent.executor.core-pool-size:4}") int corePoolSize,
+                           @org.springframework.beans.factory.annotation.Value("${rag.agent.executor.max-pool-size:8}") int maxPoolSize,
+                           @org.springframework.beans.factory.annotation.Value("${rag.agent.executor.queue-capacity:100}") int queueCapacity) {
         this.streamingAgentExecutor = streamingAgentExecutor;
         this.recorder = recorder;
+        this.corePoolSize = corePoolSize;
+        this.maxPoolSize = maxPoolSize;
+        this.queueCapacity = queueCapacity;
+        // 核心线程数不能大于最大线程数，启动时校验兜底，避免构造异常
+        int effectiveMax = Math.max(maxPoolSize, corePoolSize);
+        // 创建有界线程池：队列容量受控，超过 capacity 后由 AbortPolicy 直接拒绝并抛出 RejectedExecutionException，
+        // 由上层捕获后按“系统繁忙”降级返回，防止线程无界膨胀拖垮应用
+        this.executorService = new ThreadPoolExecutor(
+                corePoolSize,
+                effectiveMax,
+                60L,
+                TimeUnit.SECONDS,
+                new ArrayBlockingQueue<>(queueCapacity),
+                new ThreadPoolExecutor.AbortPolicy());
 
-        log.info("RagAgentService 初始化：streamingAgentExecutor={}, timeout={} minutes",
+        log.info("RagAgentService 初始化：streamingAgentExecutor={}, timeout={} minutes, " +
+                        "线程池 core={}, max={}, queue={}",
                  streamingAgentExecutor != null ? streamingAgentExecutor.getClass().getSimpleName() : "null",
-                 AGENT_TIMEOUT_MINUTES);
+                 AGENT_TIMEOUT_MINUTES, corePoolSize, effectiveMax, queueCapacity);
     }
 
     /**

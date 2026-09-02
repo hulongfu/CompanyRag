@@ -77,6 +77,29 @@ spring:
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:}
       database: 0
+  # Flyway 数据库迁移配置
+  flyway:
+    # 启用开关（自动配置在当前启动类中被 exclude 排除，故实际不执行；启用时需移除该排除）
+    enabled: true
+    # 迁移脚本位置
+    locations: classpath:db/migration
+    # 编码
+    encoding: UTF-8
+    # 是否允许无序迁移（开发环境允许，生产环境建议禁止）
+    out-of-order: false
+    # 迁移脚本前缀
+    prefix: V
+    # 迁移脚本后缀
+    suffix: .sql
+    # 迁移脚本分隔符
+    separator: ;
+    # 校验迁移脚本
+    validate-on-migrate: true
+    # 清洁模式（生产环境应禁用）
+    clean-disabled: true
+    # 基础线版本（如果已有数据库）
+    baseline-on-migrate: true
+    baseline-version: 0
 
 # JWT 配置
 jwt:
@@ -92,32 +115,18 @@ springdoc:
   show-actuator: false
   writer-with-default-pretty-printer: true
 
-# Flyway 数据库迁移配置
-# 说明：Flyway 用于生产环境自动执行数据库迁移脚本，确保多环境一致性
-flyway:
-  # 启用 Flyway
-  enabled: true
-  # 迁移脚本位置
-  locations: classpath:db/migration
-  # 编码
-  encoding: UTF-8
-  # 是否允许无序迁移（开发环境允许，生产环境建议禁止）
-  out-of-order: false
-  # 迁移脚本前缀
-  prefix: V
-  # 迁移脚本后缀
-  suffix: .sql
-  # 迁移脚本分隔符
-  separator: ;
-  # 校验迁移脚本
-  validate-on-migrate: true
-  # 清洁模式（生产环境应禁用）
-  clean-disabled: true
-  # 基础线版本（如果已有数据库）
-  baseline-on-migrate: true
-  baseline-version: 0
-  # 是否自动调用 migrate
-  migrate-at-startup: true
+# RAG Agent 线程池配置
+# 说明：Agent 超时控制复用有界线程池，核心/最大/队列大小均可配置
+# 队列打满后由 AbortPolicy 拒绝提交，请求降级为“系统繁忙”
+rag:
+  agent:
+    executor:
+      # 核心线程数
+      core-pool-size: 4
+      # 最大线程数（高峰时最多创建的线程数）
+      max-pool-size: 8
+      # 任务队列容量（待执行任务超出时开始拒绝新请求）
+      queue-capacity: 100
 
 # MyBatis-Plus
 mybatis-plus:
