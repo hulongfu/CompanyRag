@@ -543,7 +543,7 @@ Expected: `BUILD SUCCESS`（验证所有模块适配新签名，无编译残留�
 Run: `mvn -q -pl company-rag-common,company-rag-rag,company-rag-agent -am -Dtest='ToolCallRecorderTest,KnowledgeBaseToolTest,KnowledgeBaseToolEndToEndTest,DownloadToolTest,DatabaseQueryToolTest,ExecuteToolTest' test`
 Expected: `BUILD SUCCESS`，所有测试通过
 
-- [ ] **Step 3: 手动启动验证日志含 traceId（如有条件）**
+- [x] **Step 3: 手动启动验证日志含 traceId（如有条件）**
 
 Run: `mvn -pl company-rag-bootstrap spring-boot:run`
 然后 `curl -X POST http://localhost:8080/api/chat -H "Content-Type: application/json" -H "X-Tenant-Id: 1" -d '{"query":"测试"}'`
