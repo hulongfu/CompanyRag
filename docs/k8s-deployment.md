@@ -23,7 +23,23 @@
 
 ### 1. 生成并替换 Secret 真实值
 
-`k8s/secret.yaml` 中所有字段为 base64 编码，部署前必须替换为真实值：
+**方式一（推荐）：脚本自动生成**。新建 `k8s/generate-secret.sh` 从根目录 `.env`（已在 `.gitignore`）读取真实密钥，
+动态生成 `k8s/secret.generated.yaml`，真实值不写入版本库内任何文件：
+
+```bash
+# 1. 从 .env.example 复制并填写真实密钥（DASHSCOPE_API_KEY / SILICONFLOW_API_KEY / JWT_SECRET / POSTGRES_PASSWORD）
+cp .env.example .env
+
+# 2. 生成 Secret 清单
+bash k8s/generate-secret.sh
+
+# 3. 应用
+kubectl apply -f k8s/secret.generated.yaml
+```
+
+生成产物 `k8s/secret.generated.yaml` 已被 `.gitignore` 忽略，可安全在本地生成、提交部署。
+
+**方式二：手工修改 `k8s/secret.yaml`**（提交到仓库的占位模板，含 base64 编码的占位值，跨环境部署时按需替换）：
 
 ```bash
 # 生成 base64

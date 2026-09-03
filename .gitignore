@@ -21,3 +21,6 @@ uploads/*
 .env.docker
 .env.local
 .env.*.backup
+
+# k8s/generate-secret.sh 动态生成的 Secret（含真实密钥，禁止提交）
+k8s/secret.generated.yaml

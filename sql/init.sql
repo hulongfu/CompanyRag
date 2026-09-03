@@ -18,7 +18,7 @@ DO $$
 BEGIN
     -- 如果用户不存在则创建
     IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'company_rag_app') THEN
-        CREATE USER company_rag_app WITH PASSWORD 'company_rag_app_password_change_me';
+        CREATE USER company_rag_app WITH PASSWORD 'company_rag_app123456';
     END IF;
 END
 $$;
