@@ -380,7 +380,7 @@
                                 <td style="font-size: 12px; color: #909399;">{{ user.createTime || '-' }}</td>
                                 <td>
                                     <button class="table-btn" @click="editUser(user)">编辑</button>
-                                    <button class="table-btn" style="color:#f56c6c;" @click="deleteUser(user)">删除</button>
+                                    <button class="table-btn" style="color:#f56c6c;" v-if="user.role !== 'admin'" @click="deleteUser(user)">删除</button>
                                 </td>
                             </tr>
                             <tr v-if="users.length === 0">

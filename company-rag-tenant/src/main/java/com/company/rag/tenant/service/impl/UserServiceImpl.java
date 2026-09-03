@@ -3,6 +3,7 @@ package com.company.rag.tenant.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.company.rag.common.model.UserDTO;
 import com.company.rag.common.security.PasswordGenerator;
+import com.company.rag.common.security.UserContext;
 import com.company.rag.tenant.context.TenantContext;
 import com.company.rag.tenant.mapper.UserMapper;
 import com.company.rag.tenant.mapper.UserTenantRelMapper;
@@ -45,6 +46,11 @@ public class UserServiceImpl implements UserService {
         // 1. 验证用户名唯一性
         if (userMapper.countByUsername(request.getUsername()) > 0) {
             throw new IllegalArgumentException("用户名已存在：" + request.getUsername());
+        }
+        
+        // 1.1 平台管理员唯一性校验：不允许存在多个 admin 账号
+        if ("admin".equals(request.getRole()) && userMapper.countByRole("admin") > 0) {
+            throw new IllegalArgumentException("系统已存在管理员账号，不允许创建多个管理员");
         }
         
         // 2. 验证角色合法性
@@ -92,9 +98,12 @@ public class UserServiceImpl implements UserService {
         // 获取当前登录用户信息
         Long currentUserId = TenantContext.getUserId();
         Long currentTenantId = TenantContext.getTenantId();
+        // 判断当前用户是否为平台管理员（admin 可查看/管理所有用户）
+        boolean isAdmin = isCurrentUserAdmin();
         
-        // 租户隔离校验：确保用户只能查看自己所在租户的用户
-        if (tenantId != null && currentTenantId != null) {
+        // 租户隔离校验：确保非管理员用户只能查看自己所在租户的用户
+        // 平台管理员（admin）不受租户限制
+        if (!isAdmin && tenantId != null && currentTenantId != null) {
             // 验证传入的 tenantId 是否与当前用户的租户一致
             if (!tenantId.equals(currentTenantId)) {
                 // 检查当前用户是否属于指定租户（通过用户 - 租户关联表）
@@ -109,8 +118,21 @@ public class UserServiceImpl implements UserService {
         
         List<User> users;
         
-        // 如果指定了租户 ID，按租户查询
-        if (tenantId != null) {
+        // 平台管理员查看全部用户（不受租户限制，保留角色/状态/用户名筛选）
+        if (isAdmin) {
+            LambdaQueryWrapper<User> adminWrapper = new LambdaQueryWrapper<>();
+            if (StringUtils.hasText(role)) {
+                adminWrapper.eq(User::getRole, role);
+            }
+            if (status != null) {
+                adminWrapper.eq(User::getStatus, status);
+            }
+            if (StringUtils.hasText(username)) {
+                adminWrapper.like(User::getUsername, username);
+            }
+            users = userMapper.selectList(adminWrapper);
+        } else if (tenantId != null) {
+            // 如果指定了租户 ID，按租户查询
             users = userMapper.findByTenantId(tenantId, status);
         } else {
             // 否则查询所有用户（但受租户上下文限制）
@@ -181,6 +203,19 @@ public class UserServiceImpl implements UserService {
             throw new IllegalArgumentException("无效的角色：" + request.getRole());
         }
         
+        // 2.1 平台管理员数量保护：不允许制造多个 admin，或把唯一的 admin 降级
+        if ("admin".equals(request.getRole()) && !"admin".equals(user.getRole())) {
+            // 把非 admin 用户改为 admin：若已存在 admin 则拒绝
+            if (userMapper.countByRole("admin") > 0) {
+                throw new IllegalArgumentException("系统已存在管理员账号，不允许创建多个管理员");
+            }
+        } else if ("admin".equals(user.getRole()) && !"admin".equals(request.getRole())) {
+            // 把 admin 降级为非 admin：若这是唯一 admin 则拒绝
+            if (userMapper.countByRole("admin") <= 1) {
+                throw new IllegalArgumentException("不允许降级唯一的管理员账号");
+            }
+        }
+        
         // 3. 如果修改了用户名，验证唯一性
         if (StringUtils.hasText(request.getUsername()) && 
             !request.getUsername().equals(user.getUsername())) {
@@ -224,6 +259,15 @@ public class UserServiceImpl implements UserService {
             return false;
         }
         
+        // 1.1 不允许删除当前登录的账号（防自删）
+        if (id.equals(UserContext.getCurrentUserId())) {
+            throw new IllegalArgumentException("不能删除当前登录的账号");
+        }
+        // 1.2 不允许删除管理员账号（平台管理员唯一性保护）
+        if ("admin".equals(user.getRole())) {
+            throw new IllegalArgumentException("不允许删除管理员账号");
+        }
+        
         // 2. 删除用户 - 租户关联
         userTenantRelMapper.deleteByUserId(id);
         log.info("用户 - 租户关联删除成功：userId={}", id);
@@ -233,6 +277,13 @@ public class UserServiceImpl implements UserService {
         log.info("用户删除成功：id={}", id);
         
         return true;
+    }
+    
+    /**
+     * 判断当前登录用户是否为平台管理员
+     */
+    private boolean isCurrentUserAdmin() {
+        return "admin".equals(UserContext.getCurrentUserRole());
     }
     
     /**

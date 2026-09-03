@@ -14,7 +14,11 @@ public class UserContext {
      * @return 当前用户 ID，如果未认证则返回 null
      */
     public static Long getCurrentUserId() {
-        Object principal = SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        var authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null) {
+            return null;
+        }
+        Object principal = authentication.getPrincipal();
         if (principal instanceof SecurityUser) {
             return ((SecurityUser) principal).getUserId();
         }
@@ -53,7 +57,11 @@ public class UserContext {
      * @return 当前用户角色，如果未认证则返回 null
      */
     public static String getCurrentUserRole() {
-        Object principal = SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        var authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null) {
+            return null;
+        }
+        Object principal = authentication.getPrincipal();
         if (principal instanceof SecurityUser) {
             return ((SecurityUser) principal).getRole();
         }

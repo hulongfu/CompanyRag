@@ -1,6 +1,7 @@
 package com.company.rag.tenant.service;
 
 import com.company.rag.common.model.UserDTO;
+import com.company.rag.common.security.UserContext;
 import com.company.rag.tenant.mapper.UserMapper;
 import com.company.rag.tenant.mapper.UserTenantRelMapper;
 import com.company.rag.tenant.model.Tenant;
@@ -227,5 +228,128 @@ class UserServiceTest {
         boolean result = userService.deleteUser(999L);
         
         assertFalse(result);
+    }
+
+    // ===== 平台管理员唯一性 & 删除保护新增测试 =====
+
+    @Test
+    void testCreateUser_SecondAdminRejected() {
+        createRequest.setRole("admin");
+        when(userMapper.countByUsername("testuser")).thenReturn(0);
+        when(userMapper.countByRole("admin")).thenReturn(1); // 已存在一个 admin
+
+        IllegalArgumentException exception = assertThrows(
+            IllegalArgumentException.class,
+            () -> userService.createUser(createRequest)
+        );
+        assertTrue(exception.getMessage().contains("不允许创建多个管理员"));
+    }
+
+    @Test
+    void testUpdateUser_PromoteToAdminWhenAdminExistsRejected() {
+        User user = new User();
+        user.setId(1L);
+        user.setUsername("testuser");
+        user.setRole("user");
+        when(userMapper.selectById(1L)).thenReturn(user);
+        when(userMapper.countByRole("admin")).thenReturn(1); // 已存在一个 admin
+
+        IllegalArgumentException exception = assertThrows(
+            IllegalArgumentException.class,
+            () -> userService.updateUser(1L, updateRequest) // updateRequest.role=admin
+        );
+        assertTrue(exception.getMessage().contains("不允许创建多个管理员"));
+    }
+
+    @Test
+    void testUpdateUser_DemoteOnlyAdminRejected() {
+        User user = new User();
+        user.setId(1L);
+        user.setUsername("admin");
+        user.setRole("admin"); // 唯一 admin
+        when(userMapper.selectById(1L)).thenReturn(user);
+        when(userMapper.countByRole("admin")).thenReturn(1);
+
+        UserDTO.UpdateRequest req = new UserDTO.UpdateRequest();
+        req.setDisplayName("降级");
+        req.setEmail("admin@example.com");
+        req.setRole("user");
+        req.setTenantIds(Arrays.asList(1L));
+
+        IllegalArgumentException exception = assertThrows(
+            IllegalArgumentException.class,
+            () -> userService.updateUser(1L, req)
+        );
+        assertTrue(exception.getMessage().contains("不允许降级唯一的管理员账号"));
+    }
+
+    @Test
+    void testDeleteUser_DeleteCurrentSelfRejected() {
+        User user = new User();
+        user.setId(1L);
+        user.setUsername("current");
+        user.setRole("user");
+        when(userMapper.selectById(1L)).thenReturn(user);
+
+        // 模拟当前登录用户 ID = 1，删除自身账号被拦截
+        try (var ctx = mockStatic(UserContext.class)) {
+            ctx.when(UserContext::getCurrentUserId).thenReturn(1L);
+            ctx.when(UserContext::getCurrentUserRole).thenReturn(null);
+
+            IllegalArgumentException exception = assertThrows(
+                IllegalArgumentException.class,
+                () -> userService.deleteUser(1L)
+            );
+            assertTrue(exception.getMessage().contains("不能删除当前登录的账号"));
+        }
+    }
+
+    @Test
+    void testDeleteUser_DeleteAdminRejected() {
+        User admin = new User();
+        admin.setId(2L);
+        admin.setUsername("admin");
+        admin.setRole("admin");
+        when(userMapper.selectById(2L)).thenReturn(admin);
+
+        try (var ctx = mockStatic(UserContext.class)) {
+            ctx.when(UserContext::getCurrentUserId).thenReturn(1L);
+            ctx.when(UserContext::getCurrentUserRole).thenReturn(null);
+
+            IllegalArgumentException exception = assertThrows(
+                IllegalArgumentException.class,
+                () -> userService.deleteUser(2L)
+            );
+            assertTrue(exception.getMessage().contains("不允许删除管理员账号"));
+        }
+    }
+
+    @Test
+    void testQueryUserList_AsAdmin_ReturnsAllUsers() {
+        User user1 = new User();
+        user1.setId(1L);
+        user1.setUsername("user1");
+        user1.setRole("user");
+        user1.setStatus(1);
+
+        User admin = new User();
+        admin.setId(2L);
+        admin.setUsername("admin");
+        admin.setRole("admin");
+        admin.setStatus(1);
+
+        when(userMapper.selectList(any())).thenReturn(Arrays.asList(user1, admin));
+        when(userTenantRelMapper.findTenantIdsByUserId(anyLong())).thenReturn(Arrays.asList(1L));
+        when(userTenantRelMapper.findTenantNamesByUserId(anyLong())).thenReturn(Arrays.asList("租户 1"));
+
+        try (var ctx = mockStatic(UserContext.class)) {
+            ctx.when(UserContext::getCurrentUserRole).thenReturn("admin");
+
+            List<UserDTO.UserResponse> users = userService.queryUserList(null, null, null, null);
+
+            assertEquals(2, users.size());
+            // admin 走全量 selectList，不触发租户隔离校验
+            verify(userMapper).selectList(any());
+        }
     }
 }

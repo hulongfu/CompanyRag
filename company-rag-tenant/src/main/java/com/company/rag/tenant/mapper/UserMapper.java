@@ -21,6 +21,12 @@ public interface UserMapper extends BaseMapper<User> {
     int countByUsername(String username);
 
     /**
+     * 统计指定角色的用户数量（用于平台管理员唯一性校验）
+     */
+    @Select("SELECT COUNT(*) FROM sys_user WHERE role = #{role}")
+    int countByRole(@Param("role") String role);
+
+    /**
      * 根据租户 ID 查询用户列表 (关联租户表)
      */
     @Select("<script>" +
