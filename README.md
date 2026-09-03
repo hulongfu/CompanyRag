@@ -371,6 +371,8 @@ docker compose up -d
 
 ## Docker 部署指南
 
+> 📌 **需要部署到 Kubernetes？** 参见 [Kubernetes 部署指南](docs/k8s-deployment.md)
+
 ### 前置条件
 
 - Docker 20.10+

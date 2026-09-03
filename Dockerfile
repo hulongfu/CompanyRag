@@ -28,9 +28,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && pip3 --version
 
 # ============================================
-# 创建非 root 用户
+# 创建非 root 用户（显式指定 UID/GID，与 k8s runAsUser 保持一致，避免依赖系统默认取值）
 # ============================================
-RUN groupadd -r appgroup && useradd -r -g appgroup appuser
+RUN groupadd -r -g 1000 appgroup && useradd -r -g appgroup -u 1000 appuser
 
 # ============================================
 # 复制应用 JAR (本地构建)
@@ -90,4 +90,7 @@ ENV SPRING_PROFILES_ACTIVE=prod
 USER appuser
 
 EXPOSE 8080
+# 容器健康检查（探针 /actuator/health/liveness，随 probes.enabled=true 注册）
+HEALTHCHECK --interval=15s --timeout=3s --start-period=30s --retries=5 \
+  CMD wget -qO- http://localhost:8080/actuator/health/liveness >/dev/null 2>&1 || exit 1
 ENTRYPOINT ["java", "-jar", "app.jar"]

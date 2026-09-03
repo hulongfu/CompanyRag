@@ -1,0 +1,116 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: company-rag
+  namespace: default
+  labels:
+    app: company-rag
+spec:
+  # 滚动发布：先就绪再替换，避免流量打到未就绪新 Pod
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  replicas: 2
+  selector:
+    matchLabels:
+      app: company-rag
+  template:
+    metadata:
+      labels:
+        app: company-rag
+    spec:
+      # 容器以非 root 用户运行（与 Dockerfile USER appuser 一致）
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: company-rag
+          image: company-rag:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: "prod"
+            - name: POSTGRES_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: company-rag-config
+                  key: POSTGRES_HOST
+            - name: POSTGRES_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: company-rag-config
+                  key: POSTGRES_PORT
+            - name: REDIS_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: company-rag-config
+                  key: REDIS_HOST
+            # 敏感信息通过 Secret 注入，禁止明文写入清单
+            - name: DASHSCOPE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: company-rag-secret
+                  key: DASHSCOPE_API_KEY
+            - name: SILICONFLOW_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: company-rag-secret
+                  key: SILICONFLOW_API_KEY
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: company-rag-secret
+                  key: JWT_SECRET
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: company-rag-secret
+                  key: POSTGRES_PASSWORD
+          # 存活探针：应用假死/死锁时重启容器
+          # 路径依赖 application.yml 的 probes.enabled=true，SecurityConfig 已放行 /actuator/health/**
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+          # 就绪探针：依赖 DB/Redis 等外部组件就绪后才接收流量
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          volumeMounts:
+            - name: uploads
+              mountPath: /app/uploads
+      volumes:
+        - name: uploads
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: company-rag
+  namespace: default
+spec:
+  selector:
+    app: company-rag
+  ports:
+    - port: 8080
+      targetPort: 8080

@@ -42,6 +42,13 @@ services:
       JWT_SECRET: ${JWT_SECRET}
     ports:
       - "8080:8080"
+    healthcheck:
+      # 探针路径需与 application.yml 的 probes.enabled=true 与 SecurityConfig 放行保持一致
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health/liveness >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 3s
+      start_period: 30s
+      retries: 5
     depends_on:
       postgres:
         condition: service_healthy

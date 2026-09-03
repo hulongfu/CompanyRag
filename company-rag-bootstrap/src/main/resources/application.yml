@@ -175,6 +175,9 @@ management:
         exclude: "*"
   endpoint:
     health:
+      # 启用 k8s 存活/就绪探针端点（/actuator/health/liveness 与 /actuator/health/readiness）
+      probes:
+        enabled: true
       show-details: when-authorized
       show-components: when-authorized
   metrics:

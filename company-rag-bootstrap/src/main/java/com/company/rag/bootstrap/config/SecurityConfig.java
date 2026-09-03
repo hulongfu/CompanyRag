@@ -91,8 +91,8 @@ public class SecurityConfig {
                 // 放行错误页面（Swagger 内部资源 404 时会转发到 /error）
                 .requestMatchers("/error").permitAll()
                 
-                // 放行健康检查端点（用于 K8s/Docker 健康检查）
-                .requestMatchers(new AntPathRequestMatcher("/actuator/health")).permitAll()
+                // 放行健康检查端点及其探针子路径（/actuator/health、/liveness、/readiness），供 K8s/Docker 健康检查
+                .requestMatchers(new AntPathRequestMatcher("/actuator/health/**")).permitAll()
                 .requestMatchers(new AntPathRequestMatcher("/health")).permitAll()
                 
                 // 信息端点和 Prometheus 指标需要认证（避免敏感信息泄露）
