@@ -2,6 +2,60 @@
 
 ## Git Push
 
+### 最新推送（2026-09-03 新增 K8s 部署清单与健康探针配置 → 推送 gitee & github）
+
+- commit_type: Task
+- task_id: 0000
+- task_name: 新增K8s部署清单与健康探针
+- commit_hash: 608edc5
+- branch: main
+- remote: gitee & origin (github)
+- staged_files:
+  - Dockerfile（修改 - 新增 HEALTHCHECK，显式钉死 appuser UID/GID=1000 对齐 k8s runAsUser）
+  - README.md（修改 - Docker 部署指南处加 K8s 部署文档链接）
+  - company-rag-bootstrap/src/main/java/com/company/rag/bootstrap/config/SecurityConfig.java（修改 - 健康放行改 /actuator/health/**）
+  - company-rag-bootstrap/src/main/resources/application.yml（修改 - 开启 management.endpoint.health.probes.enabled）
+  - docker-compose.yml（修改 - app 服务新增 healthcheck）
+  - docs/k8s-deployment.md（新增 - K8s 部署指南）
+  - k8s/configmap.yaml（新增）
+  - k8s/deployment.yaml（新增 - Deployment+Service，含 liveness/readiness 探针）
+  - k8s/initdb-configmap.yaml（新增 - PostgreSQL 初始化脚本）
+  - k8s/postgres.yaml（新增 - Deployment+PVC+Service，超级用户 postgres 与最小权限应用用户 company_rag_app 分离）
+  - k8s/redis.yaml（新增 - Deployment+Service）
+  - k8s/secret.yaml（新增 - 敏感配置占位，部署前须替换）
+- commit_message: Task:0000_新增K8s部署清单与健康探针：add k8s deployment manifests and health probe config
+- commit_command: git commit -m "Task:0000_新增K8s部署清单与健康探针：add k8s deployment manifests and health probe config"
+- commit_exit_code: 0
+- push_command: git push gitee main && git push origin main
+- push_exit_code: 0（gitee）& 0（origin）
+- remote_head_check_command: git fetch gitee main && git fetch origin main && git rev-parse gitee/main origin/main
+- remote_head: 608edc5（本地 / gitee / origin 三处一致）
+- result: ✅ 本次交付已完整推送至 gitee 与 github(origin)，两远端分支 HEAD = 608edc5，与本地一致。内容：新增 6 份 K8s 部署清单 + 部署文档，开启 Actuator 探针端点、放行 /actuator/health/**，Dockerfile / docker-compose 补齐 HEALTHCHECK，三链路健康探针路径对齐；postgres 采用超级用户初始化 + 最小权限应用用户分离以保留 RLS。
+
+### 最新推送（2026-09-03 admin 用户列表隔离与唯一 admin 约束修复 → 补推 gitee）
+
+- commit_type: BugFix
+- task_id: 0007
+- task_name: admin 用户列表隔离与唯一 admin 约束修复
+- commit_hash: b1e5b86
+- branch: main
+- remote: origin (github，本提交已推送) & gitee（本次补推成功）
+- staged_files:
+  - company-rag-common/src/main/java/com/company/rag/common/security/UserContext.java（修改 - getCurrentUserId 增加 null 防护）
+  - company-rag-tenant/src/main/java/com/company/rag/tenant/mapper/UserMapper.java（修改 - 补 countByRole，删除重复定义）
+  - company-rag-tenant/src/main/java/com/company/rag/tenant/service/impl/UserServiceImpl.java（修改 - queryUserList admin 全量、create/update admin 唯一校验、deleteUser 禁删自己与 admin）
+  - company-rag-tenant/src/test/java/com/company/rag/tenant/service/UserServiceTest.java（修改 - 新增 6 个 admin 逻辑测试）
+  - company-rag-tenant/src/test/resources/mockito-extensions/org.mockito.plugins.MockMaker（新增 - mock-maker-inline 支持 mockStatic）
+  - company-rag-web/src/main/resources/templates/index.html（修改 - 删除按钮仅 admin 之外的用户行显示）
+- commit_message: feat(tenant): 平台管理员可见全部用户并保护唯一 admin 账号（b1e5b86，本提交早前已推送到 github origin，本次补推 gitee）
+- commit_command: git commit -F .commit-msg.txt（早前已提交）
+- commit_exit_code: 0（早前）
+- push_command: git push gitee main（本次补推）
+- push_exit_code: 0
+- remote_head_check_command: git fetch gitee main && git log -1 --oneline gitee/main
+- remote_head: b1e5b86（gitee 与本地/ github origin 一致）
+- result: ✅ 本次把已推送到 github 的提交 b1e5b86 补推至 gitee，gitee/main 校验 = b1e5b86，与本地及其它远端 HEAD 一致。修复内容：admin 登录用户列表可见全部用户；仅 admin 之外的用户行显示删除按钮；不允许多个管理员账号；admin 不能删除自己。
+
 ### 最新推送（2026-09-02 分布式追踪全链路实现）
 
 - commit_type: Task
