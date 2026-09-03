@@ -94,7 +94,7 @@ public class ChatController {
             if (request.getSessionId() != null && request.getTenantId() != null) {
                 // 读取历史会话（按时间升序）
                 List<RagSession> historySessions = ragSessionService.getSessionDetail(
-                        request.getTenantId(), request.getSessionId());
+                        request.getTenantId(), verifiedUserId, request.getSessionId());
                 
                 // 转换为 Message 列表
                 List<Message> historyMessages = new ArrayList<>();

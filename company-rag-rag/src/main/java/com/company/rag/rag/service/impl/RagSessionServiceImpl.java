@@ -156,20 +156,22 @@ public class RagSessionServiceImpl implements RagSessionService {
     }
 
     @Override
-    public List<RagSession> getSessionDetail(Long tenantId, String sessionId) {
+    public List<RagSession> getSessionDetail(Long tenantId, Long userId, String sessionId) {
         return sessionMapper.selectList(
                 new LambdaQueryWrapper<RagSession>()
                         .eq(RagSession::getTenantId, tenantId)
+                        .eq(RagSession::getUserId, userId)
                         .eq(RagSession::getSessionId, sessionId)
                         .orderByAsc(RagSession::getCreateTime)
         );
     }
 
     @Override
-    public void deleteSession(Long tenantId, String sessionId) {
+    public void deleteSession(Long tenantId, Long userId, String sessionId) {
         RagSessionMeta meta = sessionMetaMapper.selectOne(
                 new LambdaQueryWrapper<RagSessionMeta>()
                         .eq(RagSessionMeta::getTenantId, tenantId)
+                        .eq(RagSessionMeta::getUserId, userId)
                         .eq(RagSessionMeta::getSessionId, sessionId)
         );
 
@@ -177,15 +179,16 @@ public class RagSessionServiceImpl implements RagSessionService {
             meta.setIsDeleted(true);
             meta.setUpdateTime(LocalDateTime.now());
             sessionMetaMapper.updateById(meta);
-            log.info("软删除会话 | tenantId={} sessionId={}", tenantId, sessionId);
+            log.info("软删除会话 | tenantId={} userId={} sessionId={}", tenantId, userId, sessionId);
         }
     }
 
     @Override
-    public void updateSession(Long tenantId, String sessionId, String title, List<String> tags) {
+    public void updateSession(Long tenantId, Long userId, String sessionId, String title, List<String> tags) {
         RagSessionMeta meta = sessionMetaMapper.selectOne(
                 new LambdaQueryWrapper<RagSessionMeta>()
                         .eq(RagSessionMeta::getTenantId, tenantId)
+                        .eq(RagSessionMeta::getUserId, userId)
                         .eq(RagSessionMeta::getSessionId, sessionId)
         );
 
@@ -198,7 +201,7 @@ public class RagSessionServiceImpl implements RagSessionService {
             }
             meta.setUpdateTime(LocalDateTime.now());
             sessionMetaMapper.updateById(meta);
-            log.info("更新会话信息 | tenantId={} sessionId={}", tenantId, sessionId);
+            log.info("更新会话信息 | tenantId={} userId={} sessionId={}", tenantId, userId, sessionId);
         }
     }
 }

@@ -244,7 +244,7 @@ class RagSessionServiceTest {
         session2.setCreateTime(LocalDateTime.now().plusMinutes(1));
         List<RagSession> mockSessions = Arrays.asList(session1, session2);
         when(sessionMapper.selectList(any())).thenReturn(mockSessions);
-        List<RagSession> result = sessionService.getSessionDetail(TENANT_ID, SESSION_ID);
+        List<RagSession> result = sessionService.getSessionDetail(TENANT_ID, USER_ID, SESSION_ID);
         assertNotNull(result);
         assertEquals(2, result.size());
         assertEquals("第一条消息", result.get(0).getQuery());
@@ -255,7 +255,7 @@ class RagSessionServiceTest {
     @Test
     void testGetSessionDetail_empty() {
         when(sessionMapper.selectList(any())).thenReturn(Collections.emptyList());
-        List<RagSession> result = sessionService.getSessionDetail(TENANT_ID, SESSION_ID);
+        List<RagSession> result = sessionService.getSessionDetail(TENANT_ID, USER_ID, SESSION_ID);
         assertNotNull(result);
         assertTrue(result.isEmpty());
     }
@@ -264,7 +264,7 @@ class RagSessionServiceTest {
     void testDeleteSession() {
         RagSessionMeta meta = createDefaultMeta();
         when(sessionMetaMapper.selectOne(any())).thenReturn(meta);
-        sessionService.deleteSession(TENANT_ID, SESSION_ID);
+        sessionService.deleteSession(TENANT_ID, USER_ID, SESSION_ID);
         assertTrue(meta.getIsDeleted());
         assertNotNull(meta.getUpdateTime());
         verify(sessionMetaMapper).updateById(meta);
@@ -273,7 +273,7 @@ class RagSessionServiceTest {
     @Test
     void testDeleteSession_notFound() {
         when(sessionMetaMapper.selectOne(any())).thenReturn(null);
-        sessionService.deleteSession(TENANT_ID, SESSION_ID);
+        sessionService.deleteSession(TENANT_ID, USER_ID, SESSION_ID);
         verify(sessionMetaMapper, never()).updateById(any(RagSessionMeta.class));
     }
 
@@ -283,7 +283,7 @@ class RagSessionServiceTest {
         when(sessionMetaMapper.selectOne(any())).thenReturn(meta);
         String newTitle = "更新后的标题";
         List<String> newTags = Arrays.asList("ai", "rag", "test");
-        sessionService.updateSession(TENANT_ID, SESSION_ID, newTitle, newTags);
+        sessionService.updateSession(TENANT_ID, USER_ID, SESSION_ID, newTitle, newTags);
         assertEquals(newTitle, meta.getTitle());
         assertEquals(newTags, meta.getTags());
         assertNotNull(meta.getUpdateTime());
@@ -295,7 +295,7 @@ class RagSessionServiceTest {
         RagSessionMeta meta = createDefaultMeta();
         meta.setTags(Collections.singletonList("old"));
         when(sessionMetaMapper.selectOne(any())).thenReturn(meta);
-        sessionService.updateSession(TENANT_ID, SESSION_ID, "仅更新标题", null);
+        sessionService.updateSession(TENANT_ID, USER_ID, SESSION_ID, "仅更新标题", null);
         assertEquals("仅更新标题", meta.getTitle());
         assertEquals(Collections.singletonList("old"), meta.getTags());
         assertNotNull(meta.getUpdateTime());
@@ -308,7 +308,7 @@ class RagSessionServiceTest {
         meta.setTitle("原标题");
         when(sessionMetaMapper.selectOne(any())).thenReturn(meta);
         List<String> newTags = Arrays.asList("new-tag");
-        sessionService.updateSession(TENANT_ID, SESSION_ID, null, newTags);
+        sessionService.updateSession(TENANT_ID, USER_ID, SESSION_ID, null, newTags);
         assertEquals("原标题", meta.getTitle());
         assertEquals(newTags, meta.getTags());
         assertNotNull(meta.getUpdateTime());
@@ -318,7 +318,7 @@ class RagSessionServiceTest {
     @Test
     void testUpdateSession_notFound() {
         when(sessionMetaMapper.selectOne(any())).thenReturn(null);
-        sessionService.updateSession(TENANT_ID, SESSION_ID, "标题", Arrays.asList("tag"));
+        sessionService.updateSession(TENANT_ID, USER_ID, SESSION_ID, "标题", Arrays.asList("tag"));
         verify(sessionMetaMapper, never()).updateById(any(RagSessionMeta.class));
     }
 

@@ -62,7 +62,9 @@ public class SessionController {
     @PreAuthorize("isAuthenticated()")
     public R<List<RagSession>> getSessionDetail(@PathVariable String sessionId,
                                                  @RequestHeader("X-Tenant-Id") Long tenantId) {
-        List<RagSession> sessions = sessionService.getSessionDetail(tenantId, sessionId);
+        // 从认证信息获取当前用户 ID，按用户隔离会话数据
+        Long userId = UserContext.getCurrentUserId();
+        List<RagSession> sessions = sessionService.getSessionDetail(tenantId, userId, sessionId);
         return R.ok(sessions);
     }
 
@@ -73,7 +75,9 @@ public class SessionController {
     @PreAuthorize("isAuthenticated()")
     public R<Void> deleteSession(@PathVariable String sessionId,
                                   @RequestHeader("X-Tenant-Id") Long tenantId) {
-        sessionService.deleteSession(tenantId, sessionId);
+        // 从认证信息获取当前用户 ID，按用户隔离会话数据
+        Long userId = UserContext.getCurrentUserId();
+        sessionService.deleteSession(tenantId, userId, sessionId);
         return R.ok();
     }
 
@@ -85,7 +89,9 @@ public class SessionController {
     public R<Void> updateSession(@PathVariable String sessionId,
                                   @RequestBody SessionUpdateRequest request,
                                   @RequestHeader("X-Tenant-Id") Long tenantId) {
-        sessionService.updateSession(tenantId, sessionId, request.getTitle(), request.getTags());
+        // 从认证信息获取当前用户 ID，按用户隔离会话数据
+        Long userId = UserContext.getCurrentUserId();
+        sessionService.updateSession(tenantId, userId, sessionId, request.getTitle(), request.getTags());
         return R.ok();
     }
 }

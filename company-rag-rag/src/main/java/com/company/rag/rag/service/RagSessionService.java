@@ -33,17 +33,17 @@ public interface RagSessionService {
     /**
      * 获取会话详情
      */
-    List<RagSession> getSessionDetail(Long tenantId, String sessionId);
+    List<RagSession> getSessionDetail(Long tenantId, Long userId, String sessionId);
 
     /**
      * 软删除会话
      */
-    void deleteSession(Long tenantId, String sessionId);
+    void deleteSession(Long tenantId, Long userId, String sessionId);
 
     /**
      * 更新会话信息
      */
-    void updateSession(Long tenantId, String sessionId, String title, List<String> tags);
+    void updateSession(Long tenantId, Long userId, String sessionId, String title, List<String> tags);
 
     /**
      * 更新会话元数据（异步批量更新）
