@@ -2,6 +2,29 @@
 
 ## Git Push
 
+### 最新推送（2026-09-04 监控告警闭环 → gitee 成功 / github 网络失败）
+
+- commit_type: Feat
+- task_id: 0000
+- task_name: 监控告警闭环
+- commit_hash: 523c876
+- branch: main
+- remote: gitee（成功）& origin 即 github（失败 - 网络原因）
+- staged_files:
+  - prometheus.yml（修改 - 新增 rule_files 加载告警规则 /etc/prometheus/rules.yml，alerting 指向 alertmanager:9093）
+  - prometheus-rules.yml（新增 - 6 条告警规则：AppDown、限流过高、RAG 平均耗时、缓存命中率低、无流量 absent、请求耗时）
+  - alertmanager.yml（新增 - Alertmanager 配置，SMTP 163 邮件接收器，占位文档化不实际发送，凭据走 ${SMTP_*} 环境变量）
+  - docker-compose.yml（修改 - prometheus 挂载 prometheus-rules.yml；新增 alertmanager 服务（9093），注入 SMTP_* 环境变量）
+  - .env.example（修改 - 追加 SMTP 相关环境变量模板注释）
+- commit_message: Feat:0000_监控告警闭环：add Prometheus alerting rules and Alertmanager SMTP notifier
+- commit_command: git commit -m "Feat:0000_监控告警闭环：add Prometheus alerting rules and Alertmanager SMTP notifier"
+- commit_exit_code: 0
+- push_command: git push gitee main && git push origin main
+- push_exit_code: 0（gitee）& 失败（github - Recv failure: Connection was reset，网络原因）
+- remote_head_check_command: git rev-parse HEAD && git ls-remote gitee main && git ls-remote origin main
+- remote_head: 523c876（本地 / gitee 一致，均有 ls-remote 佐证；github 连接被重置无法访问/推送）
+- result: gitee 推送成功且远端 HEAD=523c876 与本地一致。github 因网络（Connection was reset）推送失败，main 仍停留在此前提交，待网络恢复后补推。变更内容：补齐 Prometheus 告警规则 + Alertmanager 通知最小闭环，告警链路（Prometheus 规则→Alertmanager）已真机验证触发 CompanyRagInstanceDown firing；163 SMTP 因 Alertmanager 仅支持 LOGIN 认证而 163 仅支持 PLAIN，二者不兼容，故该接收器标注为文档化占位、不实际发送。
+
 ### 最新推送（2026-09-04 PostgreSQL 定时备份与 WAL 归档 PITR → gitee & github 均成功）
 
 - commit_type: Feature
