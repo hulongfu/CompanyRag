@@ -15,26 +15,30 @@ import java.util.stream.Collectors;
 @Component
 public class ResultFilter {
     
-    private static final double DEFAULT_SCORE_THRESHOLD = 0.3;
-    
     /**
      * 阈值过滤 + Top-K（不再做多样性去重）
+     * <p>硬阈值仅在显式传入门限（scoreThreshold != null && > 0）时生效；
+     * 否则只保留被任一路命中（finalScore > 0）的结果，并把排序交由 Rerank 收敛。</p>
      * @param results 融合后的结果
      * @param topK 最终返回数量
-     * @param scoreThreshold 分数阈值
+     * @param scoreThreshold 分数阈值；null 或 <=0 表示不启用硬阈值
      * @return 筛选后的结果
      */
     public List<FusedResult> filter(List<FusedResult> results, int topK, Double scoreThreshold) {
-        double threshold = scoreThreshold != null ? scoreThreshold : DEFAULT_SCORE_THRESHOLD;
-        
-        log.info("开始筛选 | 原始数量={} | 阈值={} | topK={}", results.size(), threshold, topK);
-        
+        boolean thresholdEnabled = scoreThreshold != null && scoreThreshold > 0;
+
+        log.info("开始筛选 | 原始数量={} | 启用硬阈值={} | 阈值={} | topK={}",
+                results.size(), thresholdEnabled, scoreThreshold, topK);
+
         return results.stream()
-            // 1. 阈值过滤
+            // 1. 筛选：启用硬阈值时按阈值过滤；否则兜底保留被任一路命中的项(finalScore>0)
             .filter(r -> {
-                boolean pass = r.getFinalScore() >= threshold;
+                boolean pass = thresholdEnabled
+                        ? r.getFinalScore() >= scoreThreshold
+                        : r.getFinalScore() > 0;
                 if (!pass) {
-                    log.debug("阈值过滤 | chunkId={} | score={}", r.getChunkId(), r.getFinalScore());
+                    log.debug("阈值过滤 | chunkId={} | score={} | 启用硬阈值={}",
+                            r.getChunkId(), r.getFinalScore(), thresholdEnabled);
                 }
                 return pass;
             })

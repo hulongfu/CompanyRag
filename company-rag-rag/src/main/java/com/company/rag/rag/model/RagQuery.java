@@ -35,9 +35,10 @@ public class RagQuery {
     private Integer fusionTopK = 30;
     
     /**
-     * 分数阈值（默认 0.3）
+     * 分数阈值（默认 null）。
+     * 语义：仅当显式设置为 > 0 时才启用硬阈值过滤；null 表示交由 Rerank 收敛。
      */
-    private Double scoreThreshold = 0.3;
+    private Double scoreThreshold;
     
     /**
      * 多样性去重：每文档最多保留条数（默认 3）

@@ -244,7 +244,9 @@ public class RagSearchServiceImpl implements RagSearchService {
         int rerankTopK = query.getRerankTopK() != null ? query.getRerankTopK() : 20;
         int maxPerDoc = query.getMaxPerDoc() != null ? query.getMaxPerDoc() : 3;
         int fusionTopK = query.getFusionTopK() != null ? query.getFusionTopK() : 30;      // 新增参数
-        double scoreThreshold = query.getScoreThreshold() != null ? query.getScoreThreshold() : 0.3;  // 新增参数
+        // scoreThreshold 为 null 时表示不启用硬阈值，需用独立标识，避免与显式传入的任意有效值（含 0.3）互相错误命中缓存
+        String scoreThreshold = query.getScoreThreshold() != null
+                ? String.valueOf(query.getScoreThreshold()) : "null";
         
         return RagConstant.CACHE_DOC_VECTOR + query.getTenantId() + ":" + 
                normalizedQuery + ":" + topK + ":" + strategy + ":" + 
