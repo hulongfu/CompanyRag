@@ -1,0 +1,112 @@
+# ================================================
+# CompanyRag PostgreSQL 定时备份 CronJob
+# ================================================
+# 用途：
+#   每天凌晨 2 点对 company_rag 库执行 pg_dump 逻辑备份（gzip 压缩），
+#   写入独立备份 PVC postgres-backup-pvc，并按保留天数清理旧备份。
+# 设计说明：
+#   1. 备份写独立 PVC，避免与 pgdata 同一块云盘（主库与备份共盘 == 无备份）
+#   2. pg_dump 为逻辑备份，不适用于 point-in-time 恢复（PITR 见 postgres.yaml
+#      的 WAL 归档方案），但可抵御误删/表损坏/逻辑错误
+#   3. 使用与 postgres 同 namespace 的 Service 名称 postgres 访问集群内库
+#   4. 使用超级用户 postgres 备份（可读全 schema/RLS），密码从 Secret 注入
+# ================================================
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-backup
+  namespace: default
+  labels:
+    app: postgres
+    component: backup
+spec:
+  # cron 表达式：每天凌晨 2 点执行（集群本地时区取决于节点配置，一般 UTC）
+  schedule: "0 2 * * *"
+  concurrencyPolicy: Forbid          # 防止备份重叠
+  successfulJobsHistoryLimit: 7
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            component: postgres-backup
+        spec:
+          # CronJob 容器以非 root 运行，与项目其它清单保持一致
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+          restartPolicy: OnFailure
+          initContainers:
+            # 初始化容器只负责确保备份目录存在并属当前用户
+            - name: init-dir
+              image: pgvector/pgvector:pg16
+              imagePullPolicy: IfNotPresent
+              securityContext:
+                runAsNonRoot: true
+                runAsUser: 1000
+              command:
+                - sh
+                - -c
+                - mkdir -p /backup && chown 1000:1000 /backup
+              volumeMounts:
+                - name: backup
+                  mountPath: /backup
+          containers:
+            - name: pg-dump-backup
+              image: pgvector/pgvector:pg16
+              imagePullPolicy: IfNotPresent
+              # 环境：PG 连接参数 + 备份路径 + 保留天数
+              env:
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: company-rag-secret
+                      key: POSTGRES_SUPERUSER_PASSWORD
+                - name: PGUSER
+                  value: "postgres"
+                - name: PGHOST
+                  value: "postgres"            # 集群内 Service 名称
+                - name: PGPORT
+                  value: "5432"
+                - name: PGDATABASE
+                  value: "company_rag"
+                - name: BACKUP_DIR
+                  value: "/backup"
+                - name: BACKUP_RETENTION_DAYS
+                  value: "30"
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+                  mkdir -p "$BACKUP_DIR"
+                  TS=$(date +%Y%m%d_%H%M%S)
+                  OUT="$BACKUP_DIR/company_rag_$TS.dump"
+                  # pg_dump 自定义格式，便于选择性/全量恢复
+                  pg_dump -Fc -f "$OUT"
+                  echo "[$(date)] backup ok: $OUT"
+                  # 保留策略：删除超过 N 天的旧备份
+                  find "$BACKUP_DIR" -name "company_rag_*.dump" -mtime +"$BACKUP_RETENTION_DAYS" -delete
+                  echo "[$(date)] cleanup done, retention=${BACKUP_RETENTION_DAYS}d"
+              volumeMounts:
+                - name: backup
+                  mountPath: /backup
+          volumes:
+            - name: backup
+              persistentVolumeClaim:
+                claimName: postgres-backup-pvc
+---
+# 备份专用 PVC：独立于 pgdata，防止与主库同盘
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-backup-pvc
+  namespace: default
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi

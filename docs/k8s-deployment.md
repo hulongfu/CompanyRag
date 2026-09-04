@@ -129,7 +129,28 @@ kubectl port-forward service/company-rag 8080:8080
 
 ## 备份与恢复
 
-PostgreSQL 使用 PVC 持久化（默认 10Gi）。备份：
+PostgreSQL 使用 PVC 持久化（pgdata 默认 10Gi）。本项目提供两级数据保护：
+
+### 1. 自动逻辑备份（CronJob）
+
+`k8s/postgres-backup-cronjob.yaml` 每天凌晨 2 点对 `company_rag` 库执行 `pg_dump`（自定义格式），
+写入独立备份 PVC `postgres-backup-pvc`（默认 10Gi），并自动清理超过 30 天的旧备份。
+
+- 应用清单：`kubectl apply -f k8s/postgres-backup-cronjob.yaml`
+- 备份产物挂载在备份 PVC 下，路径 `/backup/company_rag_<时间戳>.dump`
+- 用途：抵御误删/表损坏/逻辑错误，可用于完整恢复
+
+手工触发一次备份：
+```bash
+kubectl create job --from=cronjob/postgres-backup manual-backup
+```
+
+查看备份文件：
+```bash
+kubectl exec deploy/postgres -- ls -lh /backup
+```
+
+### 2. 手动逻辑备份
 
 ```bash
 kubectl exec deploy/postgres -- pg_dump \
@@ -138,6 +159,31 @@ kubectl exec deploy/postgres -- pg_dump \
 # 拷贝到本地
 kubectl cp postgres:/tmp/backup.dump ./backup.dump
 ```
+
+### 3. 基于 WAL 归档的 PITR（时间点恢复）
+
+`k8s/postgres.yaml` 已开启 WAL 归档：
+- 启动参数 `archive_mode=on`、`wal_level=replica`、`archive_command=cp %p /pgarchive/%f`
+- 归档 WAL 写入独立 PVC `postgres-archive-pvc`（默认 20Gi），与主数据盘分离
+
+**注意**：`archive_mode` 需在启动 `postgres` 部署后重启一次 Pod 才生效（首次以该清单创建时即生效）。
+
+周期基础备份建议使用 `pg_basebackup`（物理备份，与 WAL 归档配套）：
+```bash
+# 在一个临时 pod 中执行，需 --no-password 与 PGPASSWORD
+kubectl run pg-basebackup --image=pgvector/pgvector:pg16 --rm -it -- \
+  bash -c 'export PGPASSWORD="$(kubectl get secret company-rag-secret -o jsonpath="{.data.POSTGRES_SUPERUSER_PASSWORD}" | base64 -d)"; \
+  pg_basebackup -U postgres -h postgres -D /tmp/base -Ft -z -P'
+```
+
+**PITR 恢复要点**（恢复到基础备份 + WAL 回放到目标时间点）：
+1. 准备一份基础备份（`pg_basebackup` 或完整数据卷快照）
+2. 将基础备份解压到新的 `pgdata` 卷
+3. 在数据目录放置归档的 WAL（从 `postgres-archive-pvc` 拷贝）
+4. 在 `postgresql.conf`/启动参数设置 `restore_command=cp /pgarchive/%f %p` 与 `recovery_target_time`
+5. 启动 postgres，完成后自动清理 `recovery.signal`
+
+> 完整 PITR 演练步骤较多，如需要可参照 PostgreSQL 官方文档「Continuous Archiving and Point-in-Time Recovery（PITR）」。
 
 ## 常见问题排查
 

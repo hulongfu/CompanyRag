@@ -21,6 +21,17 @@ spec:
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 5432
+          # PITR 相关启动参数：
+          #   wal_level=replica    开启 WAL 归档所需级别（pg16 默认即 replica）
+          #   archive_mode=on      开启归档（需重启生效）
+          #   archive_command      将已归档 WAL 拷贝到独立归档卷 /pgarchive
+          args:
+            - "-c"
+            - "archive_mode=on"
+            - "-c"
+            - "wal_level=replica"
+            - "-c"
+            - "archive_command=test ! -f /pgarchive/%f && cp %p /pgarchive/%f"
           env:
             # 主进程使用独立超级用户 postgres，负责执行 initdb 脚本（创建扩展/角色/授权）
             # 应用是另一非超户 company_rag_app（由 init.sql 创建），以保证 RLS 生效
@@ -64,12 +75,17 @@ spec:
           volumeMounts:
             - name: pgdata
               mountPath: /var/lib/postgresql/data
+            - name: pgarchive
+              mountPath: /pgarchive
             - name: initdb
               mountPath: /docker-entrypoint-initdb.d
       volumes:
         - name: pgdata
           persistentVolumeClaim:
             claimName: postgres-pvc
+        - name: pgarchive
+          persistentVolumeClaim:
+            claimName: postgres-archive-pvc
         - name: initdb
           configMap:
             name: company-rag-initdb
@@ -97,3 +113,16 @@ spec:
   ports:
     - port: 5432
       targetPort: 5432
+---
+# WAL 归档专用 PVC：独立于 pgdata，避免与主库同盘，保证 PITR 可用
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-archive-pvc
+  namespace: default
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
