@@ -2,6 +2,34 @@
 
 ## Git Push
 
+### 最新推送（2026-09-04 检索质量升级B0 → gitee 成功 / github 成功）
+
+- commit_type: Feat
+- task_id: 0000
+- task_name: 检索质量升级B0
+- commit_hash: 3a59216
+- branch: main
+- remote: gitee（成功）& origin 即 github（成功）
+- staged_files:
+  - company-rag-rag/src/main/java/com/company/rag/rag/fusion/ResultFilter.java（修改 - 删除硬编码 DEFAULT_SCORE_THRESHOLD(0.3)，改为仅显式>0才启用硬阈值，null 回退只保留 finalScore>0）
+  - company-rag-rag/src/main/java/com/company/rag/rag/model/RagQuery.java（修改 - scoreThreshold 默认 0.3 -> null，配合新阈值语义）
+  - company-rag-rag/src/main/java/com/company/rag/rag/service/impl/RagSearchServiceImpl.java（修改 - buildCacheKey 缓存键为 scoreThreshold 增加 null 独立标识，避免与显式有效值互相错误命中）
+  - company-rag-rag/src/main/java/com/company/rag/rag/eval/EvalCase.java（新增 - 评测用例 record：id/query/referenceChunkIds）
+  - company-rag-rag/src/main/java/com/company/rag/rag/eval/RetrievalEvalResult.java（新增 - 评测结果模型：recallBefore/recallAfter/dropRate/droppedChunkIds）
+  - company-rag-rag/src/main/java/com/company/rag/rag/eval/RetrievalEvalRunner.java（新增 - 免DB融合层评测器，复用 RankNormalizer/ResultFuser/ResultFilter 量化 dropRate）
+  - company-rag-rag/src/test/java/com/company/rag/rag/eval/RetrievalEvalRunnerTest.java（新增 - 评测器单测）
+  - company-rag-rag/src/test/java/com/company/rag/rag/fusion/ResultFilterTest.java（新增 - 4 个用例：默认保留单路低权重命中/显式阈值/topK/空列表）
+  - docs/superpowers/specs/2026-09-04-retrieval-quality-upgrade-design.md（新增 - 设计文档）
+  - docs/superpowers/plans/2026-09-04-retrieval-quality-upgrade.md（新增 - 实现计划）
+- commit_message: Feat:2026-09-04_检索质量升级B0：修复低权重单路命中被硬阈值误杀，新增免DB融合层评测器
+- commit_command: git commit -m "Feat:2026-09-04_检索质量升级B0：修复低权重单路命中被硬阈值误杀，新增免DB融合层评测器"
+- commit_exit_code: 0
+- push_command: git push gitee main && git push origin main
+- push_exit_code: 0（gitee）& 0（github - 本次网络正常，0d710cc..3a59216；一并补推了此前的监控告警闭环 41ff351）
+- remote_head_check_command: git rev-parse HEAD && git ls-remote gitee main && git ls-remote origin main
+- remote_head: 3a59216（本地 / gitee / origin 三处一致，均有 ls-remote 佐证）
+- result: 两远端均推送成功。gitee/main = 3a59216 与本地一致；github/main = 3a59216 与本地一致（push exit=0，0d710cc..3a59216）。变更内容：修复融合层检索「答案已检索但因融合分低于硬阈值 0.3 被过滤丢弃」问题——ResultFilter 默认不再启用硬阈值，仅显式传 >0 才启用；RagQuery.scoreThreshold 默认改为 null；缓存键为 null 增加独立标识避免与显式值分叉误命中；新增免 DB 融合层评测器（EvalCase/RetrievalEvalResult/RetrievalEvalRunner）量化 drop_rate。单测 ResultFilterTest(4) + RetrievalEvalRunnerTest(1) + ResultFuserTest(3) + RankNormalizerTest(2) 共 10 全通过。
+
 ### 最新推送（2026-09-04 监控告警闭环 → gitee 成功 / github 网络失败）
 
 - commit_type: Feat
