@@ -23,6 +23,7 @@
 - remote_head_check_command: git rev-parse HEAD && git ls-remote gitee main && timeout 60 git ls-remote origin main
 - remote_head: 0d710cc（本地 / gitee 一致；github push 返回成功 main -> main，但随后 ls-remote 网络抖动未能二次确认，以 push exit=0 为准）
 - result: 两远端均推送成功。gitee/main = 0d710cc 有 ls-remote 佐证；github push 成功（exit=0，28a6609..0d710cc），一并补推了此前 b1544b1、7304440 两个 Swagger 相关提交。变更内容：为 PostgreSQL 增加每日自动逻辑备份（CronJob + 独立备份卷）与基于 WAL 连续归档的 PITR 能力（独立归档卷），并附 Docker 离线验证脚本（已实测 archive_mode=on、pg_dump 生成备份通过）。
+- 补充：本条日志自身由提交 06d31a8 记录（deploy-log.md 更新）。06d31a8 已推送 gitee（06d31a8 与本地一致）但 github 推送失败（网络：Failed to connect to github.com port 443 / Recv failure Connection reset，多次重试仍失败），github 当前停留在 0d710cc（即 Feature 提交已同步，仅 deploy-log 文档提交 06d31a8 待网络恢复后补推）。
 
 ### 最新推送（2026-09-04 Swagger 生产环境暴露修复 → gitee 成功 / github 网络失败）
 
