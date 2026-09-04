@@ -64,6 +64,9 @@ jwt:
 
 # 多路检索配置
 rag:
+  # 安全配置：生产环境不放行 Swagger/OpenAPI 文档
+  security:
+    permit-swagger: false
   retrieval:
     # 多路检索配置
     vector-top-k: 50
@@ -73,6 +76,13 @@ rag:
     # 融合配置
     score-threshold: 0.3
     fusion-top-k: 50
+
+# SpringDoc OpenAPI：生产环境从根因上停用文档端点，避免 API 全景暴露
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
 
 # MCP Client 配置：连接外部 MCP Server
 mcp:

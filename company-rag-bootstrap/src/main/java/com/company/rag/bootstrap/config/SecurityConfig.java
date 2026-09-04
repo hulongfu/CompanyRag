@@ -5,6 +5,7 @@ import com.company.rag.mcp.filter.McpSecurityFilter;
 import com.company.rag.tenant.service.TenantService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -49,6 +50,13 @@ public class SecurityConfig {
     private final TenantService tenantService;
 
     /**
+     * 是否放行 Swagger/OpenAPI 文档。
+     * 默认 true（开发环境），生产环境通过配置设为 false 避免 API 全景暴露。
+     */
+    @Value("${rag.security.permit-swagger:true}")
+    private boolean permitSwagger;
+
+    /**
      * 配置安全过滤链
      */
     @Bean
@@ -62,53 +70,55 @@ public class SecurityConfig {
                 session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             
             // 配置请求授权规则
-            .authorizeHttpRequests(auth -> auth
+            .authorizeHttpRequests(auth -> {
                 // 放行认证相关接口
-                .requestMatchers(new AntPathRequestMatcher("/api/auth/**", HttpMethod.POST.name())).permitAll()
-                .requestMatchers(new AntPathRequestMatcher("/api/auth/**", HttpMethod.GET.name())).permitAll()
-                
+                auth.requestMatchers(new AntPathRequestMatcher("/api/auth/**", HttpMethod.POST.name())).permitAll();
+                auth.requestMatchers(new AntPathRequestMatcher("/api/auth/**", HttpMethod.GET.name())).permitAll();
+
                 // 放行登录页面和首页
-                .requestMatchers(new AntPathRequestMatcher("/")).permitAll()
-                .requestMatchers(new AntPathRequestMatcher("/login")).permitAll()
-                .requestMatchers(new AntPathRequestMatcher("/index")).permitAll()
-                
+                auth.requestMatchers(new AntPathRequestMatcher("/")).permitAll();
+                auth.requestMatchers(new AntPathRequestMatcher("/login")).permitAll();
+                auth.requestMatchers(new AntPathRequestMatcher("/index")).permitAll();
+
                 // 放行静态资源
-                .requestMatchers(new AntPathRequestMatcher("/static/**")).permitAll()
-                .requestMatchers(new AntPathRequestMatcher("/public/**")).permitAll()
-                .requestMatchers(new AntPathRequestMatcher("/assets/**")).permitAll()
-                .requestMatchers(new AntPathRequestMatcher("/*.js")).permitAll()
-                .requestMatchers(new AntPathRequestMatcher("/*.css")).permitAll()
-                .requestMatchers(new AntPathRequestMatcher("/*.html")).permitAll()
-                .requestMatchers(new AntPathRequestMatcher("/*.ico")).permitAll()
-                
-                // 放行 Swagger UI 和 API 文档（开发环境）
-                // 生产环境应通过认证访问，避免 API 全景暴露
-                .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**", "/swagger-resources/**", "/webjars/**").permitAll()
-                
+                auth.requestMatchers(new AntPathRequestMatcher("/static/**")).permitAll();
+                auth.requestMatchers(new AntPathRequestMatcher("/public/**")).permitAll();
+                auth.requestMatchers(new AntPathRequestMatcher("/assets/**")).permitAll();
+                auth.requestMatchers(new AntPathRequestMatcher("/*.js")).permitAll();
+                auth.requestMatchers(new AntPathRequestMatcher("/*.css")).permitAll();
+                auth.requestMatchers(new AntPathRequestMatcher("/*.html")).permitAll();
+                auth.requestMatchers(new AntPathRequestMatcher("/*.ico")).permitAll();
+
+                // Swagger UI 和 API 文档：仅开发环境放行（rag.security.permit-swagger=true）。
+                // 生产环境（false）不注册放行规则，请求会落入 anyRequest().authenticated() 需认证，避免 API 全景暴露。
+                if (permitSwagger) {
+                    auth.requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**", "/swagger-resources/**", "/webjars/**").permitAll();
+                }
+
                 // 放行测试端点
-                .requestMatchers("/test/**").permitAll()
-                
+                auth.requestMatchers("/test/**").permitAll();
+
                 // 放行错误页面（Swagger 内部资源 404 时会转发到 /error）
-                .requestMatchers("/error").permitAll()
-                
+                auth.requestMatchers("/error").permitAll();
+
                 // 放行健康检查端点及其探针子路径（/actuator/health、/liveness、/readiness），供 K8s/Docker 健康检查
-                .requestMatchers(new AntPathRequestMatcher("/actuator/health/**")).permitAll()
-                .requestMatchers(new AntPathRequestMatcher("/health")).permitAll()
-                
+                auth.requestMatchers(new AntPathRequestMatcher("/actuator/health/**")).permitAll();
+                auth.requestMatchers(new AntPathRequestMatcher("/health")).permitAll();
+
                 // 信息端点和 Prometheus 指标需要认证（避免敏感信息泄露）
-                .requestMatchers(new AntPathRequestMatcher("/actuator/info")).authenticated()
-                .requestMatchers(new AntPathRequestMatcher("/actuator/prometheus")).authenticated()
-                .requestMatchers(new AntPathRequestMatcher("/metrics")).authenticated()
-                
+                auth.requestMatchers(new AntPathRequestMatcher("/actuator/info")).authenticated();
+                auth.requestMatchers(new AntPathRequestMatcher("/actuator/prometheus")).authenticated();
+                auth.requestMatchers(new AntPathRequestMatcher("/metrics")).authenticated();
+
                 // 放行 MCP 端点（MCP Server 需要被外部 AI 应用/框架调用）
-                .requestMatchers(new AntPathRequestMatcher("/mcp/**")).permitAll()
-                
+                auth.requestMatchers(new AntPathRequestMatcher("/mcp/**")).permitAll();
+
                 // 放行下载接口（下载链接是临时生成的，包含租户信息，且有安全检查）
-                .requestMatchers(new AntPathRequestMatcher("/api/download/**")).permitAll()
-                
+                auth.requestMatchers(new AntPathRequestMatcher("/api/download/**")).permitAll();
+
                 // 其他所有请求需要认证
-                .anyRequest().authenticated()
-            )
+                auth.anyRequest().authenticated();
+            })
             
             // 配置异常处理
             .exceptionHandling(exception -> exception
