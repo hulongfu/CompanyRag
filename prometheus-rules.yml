@@ -1,0 +1,82 @@
+# CompanyRag 告警规则
+# 基于 company-rag-rag 模块 RagMetricsRecorder 及 Spring Boot Actuator 暴露的指标
+# 事件源：
+#   - rag_requests_total / rag_ratelimit_hits_total / rag_cache_hits_total / rag_cache_misses_total
+#   - rag_request_total / rag_retrieval_duration / rag_rerank_duration / rag_llm_duration（Timer，单位秒，含 _count/_sum/_max）
+# 说明：
+#   - 阈值均为初始建议值，需结合线上真实基线调整后启用
+#   - Alertmanager 通知渠道为占位（见 alertmanager.yml），跑通链路后替换为真实接收器
+#   - 指标命名基于 Micrometer Timer 默认行为（追加 _seconds），启用前请用 /actuator/prometheus 核对实际 MetricFamily 名
+groups:
+  - name: company-rag-availability
+    rules:
+      # 应用实例宕机 / Prometheus 采集不到
+      - alert: CompanyRagInstanceDown
+        expr: up{job="company-rag"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          app: company-rag
+        annotations:
+          summary: "CompanyRag 实例不可达"
+          description: "Prometheus 无法采集 {{ $labels.instance }} 的指标，应用可能已宕机。"
+
+      # 应用已启动但长时间无任何 RAG 请求（可能服务端僵死 / 入站被切断）
+      - alert: CompanyRagNoTraffic
+        expr: absent(rag_requests_total) or max_over_time(rag_requests_total[10m]) == 0
+        for: 5m
+        labels:
+          severity: warning
+          app: company-rag
+        annotations:
+          summary: "CompanyRag 长时间无请求"
+          description: "最近 10 分钟未收到任何 RAG 请求计数器值，应用可能无流量或处理异常。"
+
+  - name: company-rag-performance
+    rules:
+      # LLM 调用 P95 变慢（LLM 耗时 Timer，单位秒）
+      - alert: CompanyRagLlmSlow
+        expr: histogram_quantile(0.95, sum(rate(rag_llm_duration_seconds_bucket[5m])) by (le)) > 30
+        for: 5m
+        labels:
+          severity: warning
+          app: company-rag
+        annotations:
+          summary: "LLM 调用 P95 超过 30s"
+          description: "LLM 调用 P95 延迟 {{ $value }}s 持续 5 分钟，外部模型可能退化或配额受限。"
+
+      # RAG 完整请求 P95 变慢
+      - alert: CompanyRagRequestSlow
+        expr: histogram_quantile(0.95, sum(rate(rag_request_total_seconds_bucket[5m])) by (le)) > 40
+        for: 5m
+        labels:
+          severity: warning
+          app: company-rag
+        annotations:
+          summary: "RAG 请求 P95 超过 40s"
+          description: "RAG 总请求 P95 延迟 {{ $value }}s 持续 5 分钟，链路存在瓶颈。"
+
+  - name: company-rag-capacity
+    rules:
+      # 限流命中过多（容量 / 上游配额问题）
+      - alert: CompanyRagRateLimitHigh
+        expr: increase(rag_ratelimit_hits_total[5m]) > 50
+        for: 2m
+        labels:
+          severity: warning
+          app: company-rag
+        annotations:
+          summary: "限流触发频繁"
+          description: "最近 5 分钟触发 {{ $value }} 次限流，可能容量不足或上游配额已耗尽。"
+
+      # 缓存命中率过低
+      - alert: CompanyRagCacheHitRateLow
+        expr: (rag_cache_misses_total + rag_cache_hits_total) > 0
+              and (sum(rate(rag_cache_misses_total[5m])) / (sum(rate(rag_cache_hits_total[5m])) + sum(rate(rag_cache_misses_total[5m])))) > 0.8
+        for: 10m
+        labels:
+          severity: warning
+          app: company-rag
+        annotations:
+          summary: "RAG 缓存命中率过低"
+          description: "最近 5 分钟缓存未命中率 {{ $value | humanizePercentage }}，缓存策略可能失效。"

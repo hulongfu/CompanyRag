@@ -2,6 +2,16 @@ global:
   scrape_interval: 15s
   evaluation_interval: 15s
 
+# 告警规则（文件需挂载到容器内 /etc/prometheus/rules.yml）
+rule_files:
+  - '/etc/prometheus/rules.yml'
+
+# Alertmanager 告警推送
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
+
 scrape_configs:
   - job_name: 'company-rag'
     metrics_path: '/actuator/prometheus'

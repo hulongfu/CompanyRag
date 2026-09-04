@@ -1,0 +1,43 @@
+# CompanyRag Alertmanager 配置
+#
+# 渠道：SMTP 邮件（163 邮箱）— ⚠️ 文档化占位，不实际发送
+#
+# ⚠️ 重要说明：
+#   本文件为 SMTP 邮件配置的完整示例/文档，当前【不实际发送告警邮件】。
+#   原因：163 SMTP 仅支持 PLAIN 认证，而 Alertmanager 底层 Go net/smtp 只支持
+#   LOGIN/CRAM-MD5，二者不兼容（实测 AUTH LOGIN 返回 502）。如要启用真实发信，
+#   需改用支持 LOGIN 的 SMTP 服务商（如 QQ 邮箱 smtp.qq.com）或改用 webhook 渠道。
+#
+# 说明：
+#   - 敏感信息（账号/授权码/收件人）通过环境变量注入，由 docker-compose 从本地 .env 传入，
+#     文件本身不包含真实凭据，可安全提交 git。
+#   - 163 邮箱需使用「授权码」而非登录密码（邮箱设置 → 客户端授权密码 中生成）。
+#   - 端口用 25（STARTTLS）：本网络环境中 587/465 被 163 侧限制无法连接，经实测仅 25 端口可用。
+global:
+  # 告警解除后的确认延迟（推荐 3m~10m）
+  resolve_timeout: 5m
+  # 163 SMTP 配置（25 端口 STARTTLS）
+  # 注意：本网络环境 587/465 被 163 侧限制无法连接，仅 25 端口可用，故使用 smtp.163.com:25
+  smtp_smarthost: 'smtp.163.com:25'
+  smtp_from: '${SMTP_FROM}'
+  smtp_auth_username: '${SMTP_USERNAME}'
+  smtp_auth_password: '${SMTP_AUTHORIZATION_CODE}'
+  smtp_require_tls: true
+
+route:
+  # 按告警名 + 应用分组，便于归并同类告警
+  group_by: ['alertname', 'app']
+  # 组内首条告警等待时间：将同窗口内的同类告警聚合后一并通知
+  group_wait: 30s
+  # 同组告警再评估间隔
+  group_interval: 5m
+  # 同一告警重复通知的冷却时间（避免告警风暴）
+  repeat_interval: 4h
+  receiver: 'default'
+
+receivers:
+  # 默认接收器：发送告警邮件到收件人邮箱（告警触发 + 告警解除时各发一封）
+  - name: 'default'
+    email_configs:
+      - to: '${SMTP_TO}'
+        send_resolved: true
