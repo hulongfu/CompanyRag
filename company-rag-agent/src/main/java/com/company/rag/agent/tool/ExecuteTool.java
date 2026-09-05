@@ -370,6 +370,12 @@ public class ExecuteTool implements AgentTool {
         if (skillBasePath != null) {
             env.put("AGENT_SKILL_BASE", skillBasePath);
         }
+        // 注入默认工作目录（app.default-work-dir，独立沙箱），让 file-manager 等写文件技能把产物放到
+        // 该目录而非技能/项目目录，避免污染技能目录或项目代码
+        String workDirPath = defaultWorkDir;
+        if (workDirPath != null && !workDirPath.isBlank()) {
+            env.put("AGENT_WORK_DIR", workDirPath);
+        }
         if (workingDir != null) {
             processBuilder.directory(workingDir);
             log.debug("设置工作目录：{}", workingDir.getAbsolutePath());

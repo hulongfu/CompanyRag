@@ -48,6 +48,21 @@ if AGENT_SKILL_BASE:
         PROTECTED_SCRIPTS_ROOTS = []
 logger.info("受保护的技能脚本目录（只读）：%s", PROTECTED_SCRIPTS_ROOTS)
 
+# ========== 默认工作目录（独立沙箱）==========
+# ExecuteTool 通过环境变量 AGENT_WORK_DIR 注入 app.default-work-dir（如 D:/workspace），
+# 用于承载 file-manager 生成的产物，避免写入技能目录或项目代码目录。未注入时回退到当前 cwd 下的 shared。
+AGENT_WORK_DIR = os.environ.get("AGENT_WORK_DIR", "").strip()
+
+
+def default_base_dir() -> Path:
+    """返回 file-manager 的默认落地根目录（shared 关键字与默认 --base-folder 语义）。"""
+    if AGENT_WORK_DIR:
+        try:
+            return Path(AGENT_WORK_DIR).resolve()
+        except OSError:
+            pass
+    return Path.cwd() / "shared"
+
 
 def is_protected_scripts_path(path: Path) -> bool:
     """判断路径是否位于任一受保护的 skill scripts 目录内（只读信任锚）。"""
@@ -83,7 +98,7 @@ def resolve_path(base_folder: str, relative_path: str = "") -> Path:
     """
     # 处理特殊关键字
     if base_folder == "shared":
-        base_path = Path.cwd() / "shared"
+        base_path = default_base_dir()
     elif base_folder == "desktop":
         base_path = Path.home() / "Desktop"
     elif base_folder == "documents":
