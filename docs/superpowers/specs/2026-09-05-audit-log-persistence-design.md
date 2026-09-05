@@ -56,6 +56,7 @@ public void recordAuditLog(String actionType, String targetType, String targetId
 - 把 `recordAuditLog` 的 TODO 补全为真实 DB 写入。
 - 按操作特征分级处理（管理类同步、数据类异步批量）。
 - 补全归属信息（tenant_id / user_id / ip_address）。
+- **新增"技能/高风险工具"审计**：技能命令（ExecuteTool 的 PYTHON 分支）+ 高风险工具（`DatabaseQueryTool`/`DownloadTool`/外部 MCP）→ 写入既有 `audit_log`（actionType + detail=动作本体，不记输出）。
 - **修复硬伤 1**：`audit_log` 建表迁移入 Flyway（新增 `V4__create_audit_log.sql`），删除孤儿 DDL。
 - **修复硬伤 2**：写法规避 search_path 残留——`@TableName("public.audit_log")` 显式限定 public schema。
 - **修复硬伤 3**：`TenantMyBatisPlusConfig.ignoreTable` 豁免 `audit_log`，避免 TenantLine 追加 `tenant_id` 污染写入、截断 admin 跨租户查询。
@@ -68,6 +69,10 @@ public void recordAuditLog(String actionType, String targetType, String targetId
 - ❌ 不做 detail 编辑/删除接口（审计只读不可变）。
 - ❌ 不引入 ES/消息中间件做异步（轻量内存队列足够）。
 - ❌ 不改 `audit_log` 表结构（现有字段已够用）。
+- ❌ **不新增 `tool_call_log` 表**：工具调用的耗时/状态等全量明细维持 `ToolCallRecorder` 日志，审计表只记"高风险动作本体"。
+- ❌ **不全部工具落库**：只读工具（`CodeSearchTool`/`ApiDocTool`/`KnowledgeBaseTool`/RAG 检索）**不落库**，仅 `ToolCallRecorder` 日志。
+
+> 📌 **与 `ToolCallRecorder` 的分工**：`ToolCallRecorder`（common，通用）负责所有工具调用的 traceId/耗时/状态日志（内存 ThreadLocal，`RagAgentService` 聚合后打 `[AGENT] tools=[...]`）。本次审计**复用其"工具名"语义**、但只对高风险动作额外落库；两条链路不冲突、不重复建表。
 
 ---
 
@@ -75,7 +80,8 @@ public void recordAuditLog(String actionType, String targetType, String targetId
 
 ```
 管理类(登录/登出、用户/租户/文档删除、缓存清空)     ── 同步直写 AuditLogMapper (REQUIRES_NEW)
-数据类(RAG会话查询、文档上传/解析、ExecuteTool执行)  ── 有界队列 → 后台批量 insertBatch
+数据类(RAG会话查询、文档上传/解析)                 ── 有界队列 → 后台批量 insertBatch
+风险动作(技能命令/高风险管理工具/外部MCP)          ── 有界队列 → 后台批量 insertBatch
                                       │
                                       ▼
                  public schema.audit_log （平台级数据，仅 admin 可读，不受 RLS）
@@ -85,6 +91,7 @@ public void recordAuditLog(String actionType, String targetType, String targetId
 
 - **管理类**：低频、对"谁干了什么"最敏感，需即时、可靠、独立于主事务的证据 → 同步 `REQUIRES_NEW` 直写。
 - **数据类**：高频（尤其 RAG 会话查询），逐条同步写会拖慢主流程并导致表高速增长 → 有界队列 + 后台批量落库。
+- **风险动作**：技能命令（ExecuteTool `python {skill}/{name}/scripts/*.py`）、`DatabaseQueryTool`、`DownloadTool`、外部 MCP 工具——对检测与归因最有价值，但频率高于管理类，走**异步批量**。只读工具（CodeSearch/ApiDoc/KnowledgeBase）不落库，仅 `ToolCallRecorder` 日志。
 
 ---
 
@@ -106,6 +113,11 @@ public void recordAuditLog(String actionType, String targetType, String targetId
 | `TenantServiceImpl.recordAuditLog` | tenant | **改** | 删除 TODO，委托 `AuditLogServiceImpl` 落库（保持 AuthController 兼容入口） |
 | `AuditLogQueryService` | tenant | **新** | admin 分页过滤查询 |
 | `AuditLogController` | web | **新** | admin 只读查询 REST |
+| `ExecuteTool` | agent | **改** | `executeCommand` 执行后 `recordAsync`（技能命令+诊断），detail=命令本身 |
+| `DatabaseQueryTool` | agent | **改** | 执行 SELECT 后 `recordAsync`，detail=SQL 语句 |
+| `DownloadTool` | agent | **改** | 下载完成后 `recordAsync`，detail=目标 URL |
+| 外部 MCP 工具调用点 | mcp-client | **改** | `ExternalMcpTool.execute` / `AgentToolRegistry.executeTool` 处 `recordAsync`，detail=工具名+参数 |
+| `ToolCallRecorder` | common | 复用（不改） | 所有工具调用的 traceId/耗时/状态日志，只读工具不落库仅靠它留痕 |
 
 ### 4.2 接口签名（common）
 
@@ -130,13 +142,21 @@ public interface AuditLogService {
 
 初始分级映射（供实现计划落实）：
 - 同步（async=false，默认）：LOGIN、LOGOUT、CREATE/UPDATE/DELETE_USER、CREATE/DELETE_TENANT、DELETE_DOCUMENT、CLEAR_CACHE
-- 异步（async=true）：RAG 会话查询、文档上传/解析、EXECUTE_TOOL
+- 异步（async=true）：RAG 会话查询、文档上传/解析、技能命令（EXECUTE_TOOL）、DatabaseQuery（DATABASE_QUERY）、Download（DOWNLOAD）、外部 MCP 工具（MCP_TOOL）
 
-### 4.4 ExecuteTool 接入（agent 模块）
+> 只读工具（CodeSearchTool / ApiDocTool / KnowledgeBaseTool / RAG 检索）**不在映射内**，不落库，仅靠 `ToolCallRecorder` 日志留痕。
 
-- `ExecuteTool.executeCommand`（`ExecuteTool.java:101`）执行完成后调用 `auditLogService.recordAsync(...)`。
-- **detail 只记命令本身，不记输出/环境变量**，避免脚本内容、密钥进入审计表。
-- 依赖方向：agent → common（已存在），无反向依赖，架构干净。
+### 4.4 工具/技能审计接入
+
+按**混合方案**分级落库到既有 `audit_log`，**不加新表、不加新注解类型**：
+
+- **技能命令**（`ExecuteTool.executeCommand`，`ExecuteTool.java:101`，PYTHON 分支）：执行后 `recordAsync`，`actionType=EXECUTE_TOOL`，detail=完整命令文本。技能本质上就是 execute 工具——无需为"技能"另设类型。
+- **`DatabaseQueryTool`**：执行 SELECT 后 `recordAsync`，detail=SQL 语句。
+- **`DownloadTool`**：下载后 `recordAsync`，detail=目标 URL。
+- **外部 MCP 工具**：在 `ExternalMcpTool.execute` / `AgentToolRegistry.executeTool` 统一入口 `recordAsync`，detail=工具名+参数摘要，避免逐个 MCP 埋点。
+- **detail 安全约束**：只记动作本体（命令/SQL/URL/工具名+参数），**不记输出、不记环境变量/密钥**（沿用 `ToolCallRecorder` 对 input 截断 50 字符的做法，避免敏感参数污染审计）。
+- **依赖方向**：agent/mcp-client → common（已存在），无反向依赖；`AuditLogContext` 置于 common 供上述模块引用。
+- **与 `ToolCallRecorder` 的分工**：`ToolCallRecorder` 仍负责所有工具调用的 traceId/耗时/状态日志（不重复建表）；本次审计只对**高风险动作**额外落库。两者不冲突。
 
 ---
 
@@ -149,7 +169,7 @@ public interface AuditLogService {
 | `id` | BIGSERIAL PK | 自增 |
 | `tenant_id` | VARCHAR(32) NOT NULL | 归属租户（审计回答"对哪个租户"） |
 | `user_id` | BIGINT NOT NULL | 操作者 |
-| `action_type` | VARCHAR(32) NOT NULL | LOGIN / DELETE_DOCUMENT / EXECUTE_TOOL 等 |
+| `action_type` | VARCHAR(32) NOT NULL | LOGIN / DELETE_DOCUMENT / EXECUTE_TOOL / DATABASE_QUERY / DOWNLOAD / MCP_TOOL 等 |
 | `target_type` | VARCHAR(32) | document / user / tenant / tool |
 | `target_id` | VARCHAR(64) | 目标 ID |
 | `detail` | TEXT | 详情（含 ExecuteTool 命令文本） |
@@ -197,19 +217,22 @@ public interface AuditLogService {
 ### 7.3 安全
 
 - admin 接口走既有 Spring Security，`ROLE_ADMIN`。
-- **ExecuteTool detail 只记命令，不记输出/环境变量**。
+- **工具/技能审计 detail 只记动作本体**（ExecuteTool 命令、DatabaseQuery 的 SQL、Download 的 URL、外部 MCP 工具名+参数摘要），**不记输出、不记环境变量/密钥**，并沿用 `ToolCallRecorder` 的 input 截断策略（50 字符）。
 - 审计只读不可变，无编辑/删除接口。
 
 ---
 
 ## 8. 测试策略
 
-遵循项目测试规范（正常 / 边界 / 异常）：
+- 遵循项目测试规范（正常 / 边界 / 异常）：
 
 - `AuditLogServiceImplTest`：同步落库成功 / 失败降级（mock Mapper）；REQUIRES_NEW 独立事务验证。
 - `AuditLogAsyncWriterTest`：队列背压丢弃、批量刷库、`@PreDestroy` flush。
 - `AuditLogAspectTest`：归属信息（tenant/user/ip）补齐正确。
 - `ExecuteToolTest`（扩展）：执行后调用 `recordAsync`，且命令不外泄（不记输出/密钥）。
+- `DatabaseQueryToolTest` / `DownloadToolTest`（扩展）：执行/下载后调用 `recordAsync`，detail=SQL/URL。
+- **外部 MCP 工具审计测试**：`ExternalMcpTool` / `AgentToolRegistry` 调用后 `recordAsync`（工具名+参数摘要）。
+- **只读工具不落库测试**：验证 CodeSearch / ApiDoc / KnowledgeBase 调用**不**触发 `recordAsync`（仅 `ToolCallRecorder` 日志）。
 - admin 查询 Controller 测试：过滤分页正确；非 admin 403。
 - **Flyway 迁移测试**：启动上下文后验证 `public.audit_log` 已创建（表存在），孤儿 DDL 已删除。
 - **多租户隔离测试**（关键，回归硬伤 2/3）：在租户 context（search_path=租户 schema）下写/查 `public.audit_log`，断言数据落到 public、不被租户隔离器过滤（仿 `RlsIsolationTest`、`TenantAwareJdbcTemplateTest` 模式）。
