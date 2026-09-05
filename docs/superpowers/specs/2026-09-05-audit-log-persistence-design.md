@@ -30,7 +30,15 @@ public void recordAuditLog(String actionType, String targetType, String targetId
 
 - `AuditLog` 实体（`tenant/model`，`@TableName("audit_log")`，含 tenantId/userId/ipAddress/createdAt）
 - `AuditLogMapper`（`tenant/mapper`，继承 `BaseMapper<AuditLog>`）
-- `audit_log_ddl.sql`（建表脚本，幂等 `CREATE TABLE IF NOT EXISTS`，字段齐全，含两个索引）
+- `audit_log_ddl.sql`（`tenant/src/main/resources/sql/`，建表脚本，幂等，字段齐全，含两个索引）
+
+**⚠️ 现状缺陷（用户评审发现的关键硬伤，须在本设计修复）：**
+
+1. **硬伤 1｜孤儿 DDL，表根本不会被创建**：`audit_log_ddl.sql` 位于 `company-rag-tenant/src/main/resources/sql/`，但 Flyway 的 `locations` 为 `classpath:db/migration`（`application.yml:85`），迁移目录（`company-rag-bootstrap/src/main/resources/db/migration/`）仅有 `V0~V3__*.sql`，不含 audit_log；`sql/init.sql`（docker 挂载）也不含。→ 该 DDL 是孤儿文件，上线后首次写审计即报 `relation "audit_log" does not exist`。
+
+2. **硬伤 2｜schema 未限定，REQUIRES_NEW 会解析错表**：现有 DDL 与实体均为裸表名（无 `public.` 前缀）。租户请求下 `TenantSchemaInterceptor` 把连接 search_path 设为 `tenant_X`；`recordAuditLog` 用 REQUIRES_NEW 起新事务，从 HikariCP 可能拿到一条残留 `search_path=tenant_X` 的池化连接（该拦截器用 `SET` 而非 `SET LOCAL`，且注释明确"不依赖 HikariCP 归还时重置会话状态"）。→ `audit_log` 会被解析成 `tenant_X.audit_log`（不存在），写入失败或错写。与 `vector_store` 是同类教训。
+
+3. **硬伤 3｜ignoreTable 未豁免 audit_log**：`TenantMyBatisPlusConfig.java:42-49` 的 `ignoreTable` 只豁免 `sys_tenant / sys_user / sys_user_tenant_rel`。→ 未豁免时 `TenantLineInnerInterceptor` 会对 audit_log 的 insert/select 自动追加 `tenant_id = ?`：写入被多塞一列/条件污染数据；admin 跨租户查询被错误截断，只能看到"当前租户"的审计。
 - 已标注 `@AuditLog` 的控制器：`AuthController`（LOGIN/LOGOUT）、`UserController`（CREATE/UPDATE/DELETE_USER）、`TenantController`（CREATE/DELETE_TENANT）、`DocumentController`（DELETE_DOCUMENT）、`CacheManageController`（CLEAR_CACHE）
 - `AuthController` 中还有两处手动 `tenantService.recordAuditLog(...)` 调用（LOGIN/LOGOUT）
 
@@ -48,6 +56,9 @@ public void recordAuditLog(String actionType, String targetType, String targetId
 - 把 `recordAuditLog` 的 TODO 补全为真实 DB 写入。
 - 按操作特征分级处理（管理类同步、数据类异步批量）。
 - 补全归属信息（tenant_id / user_id / ip_address）。
+- **修复硬伤 1**：`audit_log` 建表迁移入 Flyway（新增 `V4__create_audit_log.sql`），删除孤儿 DDL。
+- **修复硬伤 2**：写法规避 search_path 残留——`@TableName("public.audit_log")` 显式限定 public schema。
+- **修复硬伤 3**：`TenantMyBatisPlusConfig.ignoreTable` 豁免 `audit_log`，避免 TenantLine 追加 `tenant_id` 污染写入、截断 admin 跨租户查询。
 - 新增 admin 只读分页查询接口（按租户/用户/操作类型/时间过滤）。
 
 **明确不做（YAGNI）：**
@@ -83,14 +94,16 @@ public void recordAuditLog(String actionType, String targetType, String targetId
 
 | 组件 | 归属模块 | 动作 | 职责 |
 |---|---|---|---|
-| `AuditLog`（实体） | tenant/model | 已有，复用 | 字段已含 tenantId/userId/ip |
+| `AuditLog`（实体） | tenant/model | **改** | `@TableName` 改为 **`public.audit_log`**（显式限定 public schema，规避硬伤 2） |
 | `AuditLogMapper` | tenant/mapper | 已有，复用 | BaseMapper |
+| `V4__create_audit_log.sql` | bootstrap/db/migration | **新增** | 建表迁移（修复硬伤 1）；删除孤儿 `sql/audit_log_ddl.sql` |
+| `TenantMyBatisPlusConfig` | tenant/config | **改** | `ignoreTable` 增加 `audit_log` 豁免（修复硬伤 3） |
 | `AuditLogContext`（新增 DTO） | common | **新增** | 载体：actionType/targetType/targetId/detail + 可选 tenantId/userId/ipAddress |
 | `AuditLogService`（接口） | common | **改** | 暴露 `record(context)`（同步+REQUIRES_NEW）与 `recordAsync(context)`（入队） |
 | `AuditLogAsyncWriter` | tenant | **新增** | 有界队列 + 后台批量 flush + `@PreDestroy` 兜底 |
-| `AuditLogServiceImpl` | tenant | **改** | 注入 `AuditLogMapper`，实现落库；`recordAsync` 委托 AsyncWriter |
+| `AuditLogServiceImpl` | tenant | **改** | 注入 `AuditLogMapper`，落库；`recordAsync` 委托 AsyncWriter |
 | `AuditLogAspect` | common | **改** | 采集 tenant/user/ip；按动作类型分发同步/异步 |
-| `TenantServiceImpl.recordAuditLog` | tenant | **改** | 删除 TODO，改为真实调用（或委托 AsyncWriter） |
+| `TenantServiceImpl.recordAuditLog` | tenant | **改** | 删除 TODO，委托 `AuditLogServiceImpl` 落库（保持 AuthController 兼容入口） |
 | `AuditLogQueryService` | tenant | **新** | admin 分页过滤查询 |
 | `AuditLogController` | web | **新** | admin 只读查询 REST |
 
@@ -129,7 +142,7 @@ public interface AuditLogService {
 
 ## 5. 数据模型
 
-沿用现有 `audit_log` 表，无需改结构：
+沿用现有 `audit_log` 表，**不新增列、不改结构**；但为规避硬伤 2，实体 `@TableName` 改为 `public.audit_log`，DDL 中表名也统一带 `public.` 前缀（Flyway V4 建在 public schema）：
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
@@ -170,15 +183,16 @@ public interface AuditLogService {
 - 后台单线程定时/按阈值刷库（每 100 条或每 500ms `batchInsert`）。
 - `@PreDestroy` flush 残余，JVM 关闭不丢队列数据。
 
-### 7.2 多租户隔离——关键风险点
+### 7.2 多租户隔离——关键风险点（已由设计决策修复）
 
-`audit_log` 在 **public schema、平台级**，与 `TenantAwareJdbcTemplate` 的 `vector_store` 同理：它是跨租户追溯数据，**不受 RLS、也不应被 MyBatis-Plus 多租户拦截器自动追加 `tenant_id` 条件**。
+`audit_log` 是 **public schema、平台级** 数据（admin 跨租户追溯），不受 RLS。硬伤 2/3 已通过两项决策规避：
 
-⚠️ **必须**：在 MyBatis-Plus 多租户拦截器中对 `audit_log` 表做**豁免**，否则租户上下文下任何审计相关查询会被误加 `tenant_id` 过滤，导致：
-- admin 跨租户查询被误截断；
-- 数据类批量写时带上当前调用的 tenant_id 污染。
+- **硬伤 2（search_path 残留）**：所有访问统一 `public.` 显式前缀（实体 `@TableName("public.audit_log")`、Flyway V4 DDL、查询 SQL）。即便连接池残留 `search_path=tenant_X`，`public.audit_log` 因显式 schema 前缀仍正确解析到 public schema，与租户无关。
+- **硬伤 3（TenantLine 追加 tenant_id）**：`TenantMyBatisPlusConfig.ignoreTable` 增加 `audit_log` 豁免，TenantLine 不再对审计表追加 `tenant_id` 条件，避免污染写入/截断 admin 跨租户查询。
 
-此条需在 boundaries / iron-rules 中显式记录。
+> ⚠️ **实现硬约束**：审计相关的**所有 SQL（写入与查询）必须带 `public.` 前缀**，禁止出现裸 `audit_log` 表名，否则在多租户连接下会被 search_path 解析错。此条需在 boundaries / iron-rules 中显式记录。
+>
+> 补充：`TenantSchemaInterceptor` 仍会在审计写/查的连接上 `SET search_path`——因表名带 `public.` 前缀，无碍；但若某条审计 SQL 遗漏前缀，即会命中硬伤 2。这也是"统一前缀"约束的由来。
 
 ### 7.3 安全
 
@@ -197,12 +211,16 @@ public interface AuditLogService {
 - `AuditLogAspectTest`：归属信息（tenant/user/ip）补齐正确。
 - `ExecuteToolTest`（扩展）：执行后调用 `recordAsync`，且命令不外泄（不记输出/密钥）。
 - admin 查询 Controller 测试：过滤分页正确；非 admin 403。
+- **Flyway 迁移测试**：启动上下文后验证 `public.audit_log` 已创建（表存在），孤儿 DDL 已删除。
+- **多租户隔离测试**（关键，回归硬伤 2/3）：在租户 context（search_path=租户 schema）下写/查 `public.audit_log`，断言数据落到 public、不被租户隔离器过滤（仿 `RlsIsolationTest`、`TenantAwareJdbcTemplateTest` 模式）。
 
 ---
 
 ## 9. 风险点小结
 
-1. **多租户拦截器豁免 audit_log**：否则租户/平台查询被误过滤（7.2）。
-2. **失败留痕**：审计自身失败也应有 `log.error` 兜底，形成"审计的审计"。
-3. **detail 敏感性**：命令文本可能敏感，仅 admin 可查。
-4. **队列背压**：需有界 + 丢弃告警，避免内存溢出拖垮服务。
+1. **硬伤 1｜迁移落地**：须新增 `V4__create_audit_log.sql` 且**删除孤儿 `sql/audit_log_ddl.sql`**，否则表永不创建。已纳入范围。
+2. **硬伤 2｜search_path 残留**：所有审计 SQL 强制 `public.` 前缀（实体/DDL/查询），否则被解析到租户 schema。已纳入范围，并作为实现硬约束（7.2）。
+3. **硬伤 3｜多租户拦截器豁免 audit_log**：`ignoreTable` 增加豁免，否则租户/平台查询被误过滤、写入被污染。已纳入范围。
+4. **失败留痕**：审计自身失败也应有 `log.error` 兜底，形成"审计的审计"。
+5. **detail 敏感性**：命令文本可能敏感，仅 admin 可查。
+6. **队列背压**：需有界 + 丢弃告警，避免内存溢出拖垮服务。
