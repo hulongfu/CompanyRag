@@ -113,6 +113,8 @@ public void recordAuditLog(String actionType, String targetType, String targetId
 | `TenantServiceImpl.recordAuditLog` | tenant | **改** | 删除 TODO，委托 `AuditLogServiceImpl` 落库（保持 AuthController 兼容入口） |
 | `AuditLogQueryService` | tenant | **新** | admin 分页过滤查询 |
 | `AuditLogController` | web | **新** | admin 只读查询 REST |
+| `audit-log.html` | web(模板) | **新** | 管理员日志查询页面（过滤+分页列表+详情抽屉） |
+| `index.html` | web(模板) | **改** | 头部加"📋 日志"按钮（`v-if="role==='admin'"`，跳转 `audit-log.html`） |
 | `ExecuteTool` | agent | **改** | `executeCommand` 执行后 `recordAsync`（技能命令+诊断），detail=命令本身 |
 | `DatabaseQueryTool` | agent | **改** | 执行 SELECT 后 `recordAsync`，detail=SQL 语句 |
 | `DownloadTool` | agent | **改** | 下载完成后 `recordAsync`，detail=目标 URL |
@@ -188,6 +190,23 @@ public interface AuditLogService {
 - 响应：`R<Page<AuditLog>>` 统一格式（分页，含总条数）
 - 权限：仅 `ROLE_ADMIN`，其余角色 403（走既有 Spring Security 授权链）
 
+### 6.1 前端日志查询页面
+
+**入口**：在 `index.html` 头部动作栏（`header-actions`，现有按钮区 L107-118）新增一个"📋 日志"icon 按钮：
+```
+<button class="hdr-btn" v-if="role === 'admin'" @click="goAuditLog" title="审计日志">📋 日志</button>
+```
+- `role` 取自 `localStorage.getItem('role')`（`login.html:60` 写入），仅 `'admin'` 可见——与现有 `👤 用户` 按钮（`index.html:114`）判定方式一致。
+- 职责纯粹：仅页面跳转，不做本页内 tab 逻辑。
+- 非管理员即便手工构造 URL，后端 `ROLE_ADMIN` 授权链也会 403，前端隐藏仅作 UX 优化。
+
+**页面**：新增独立 `audit-log.html`（`company-rag-web/src/main/resources/templates/`），复用 `admin.html` 的 Vue3 + Element Plus 技术栈与深色头部风格：
+- **查询区**：租户 `tenantId`、用户 `userId`、操作类型 `actionType` 下拉/输入 + 时间范围 `startTime/endTime`（`el-date-picker`）+ 查询/重置按钮。
+- **列表区**：`el-table` 展示 `createdAt / userId / tenantId / actionType / targetType / targetId / detail(截断) / ipAddress`；`actionType` 用 `el-tag` 着色区分；分页用 `el-pagination`（复用 `GET /api/admin/audit-logs` 的 `page/pageSize`）。
+- **详情**：点某行弹出 `el-drawer`（从右侧滑出），完整展示该条记录全部字段（删除截断），并标明"只读不可修改"。
+- 数据加载：`onMounted` 调 `GET /api/admin/audit-logs?page=1&pageSize=20`，后续按过滤条件/分页重新请求；带 `Authorization: Bearer <token>`（`login.html` 存的 token）请求头。
+- 返回：头部放"← 返回首页"（同 `admin.html:24` 的 `goHome`）。
+
 ---
 
 ## 7. 可靠性 / 安全 / 隔离
@@ -234,6 +253,7 @@ public interface AuditLogService {
 - **外部 MCP 工具审计测试**：`ExternalMcpTool` / `AgentToolRegistry` 调用后 `recordAsync`（工具名+参数摘要）。
 - **只读工具不落库测试**：验证 CodeSearch / ApiDoc / KnowledgeBase 调用**不**触发 `recordAsync`（仅 `ToolCallRecorder` 日志）。
 - admin 查询 Controller 测试：过滤分页正确；非 admin 403。
+- **前端页面验收（手动/冒烟）**：非 admin 看不到"📋 日志"按钮；admin 点击跳转日志页；列表过滤、分页、点击某行弹详情抽屉展示完整字段。
 - **Flyway 迁移测试**：启动上下文后验证 `public.audit_log` 已创建（表存在），孤儿 DDL 已删除。
 - **多租户隔离测试**（关键，回归硬伤 2/3）：在租户 context（search_path=租户 schema）下写/查 `public.audit_log`，断言数据落到 public、不被租户隔离器过滤（仿 `RlsIsolationTest`、`TenantAwareJdbcTemplateTest` 模式）。
 
