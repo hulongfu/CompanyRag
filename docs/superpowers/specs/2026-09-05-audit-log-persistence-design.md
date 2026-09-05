@@ -39,8 +39,8 @@ public void recordAuditLog(String actionType, String targetType, String targetId
 2. **硬伤 2｜schema 未限定，REQUIRES_NEW 会解析错表**：现有 DDL 与实体均为裸表名（无 `public.` 前缀）。租户请求下 `TenantSchemaInterceptor` 把连接 search_path 设为 `tenant_X`；`recordAuditLog` 用 REQUIRES_NEW 起新事务，从 HikariCP 可能拿到一条残留 `search_path=tenant_X` 的池化连接（该拦截器用 `SET` 而非 `SET LOCAL`，且注释明确"不依赖 HikariCP 归还时重置会话状态"）。→ `audit_log` 会被解析成 `tenant_X.audit_log`（不存在），写入失败或错写。与 `vector_store` 是同类教训。
 
 3. **硬伤 3｜ignoreTable 未豁免 audit_log**：`TenantMyBatisPlusConfig.java:42-49` 的 `ignoreTable` 只豁免 `sys_tenant / sys_user / sys_user_tenant_rel`。→ 未豁免时 `TenantLineInnerInterceptor` 会对 audit_log 的 insert/select 自动追加 `tenant_id = ?`：写入被多塞一列/条件污染数据；admin 跨租户查询被错误截断，只能看到"当前租户"的审计。
-- 已标注 `@AuditLog` 的控制器：`AuthController`（LOGIN/LOGOUT）、`UserController`（CREATE/UPDATE/DELETE_USER）、`TenantController`（CREATE/DELETE_TENANT）、`DocumentController`（DELETE_DOCUMENT）、`CacheManageController`（CLEAR_CACHE）
-- `AuthController` 中还有两处手动 `tenantService.recordAuditLog(...)` 调用（LOGIN/LOGOUT）
+- 已标注 `@AuditLog` 的控制器：`UserController`（CREATE/UPDATE/DELETE_USER）、`TenantController`（CREATE/DELETE_TENANT）、`DocumentController`（DELETE_DOCUMENT）、`CacheManageController`（CLEAR_CACHE）
+- **例外（不经注解，AuthController 手动调用）**：LOGIN/LOGOUT 不走切面（登录时 SecurityContext 未建立、切面取不到用户，见 4.5），由 `AuthController` 手动调 `record()`；当前 `AuthController` 中两处手动 `tenantService.recordAuditLog(...)` 调用在方案 A 下保留并改走 `auditLogService.record()`，但需移除其 `@AuditLog` 注解消除双写
 
 ### 1.3 暴露的问题
 
@@ -91,7 +91,7 @@ public void recordAuditLog(String actionType, String targetType, String targetId
 
 - **管理类**：低频、对"谁干了什么"最敏感，需即时、可靠、独立于主事务的证据 → 同步 `REQUIRES_NEW` 直写。
 - **数据类**：高频（尤其 RAG 会话查询），逐条同步写会拖慢主流程并导致表高速增长 → 有界队列 + 后台批量落库。
-- **风险动作**：技能命令（ExecuteTool `python {skill}/{name}/scripts/*.py`）、`DatabaseQueryTool`、`DownloadTool`、外部 MCP 工具——对检测与归因最有价值，但频率高于管理类，走**异步批量**。只读工具（CodeSearch/ApiDoc/KnowledgeBase）不落库，仅 `ToolCallRecorder` 日志。
+- **风险动作**：技能命令（ExecuteTool `python {skill}/{name}/scripts/*.py`）、`DatabaseQueryTool`、`DownloadTool`、外部 MCP 工具——**关键动作本体留痕**（命令/SQL/URL/工具名），有助于"异常时查证已执行了什么"；但这些动作（尤其 `ExecuteTool`）执行前已完成白名单、`env.clear`、租户隔离等**预防层管控**，审计仅是**补充留痕而非唯一防线**，故价值定位低于管理类，频率又高于管理类，走**异步批量**。只读工具（CodeSearch/ApiDoc/KnowledgeBase）不落库，仅 `ToolCallRecorder` 日志。
 
 ---
 
@@ -110,7 +110,8 @@ public void recordAuditLog(String actionType, String targetType, String targetId
 | `AuditLogAsyncWriter` | tenant | **新增** | 有界队列 + 后台批量 flush + `@PreDestroy` 兜底 |
 | `AuditLogServiceImpl` | tenant | **改** | 注入 `AuditLogMapper`，落库；`recordAsync` 委托 AsyncWriter |
 | `AuditLogAspect` | common | **改** | 采集 tenant/user/ip；按动作类型分发同步/异步 |
-| `TenantServiceImpl.recordAuditLog` | tenant | **改** | 删除 TODO，委托 `AuditLogServiceImpl` 落库（保持 AuthController 兼容入口） |
+| `TenantServiceImpl.recordAuditLog` | tenant | **改** | 删除 TODO，委托 `AuditLogServiceImpl` 落库（保持 AuthController/其它显式调用的兼容入口） |
+| `AuthController` | web | **改** | `login`/`logout` **移除 `@AuditLog` 注解**，改为手动调 `auditLogService.record()` 写同步审计；归属（userId/tenantId）从 `SecurityUser` 取、不依赖 `TenantContext`（见 4.5） |
 | `AuditLogQueryService` | tenant | **新** | admin 分页过滤查询 |
 | `AuditLogController` | web | **新** | admin 只读查询 REST |
 | `audit-log.html` | web(模板) | **新** | 管理员日志查询页面（过滤+分页列表+详情抽屉） |
@@ -146,6 +147,8 @@ public interface AuditLogService {
 - 同步（async=false，默认）：LOGIN、LOGOUT、CREATE/UPDATE/DELETE_USER、CREATE/DELETE_TENANT、DELETE_DOCUMENT、CLEAR_CACHE
 - 异步（async=true）：RAG 会话查询、文档上传/解析、技能命令（EXECUTE_TOOL）、DatabaseQuery（DATABASE_QUERY）、Download（DOWNLOAD）、外部 MCP 工具（MCP_TOOL）
 
+> **例外（不经注解/切面）**：LOGIN、LOGOUT 因登录时 SecurityContext 未建立、切面取不到用户（见 4.5），**不标注 `@AuditLog`**，由 `AuthController` 手动调 `auditLogService.record()` 写同步审计；归属与其余管理类相同（同步、SecurityUser 取归属）。
+
 > 只读工具（CodeSearchTool / ApiDocTool / KnowledgeBaseTool / RAG 检索）**不在映射内**，不落库，仅靠 `ToolCallRecorder` 日志留痕。
 
 ### 4.4 工具/技能审计接入
@@ -159,6 +162,17 @@ public interface AuditLogService {
 - **detail 安全约束**：只记动作本体（命令/SQL/URL/工具名+参数），**不记输出、不记环境变量/密钥**（沿用 `ToolCallRecorder` 对 input 截断 50 字符的做法，避免敏感参数污染审计）。
 - **依赖方向**：agent/mcp-client → common（已存在），无反向依赖；`AuditLogContext` 置于 common 供上述模块引用。
 - **与 `ToolCallRecorder` 的分工**：`ToolCallRecorder` 仍负责所有工具调用的 traceId/耗时/状态日志（不重复建表）；本次审计只对**高风险动作**额外落库。两者不冲突。
+
+### 4.5 LOGIN/LOGOUT 审计路径（已定：方案 A）
+
+**约束背景（已核实代码）：** `AuditLogAspect.getCurrentUser()` 从 `SecurityContextHolder` 取认证主体（`AuditLogAspect.java:56-62`），非 `SecurityUser` 返回 null 并跳过记录；`/api/auth/**` 为 `permitAll`（`SecurityConfig.java:75-76`），登录请求不带 token 不经过 `JwtAuthenticationFilter`，因而 `AuthController.login` 手动 `authenticate()` 后（`AuthController.java:55-60`）**未写入 SecurityContext**。→ **LOGIN 时切面取不到用户、会跳过审计**；LOGOUT 时 context 已建立、切面可取到用户。这是当初 AuthController 需手动补调 `recordAuditLog` 的根因，也造成"切面标注 + 手动调用"的双写隐患。
+
+**选定方案 A（显式手动调用 + 切面只管其余操作）：**
+- **移除** `AuthController.login` / `AuthController.logout` 上的 `@AuditLog` 注解，避免与手动调用双写。
+- `AuthController` 内**手动**调用 `auditLogService.record(...)` 写**同步**审计：login 用 `authentication.getPrincipal()` 的 `SecurityUser`，logout 用 `SecurityContextHolder` 取到的 `SecurityUser`。
+- **归属信息一律从 `SecurityUser` 取，不依赖 `TenantContext`**（登录瞬间 TenantContext 往往未建立）：`userId` = 取 `securityUser.getUserId()`；`tenantId` = 取 `securityUser.getTenantId()`。
+- 其余所有操作（非认证业务操作）仍由 `@AuditLog` 切面统一接管，不受影响。
+- 测试：`AuditLogAspectTest` 不再覆盖 LOGIN/LOGOUT；`AuthControllerTest`（新增/扩展）验证 login/logout 后调用 `record()` 且归属取自 SecurityUser。
 
 ---
 
@@ -217,8 +231,8 @@ public interface AuditLogService {
 - `@Transactional(propagation = REQUIRES_NEW)`，审计写入独立于主事务——主流程回滚不影响审计留存。
 - AOP 环绕层自带 try/catch，审计失败仅 `log.warn`，**绝不抛给主流程**。
 
-**数据类（异步批量）：**
-- 有界 `BlockingQueue`（建议容量 1000），背压时丢弃并 `log.warn`（避免拖垮 RAG 主流程）。
+**数据类 / 风险动作（异步批量）：**
+- 有界 `BlockingQueue`（建议容量 1000），背压时丢弃并 `log.warn`（避免拖垮 RAG 主流程）——与 3.1 定位一致：风险动作（含 EXECUTE_TOOL）执行前已有白名单、`env.clear`、租户隔离等**预防层管控**，审计仅为**补充留痕而非唯一防线**，故极端背压下允许让位，丢失的是"留痕"而非"防线"。
 - 后台单线程定时/按阈值刷库（每 100 条或每 500ms `batchInsert`）。
 - `@PreDestroy` flush 残余，JVM 关闭不丢队列数据。
 
