@@ -468,7 +468,7 @@ $ git rev-parse HEAD
 - task_name:              ExecuteTool命令安全改造
 - commit_hash:            b6dee7c96dc6d12870c22ec1800dfd0e676c399c
 - branch:                 main
-- remote:                 gitee（成功）/ origin(github)（失败）
+- remote:                 gitee（成功）/ origin(github)（首次连接失败，重试后成功）
 - staged_files:
   - agent_skills/file-manager/SKILL.md（修改 - 全部命令示例加 agent_skills/ 前缀，移除 python -c 用法，改用 file-manager write 创建临时文件）
   - agent_skills/file-manager/scripts/file_manager.py（修改 - scripts 只读守卫按 AGENT_SKILL_BASE env 动态识别受保护根，拒绝落入 */scripts 的写/删/移/拷）
@@ -481,8 +481,8 @@ $ git rev-parse HEAD
 - commit_message:         Task:0000_ExecuteTool命令安全改造：安全分层、硬编码消除、env白名单、scripts只读守卫
 - commit_command:         git commit -m "Task:0000_ExecuteTool命令安全改造：安全分层、硬编码消除、env白名单、scripts只读守卫"
 - commit_exit_code:       0
-- push_command:           git push gitee main; git push origin main
-- push_exit_code:         gitee=0 / origin=128（Connection was reset / port 443 连接失败）
+- push_command:           git push gitee main; git push origin main（origin 首次失败，重试成功）
+- push_exit_code:         gitee=0 / origin：首次 128（Connection was reset / port 443 失败），重试 0
 - remote_head_check_command: git ls-remote gitee refs/heads/main; git ls-remote origin refs/heads/main
-- remote_head:            b6dee7c96dc6d12870c22ec1800dfd0e676c399c（gitee 一致；origin 无法访问，未验证）
-- result:                 gitee 推送成功且远端 HEAD 与本地一致（证据完整）。github(origin) 因网络原因推送失败（连接被重置/443 不可达），本次仅 gitee 落地。变更内容：ExecuteTool 命令安全分层改造（命令白名单、token 级元字符、python 仅技能 scripts、子进程 env 白名单重建以防密钥扩散）、agent_skills 硬编码消除（skillDirName 动态前缀）、file-manager scripts 只读守卫、SKILL.md 命令示例更新。ExecuteToolTest 23/23 通过。
+- remote_head:            b6dee7c96dc6d12870c22ec1800dfd0e676c399c（代码提交）；deploy-log 提交 8743c1f577b4fb29f9fb0d3aa2d3e344b66b235f 已推送，gitee 与 origin 均一致
+- result:                 代码提交 b6dee7c + 推送日志提交 8743c1f 均已推送 gitee 与 github 成功，两端远端 HEAD 与本地均一致（证据完整）。github(origin) 首次因瞬时网络断开失败，重试后成功补推。变更内容：ExecuteTool 命令安全分层改造（命令白名单、token 级元字符、python 仅技能 scripts、子进程 env 白名单重建以防密钥扩散）、agent_skills 硬编码消除（skillDirName 动态前缀）、file-manager scripts 只读守卫、SKILL.md 命令示例更新。ExecuteToolTest 23/23 通过。
