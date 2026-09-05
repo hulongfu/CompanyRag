@@ -2,6 +2,27 @@
 
 ## Git Push
 
+### 最新推送（2026-09-05 ExecuteTool命令安全改造：file-manager 产物落点 → gitee 成功 / github 成功）
+
+- commit_type: Task
+- task_id: 0000
+- task_name: ExecuteTool命令安全改造
+- commit_hash: cb26194
+- branch: main
+- remote: gitee（成功）& origin 即 github（成功）
+- staged_files:
+  - agent_skills/file-manager/SKILL.md（修改 - shared/默认工作目录说明改为 AGENT_WORK_DIR 注入的默认工作目录）
+  - agent_skills/file-manager/scripts/file_manager.py（修改 - 读取 AGENT_WORK_DIR 新增 default_base_dir，shared/默认路径解析改为注入的默认工作目录，未注入时回退 cwd/shared）
+  - company-rag-agent/src/main/java/com/company/rag/agent/tool/ExecuteTool.java（修改 - runPython 子进程 env 追加注入 AGENT_WORK_DIR，使 file-manager 产物落到 app.default-work-dir）
+- commit_message:        Task:0000_ExecuteTool命令安全改造：file-manager 产物落点改为 AGENT_WORK_DIR 默认工作目录
+- commit_command:        git commit -m "Task:0000_ExecuteTool命令安全改造：file-manager 产物落点改为 AGENT_WORK_DIR 默认工作目录"
+- commit_exit_code:      0
+- push_command:          git push gitee main; git push origin main
+- push_exit_code:        gitee=0 / origin=0
+- remote_head_check_command: git ls-remote gitee refs/heads/main; git ls-remote origin refs/heads/main
+- remote_head:           cb2619402ea1deaafd8fe9ce7cb3502a94ee119f（gitee 与 github 均一致）
+- result:                代码提交 cb26194 已推送 gitee 与 github 成功，两端远端 HEAD 均与本地一致（证据完整）。变更内容：修复 file-manager 生成文件落点到技能目录/项目目录的问题——ExecuteTool 向子进程注入 AGENT_WORK_DIR（=app.default-work-dir=D:/workspace 独立沙箱），file_manager.py 的 shared/默认路径改用它解析，未注入时回退原 cwd/shared 保持向后兼容；SKILL.md 同步更新 shared 语义。ExecuteToolTest 23/23 通过，gitee 与 github 均推送成功。
+
 ### 最新推送（2026-09-04 检索质量升级B0 → gitee 成功 / github 成功）
 
 - commit_type: Feat
