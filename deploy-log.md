@@ -460,3 +460,29 @@ $ git rev-parse HEAD
 - remote_head_check_command: git ls-remote gitee main && git ls-remote origin main
 - remote_head:            dd143e36f95be22b617bf337c41ec98867e1002c（gitee 与 origin 均一致）
 - result:                 gitee 与 github 均推送成功，远端 HEAD 与本地一致。修复会话详情/删除/改名接口仅按 tenantId+sessionId 过滤导致的 IDOR 越权：补齐 userId 级隔离（列表接口本就按 userId 过滤，详情/删除/改名却可按任意 sessionId 操作他人会话）。修复入口包括 SessionController 三个接口与 ChatController 历史加载调用。RagSessionServiceTest 17/17 通过。
+
+## Git Push
+
+- commit_type:            Task
+- task_id:                0000
+- task_name:              ExecuteTool命令安全改造
+- commit_hash:            b6dee7c96dc6d12870c22ec1800dfd0e676c399c
+- branch:                 main
+- remote:                 gitee（成功）/ origin(github)（失败）
+- staged_files:
+  - agent_skills/file-manager/SKILL.md（修改 - 全部命令示例加 agent_skills/ 前缀，移除 python -c 用法，改用 file-manager write 创建临时文件）
+  - agent_skills/file-manager/scripts/file_manager.py（修改 - scripts 只读守卫按 AGENT_SKILL_BASE env 动态识别受保护根，拒绝落入 */scripts 的写/删/移/拷）
+  - company-rag-agent/src/main/java/com/company/rag/agent/config/AgentConfig.java（修改 - 读 app.skill-base 消除硬编码 agent_skills）
+  - company-rag-agent/src/main/java/com/company/rag/agent/tool/ExecuteTool.java（修改 - 命令白名单分层、token 级元字符、python 仅技能 scripts(canonical)、skillDirName 动态前缀消除硬编码、runPython 子进程 env 白名单重建注入 AGENT_SKILL_BASE）
+  - company-rag-agent/src/test/java/com/company/rag/agent/tool/ExecuteToolTest.java（修改 - 同步硬编码消除与动态前缀，23 用例）
+  - company-rag-bootstrap/src/main/resources/application-dev.yml（修改 - Spring AI skill registry paths 统一读 AGENT_SKILL_BASE）
+  - company-rag-bootstrap/src/main/resources/application-prod.yml（修改 - 同上）
+  - company-rag-bootstrap/src/main/resources/application.yml（修改 - 补 skill-base/trusted-dirs 注释）
+- commit_message:         Task:0000_ExecuteTool命令安全改造：安全分层、硬编码消除、env白名单、scripts只读守卫
+- commit_command:         git commit -m "Task:0000_ExecuteTool命令安全改造：安全分层、硬编码消除、env白名单、scripts只读守卫"
+- commit_exit_code:       0
+- push_command:           git push gitee main; git push origin main
+- push_exit_code:         gitee=0 / origin=128（Connection was reset / port 443 连接失败）
+- remote_head_check_command: git ls-remote gitee refs/heads/main; git ls-remote origin refs/heads/main
+- remote_head:            b6dee7c96dc6d12870c22ec1800dfd0e676c399c（gitee 一致；origin 无法访问，未验证）
+- result:                 gitee 推送成功且远端 HEAD 与本地一致（证据完整）。github(origin) 因网络原因推送失败（连接被重置/443 不可达），本次仅 gitee 落地。变更内容：ExecuteTool 命令安全分层改造（命令白名单、token 级元字符、python 仅技能 scripts、子进程 env 白名单重建以防密钥扩散）、agent_skills 硬编码消除（skillDirName 动态前缀）、file-manager scripts 只读守卫、SKILL.md 命令示例更新。ExecuteToolTest 23/23 通过。
