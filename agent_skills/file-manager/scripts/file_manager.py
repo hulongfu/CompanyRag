@@ -29,6 +29,47 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# ========== 技能脚本目录只读守卫（信任锚）==========
+# 技能 scripts 目录是 ExecuteTool 唯一放行执行的信任锚。本脚本不能写、删、移、拷任何落入
+# <AGENT_SKILL_BASE>/*/scripts 的路径，否则可通过"先写后执行"向 scripts 植入脚本再被 ExecuteTool
+# 执行。技能根由 ExecuteTool 通过环境变量 AGENT_SKILL_BASE 注入（与 yaml app.skill-base 同源），
+# 此处不硬编码具体路径。
+AGENT_SKILL_BASE = os.environ.get("AGENT_SKILL_BASE", "").strip()
+PROTECTED_SCRIPTS_ROOTS: List[Path] = []
+if AGENT_SKILL_BASE:
+    try:
+        skill_root = Path(AGENT_SKILL_BASE).resolve()
+        if skill_root.is_dir():
+            for child in skill_root.iterdir():
+                scripts_dir = child / "scripts"
+                if child.is_dir() and scripts_dir.is_dir():
+                    PROTECTED_SCRIPTS_ROOTS.append(scripts_dir.resolve())
+    except OSError:
+        PROTECTED_SCRIPTS_ROOTS = []
+logger.info("受保护的技能脚本目录（只读）：%s", PROTECTED_SCRIPTS_ROOTS)
+
+
+def is_protected_scripts_path(path: Path) -> bool:
+    """判断路径是否位于任一受保护的 skill scripts 目录内（只读信任锚）。"""
+    try:
+        target = path.resolve()
+    except OSError:
+        return False
+    for root in PROTECTED_SCRIPTS_ROOTS:
+        if target.is_relative_to(root):
+            return True
+    return False
+
+
+def reject_protected_write(path: Path, description: str = "") -> Optional[Dict[str, Any]]:
+    """若写操作目标落在受保护 scripts 目录内则返回错误结果，否则返回 None。"""
+    if is_protected_scripts_path(path):
+        return {
+            "success": False,
+            "error": f"拒绝{description}：技能脚本目录（scripts/）为只读信任锚，禁止写入：{path}"
+        }
+    return None
+
 
 def resolve_path(base_folder: str, relative_path: str = "") -> Path:
     """解析路径
@@ -145,6 +186,10 @@ def write_file(file_path: str, content: str, base_folder: str = "shared",
     try:
         full_path = resolve_path(base_folder, file_path)
         
+        guard = reject_protected_write(full_path, "写入文件")
+        if guard:
+            return guard
+        
         if full_path.exists() and not overwrite:
             return {
                 "success": False,
@@ -198,6 +243,10 @@ def write_large_content(file_path: str, content: str = None, base_folder: str = 
     """
     try:
         full_path = resolve_path(base_folder, file_path)
+        
+        guard = reject_protected_write(full_path, "写入大文件")
+        if guard:
+            return guard
         
         # 确定内容来源：优先使用 content_file，其次使用 content
         if content_file:
@@ -277,6 +326,10 @@ def create_folder(folder_path: str, base_folder: str = "shared", parents: bool =
     try:
         full_path = resolve_path(base_folder, folder_path)
         
+        guard = reject_protected_write(full_path, "创建文件夹")
+        if guard:
+            return guard
+        
         if full_path.exists():
             if full_path.is_dir():
                 return {
@@ -319,6 +372,10 @@ def delete_file(file_path: str, base_folder: str = "shared", force: bool = False
     """
     try:
         full_path = resolve_path(base_folder, file_path)
+        
+        guard = reject_protected_write(full_path, "删除文件")
+        if guard:
+            return guard
         
         if not full_path.exists():
             return {
@@ -365,6 +422,10 @@ def delete_folder(folder_path: str, base_folder: str = "shared",
     """
     try:
         full_path = resolve_path(base_folder, folder_path)
+        
+        guard = reject_protected_write(full_path, "删除文件夹")
+        if guard:
+            return guard
         
         if not full_path.exists():
             return {
@@ -413,6 +474,13 @@ def move_item(source_path: str, target_path: str, base_folder: str = "shared") -
         source_full = resolve_path(base_folder, source_path)
         target_full = resolve_path(base_folder, target_path)
         
+        guard_source = reject_protected_write(source_full, "移动源")
+        if guard_source:
+            return guard_source
+        guard_target = reject_protected_write(target_full, "移动目标")
+        if guard_target:
+            return guard_target
+        
         if not source_full.exists():
             return {
                 "success": False,
@@ -449,6 +517,10 @@ def copy_file(source_path: str, target_path: str, base_folder: str = "shared") -
     try:
         source_full = resolve_path(base_folder, source_path)
         target_full = resolve_path(base_folder, target_path)
+        
+        guard = reject_protected_write(target_full, "复制目标")
+        if guard:
+            return guard
         
         if not source_full.exists():
             return {

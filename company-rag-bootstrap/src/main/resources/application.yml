@@ -212,6 +212,18 @@ app:
     # - 特殊项目结构需要自定义搜索范围
     # - 多代码仓库联合搜索
     src-base: ${CODE_SEARCH_SRC_BASE:D:/tmp/CompanyRag/company-rag-agent}
+  # 技能根目录（AgentConfig 注册 Skills、ExecuteTool 定位可执行脚本均读此配置，同源避免硬编码）
+  # 注意：ExecuteTool 会把 <skill-base>/*/scripts 列为唯一放行的 python 脚本执行信任锚，
+  #       并对子进程注入同名环境变量 AGENT_SKILL_BASE，供 file-manager 等脚本自行校验 scripts 只读。
+  #       默认回退 ./agent_skills（即 user.dir/agent_skills），可通过环境变量 AGENT_SKILL_BASE 覆盖。
+  skill-base: ${AGENT_SKILL_BASE:./agent_skills}
+  # 额外的受信任目录白名单（逗号分隔）。仅放行 ExecuteTool 的只读诊断访问（如 cat/list/stat），
+  # 不会放行该目录下的 python 脚本执行（脚本执行只允许 skill scripts 信任锚）。
+  # 可被环境变量 TRUSTED_DIRS 覆盖，默认空。
+  trusted-dirs: ${TRUSTED_DIRS:}
+  # ExecuteTool 未匹配技能时的默认工作目录（独立沙箱，与项目路径无关，避免污染项目代码）
+  # 可被环境变量 AGENT_WORK_DIR 覆盖
+  default-work-dir: ${AGENT_WORK_DIR:D:/workspace}
 
 # 日志
 logging:

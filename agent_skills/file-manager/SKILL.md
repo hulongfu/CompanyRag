@@ -16,11 +16,11 @@ read_when:
 
 ### For Deep Agent (Execute Scripts)
 
-**Script Location:** `scripts/file_manager.py` (in skill directory)
+**Script Location:** `agent_skills/file-manager/scripts/file_manager.py`（技能目录下的 `scripts/` 子目录；调用时必须带 `agent_skills/` 前缀）
 
 **Usage Pattern:**
 ```bash
-execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/file_manager.py <operation> [options]")
+execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe agent_skills/file-manager/scripts/file_manager.py <operation> [options]")
 ```
 
 ## Supported Operations
@@ -43,12 +43,12 @@ execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/file_m
 
 ### 1. Read a file
 ```bash
-execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/file_manager.py read --file 'D:/documents/report.txt'")
+execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe agent_skills/file-manager/scripts/file_manager.py read --file 'D:/documents/report.txt'")
 ```
 
 ### 2. Write to a file
 ```bash
-execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/file_manager.py write --file 'D:/output/result.txt' --content 'Hello World'")
+execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe agent_skills/file-manager/scripts/file_manager.py write --file 'D:/output/result.txt' --content 'Hello World'")
 ```
 
 ### 2.5. Write large content to a file (optimized for LLM token usage)
@@ -57,23 +57,23 @@ execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/file_m
 
 #### 方式 1：从文件读取内容（推荐，适用于大内容）
 ```bash
-# 步骤 1：先将内容写入临时文件（使用 Python 或其他工具）
-execute("python -c \"f=open('temp_content.txt','w',encoding='utf-8'); f.write('大量内容...'); f.close()\"")
+# 步骤 1：先将内容写入临时文件（用 file-manager 的 write 操作创建 temp_content.txt）
+execute("python agent_skills/file-manager/scripts/file_manager.py write --file 'temp_content.txt' --content '大量内容...' --base-folder shared")
 
 # 步骤 2：使用 write-large --content-file 从临时文件读取并写入目标文件
-execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/file_manager.py write-large --file 'D:/output/api_doc.md' --content-file 'temp_content.txt'")
+execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe agent_skills/file-manager/scripts/file_manager.py write-large --file 'D:/output/api_doc.md' --content-file 'temp_content.txt'")
 ```
 
 #### 方式 2：直接传递内容字符串（仅适用于小内容 < 1000 字符）
 ```bash
 # 当内容较小时，可直接使用 --content 参数
-execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/file_manager.py write-large --file 'D:/output/small_doc.md' --content '内容...'")
+execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe agent_skills/file-manager/scripts/file_manager.py write-large --file 'D:/output/small_doc.md' --content '内容...'")
 
 # 当内容超过 10000 字符时，自动使用优化策略
-execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/file_manager.py write-large --file 'D:/output/large_api_doc.md' --content '这里是大量的 API 文档内容...'")
+execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe agent_skills/file-manager/scripts/file_manager.py write-large --file 'D:/output/large_api_doc.md' --content '这里是大量的 API 文档内容...'")
 
 # 自定义大小阈值（5000 字符）
-execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/file_manager.py write-large --file 'api.md' --content '...' --size-threshold 5000")
+execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe agent_skills/file-manager/scripts/file_manager.py write-large --file 'api.md' --content '...' --size-threshold 5000")
 ```
 
 #### ❌ 错误恢复指南
@@ -85,47 +85,47 @@ execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/file_m
 3. **应该** 使用 `--content-file` 方式：
    ```bash
    # 正确做法：
-   # 1. 先创建临时文件
-   execute("python -c \"f=open('temp.txt','w',encoding='utf-8'); f.write('大量内容'); f.close()\"")
+   # 1. 先创建临时文件（用 file-manager 的 write 操作创建 temp.txt）
+   execute("python agent_skills/file-manager/scripts/file_manager.py write --file 'temp.txt' --content '大量内容' --base-folder shared")
    # 2. 使用 --content-file 参数
-   execute("python scripts/file_manager.py write-large --file 'output.md' --content-file 'temp.txt'")
-   # 3. 清理临时文件（可选）
-   execute("python scripts/file_manager.py delete-file --file 'temp.txt'")
+execute("python agent_skills/file-manager/scripts/file_manager.py write-large --file 'output.md' --content-file 'temp.txt'")
+    # 3. 清理临时文件（可选）
+    execute("python agent_skills/file-manager/scripts/file_manager.py delete-file --file 'temp.txt'")
    ```
 
 ### 3. Create a folder
 ```bash
-execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/file_manager.py create-folder --folder 'project/src/components'")
+execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe agent_skills/file-manager/scripts/file_manager.py create-folder --folder 'project/src/components'")
 ```
 
 ### 4. List files in a folder
 ```bash
-execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/file_manager.py list --folder 'D:/project' --recursive")
+execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe agent_skills/file-manager/scripts/file_manager.py list --folder 'D:/project' --recursive")
 ```
 
 ### 5. Search for files
 ```bash
-execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/file_manager.py search --pattern '*.py' --base-folder 'D:/project'")
+execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe agent_skills/file-manager/scripts/file_manager.py search --pattern '*.py' --base-folder 'D:/project'")
 ```
 
 ### 6. Copy a file
 ```bash
-execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/file_manager.py copy --file 'source.txt' --target 'backup.txt'")
+execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe agent_skills/file-manager/scripts/file_manager.py copy --file 'source.txt' --target 'backup.txt'")
 ```
 
 ### 7. Move/rename a file
 ```bash
-execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/file_manager.py move --file 'old_name.txt' --target 'new_name.txt'")
+execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe agent_skills/file-manager/scripts/file_manager.py move --file 'old_name.txt' --target 'new_name.txt'")
 ```
 
 ### 8. Delete a file
 ```bash
-execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/file_manager.py delete-file --file 'temp.txt' --force")
+execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe agent_skills/file-manager/scripts/file_manager.py delete-file --file 'temp.txt' --force")
 ```
 
 ### 9. Get file information
 ```bash
-execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe scripts/file_manager.py info --file 'document.pdf'")
+execute("D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe agent_skills/file-manager/scripts/file_manager.py info --file 'document.pdf'")
 ```
 
 ## Common Options

@@ -9,27 +9,55 @@ import org.springframework.stereotype.Component;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.util.HashMap;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 /**
- * MCP 工具 - 执行系统命令
- * 用于执行安全的系统命令，如 Python 脚本、Shell 脚本等
- * 
- * 实现 AgentTool 接口以被 AgentToolRegistry 自动注册
+ * MCP 工具 - 执行受约束的系统命令
+ *
+ * 安全模型（取代旧的"substring 黑名单 + 前缀白名单"）：
+ * 1. 命令白名单：只允许 python 与少量只读诊断命令（ls/dir/pwd/type/cat/echo），白名单外一律拒绝。
+ * 2. 无 Shell：所有执行基于 ProcessBuilder 直 exec / Java 进程内处理，永不经过 cmd /c、/bin/sh -c，
+ *    因此 &&、;、|、$()、反引号、通配符展开等 shell 语义天然不被解释。
+ * 3. python 特判：只执行"技能 scripts 目录"下的预审批脚本（真实存在、canonical 解析后仍落于 scripts 内），
+ *    绝不执行 cwd/默认工作目录/下载目录下由生成或上传产生的脚本，杜绝"生成代码后执行"。
+ * 4. 只读诊断命令：不做任何写操作，可访问路径被限制在受信任根内（cwd、各技能 scripts、登记的信任目录）。
+ *
+ * 防御思路：既然威胁模型为"LLM/用户相对可信 + 仅内部 RAG Agent 编排"，且只运行可信预审批脚本，
+ * 无需 OS 级沙箱即可闭环——信任锚是技能 scripts 目录内容，故该目录必须只读、版本受控。
  */
 @Slf4j
 @Component
 public class ExecuteTool implements AgentTool {
 
-    // 命令超时时间（秒）
-    // web-search 等网络请求需要更长时间，设置为 60 秒
+    // 命令超时时间（秒）；web-search 等网络请求需要更长时间，设置为 60 秒
     private static final int COMMAND_TIMEOUT_SECONDS = 60;
+
+    // 进程内只读查看文本文件的最大字节数，防止一次性读取超大文件
+    private static final long MAX_DIAG_READ_BYTES = 64 * 1024;
 
     @Value("${agent.python-exec-path:D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe}")
     private String pythonExecPath;
+
+    // 技能根目录。由 app.skill-base 配置（yml 默认 ${AGENT_SKILL_BASE:./agent_skills}），
+    // 命令中的技能前缀即取自该配置目录名，避免在代码里硬编码目录名。
+    @Value("${app.skill-base:#{null}}")
+    private String skillBase;
+
+    // 未匹配任何技能时的默认工作目录（未配置或不存时回退 user.dir）
+    @Value("${app.default-work-dir:#{null}}")
+    private String defaultWorkDir;
+
+    // 登记的受信任目录白名单（逗号分隔）；仅放行只读诊断访问，不放行 python 脚本执行
+    @Value("${app.trusted-dirs:}")
+    private String trustedDirs;
 
     @Override
     public String getName() {
@@ -38,17 +66,26 @@ public class ExecuteTool implements AgentTool {
 
     @Override
     public String getDescription() {
-        return "执行系统命令，如 Python 脚本、Shell 脚本等。适用于执行 calculator、web-search 等技能定义的命令（超时时间 60 秒）。";
+        return "执行受约束的命令：Python 技能脚本，或只读诊断命令（ls/dir/pwd/type/cat/echo）。仅允许技能 scripts 目录下的预审批 Python 脚本；诊断命令只读。";
     }
 
     @Override
     public Map<String, Object> getParameterSchema() {
-        Map<String, Object> schema = new HashMap<>();
+        Map<String, Object> schema = new java.util.HashMap<>();
         schema.put("type", "object");
+        String skillPrefix = skillDirName();
+        String example;
+        if (!skillPrefix.isEmpty()) {
+            example = "要执行的命令，例如：python " + skillPrefix
+                    + "/calculator/scripts/calculator.py 50 + 50，或 ls，或 type config.yaml";
+        } else {
+            example = "要执行的命令，例如：python <技能根目录>/calculator/scripts/calculator.py 50 + 50，"
+                    + "或 ls，或 type config.yaml";
+        }
         schema.put("properties", Map.of(
                 "command", Map.of(
                         "type", "string",
-                        "description", "要执行的系统命令，例如：python scripts/calculator.py 50 + 50"
+                        "description", example
                 )
         ));
         schema.put("required", new String[]{"command"});
@@ -65,416 +102,664 @@ public class ExecuteTool implements AgentTool {
     }
 
     /**
-     * 执行系统命令（@Tool 注解版本，供 Spring AI 自动调用）
-     * @param command 要执行的系统命令
+     * 执行受约束命令（@Tool 注解版本，供 Spring AI 自动调用）
+     *
+     * @param command 要执行的命令
      * @return 命令执行结果
      */
     @Tool(
         name = "execute",
         description = """
-            执行系统命令，如 Python 脚本、Shell 脚本等。
+            执行受约束的命令。
             
-            适用场景：
-            - 执行 calculator 技能：python scripts/calculator.py 50 + 50
-            - 执行 web-search 技能：python skills/web-search/scripts/search_tool.py "关键词"
-            - 执行其他预定义的脚本文件
+            允许的命令（命令白名单）：
+            - Python 技能脚本：python <技能根目录名>/{技能名}/scripts/xxx.py [参数]    仅限预审批技能脚本，禁止 -c/-m/-i 内联代码
+            - 只读诊断命令：ls / dir [路径]、pwd、type / cat <文件>、echo <文本>
             
-            不适用场景：
-            - 危险命令（rm -rf、del、format 等）被禁止
+            安全约束：
+            - 只允许上述白名单命令；系统写类命令（copy/move/del/mkdir/rm 等）一律拒绝，文件操作请用 file-manager
+            - 不使用 shell（无管道/重定向/命令组合/通配符展开/环境变量展开）
+            - Python 脚本只能来自技能 scripts 目录，且必须真实存在；cwd、默认工作目录与下载目录的脚本一律拒绝
+            - 危险/写类命令被禁止
             - 交互式命令（需要用户输入的）不支持
-            - 超时限制：60 秒（网络请求可能需要更长时间）
-            
-            注意：在 Git Bash 环境中，自动将 Windows cmd 命令转换为 Bash 语法
-            （例如：set VAR=value → export VAR=value）
+            - 只读诊断命令可访问的路径被限制在受信任根内（cwd、各技能 scripts、登记的信任目录）
+            - 超时限制：60 秒
             """
     )
     public String executeCommand(
-            @ToolParam(description = "要执行的系统命令", required = true) String command) {
-        
+            @ToolParam(description = "要执行的命令", required = true) String command) {
         log.info("执行命令：{}", command);
-        
-        // 安全检查：禁止危险命令
-        if (!isCommandSafe(command)) {
-            log.warn("检测到危险命令，拒绝执行：{}", command);
-            return "错误：禁止执行危险命令（如删除、格式化等破坏性操作）";
+
+        // 命令白名单 + 元字符 + 路径校验（null 表示通过）
+        String rejectedReason = rejectUnsafePath(command);
+        if (rejectedReason != null) {
+            log.warn("命令被拒绝：{}，原因：{}", command, rejectedReason);
+            return "错误：" + rejectedReason;
         }
-        
-        try {
-            // 路径归一化：将所有 Python 命令替换为配置路径
-            String normalizedCommand = normalizePythonPath(command);
-            log.debug("归一化后的命令：{}", normalizedCommand);
-            
-            // 命令预处理：将 Windows cmd 语法转换为 Unix Shell 语法
-            String processedCommand = preprocessCommand(normalizedCommand);
-            log.debug("预处理后的命令：{}", processedCommand);
-            
-            // 检测是否需要通过 Shell 执行（包含 &&、||、export 等 Shell 特性）
-            boolean useShell = requiresShellExecution(processedCommand);
-            
-            ProcessBuilder processBuilder;
-            if (useShell) {
-                // 根据操作系统选择正确的 Shell
-                String osName = System.getProperty("os.name").toLowerCase();
-                boolean isWindows = osName.contains("win");
-                
-                if (isWindows) {
-                    // Windows: 使用 cmd.exe /c 执行
-                    log.info("检测到 Windows 环境，使用 cmd.exe /c 执行");
-                    processBuilder = new ProcessBuilder("cmd.exe", "/c", processedCommand);
-                } else {
-                    // Linux/macOS: 使用 /bin/sh -c 执行
-                    log.info("检测到 Unix 环境，使用 /bin/sh -c 执行");
-                    processBuilder = new ProcessBuilder("/bin/sh", "-c", processedCommand);
+
+        // 路径归一化：将所有 python 命令替换为配置的 python 路径
+        String normalizedCommand = normalizePythonPath(command);
+        String[] tokens = parseCommand(normalizedCommand);
+        CmdKind kind = classify(tokens[0]);
+
+        switch (kind) {
+            case PYTHON:
+                return runPython(command, tokens);
+            case LIST:
+            case READ:
+                return runDiagnostic(command, kind, tokens);
+            case PWD:
+                return runPwd(command);
+            case ECHO:
+                return runEcho(tokens);
+            default:
+                return "错误：命令不在白名单";
+        }
+    }
+
+    /**
+     * 命令分类 RM
+     */
+    private enum CmdKind { PYTHON, LIST, READ, PWD, ECHO, UNKNOWN }
+
+    /**
+     * 根据命令第一个 token 判断命令类别
+     */
+    private CmdKind classify(String firstToken) {
+        if (isPythonExecutable(firstToken)) {
+            return CmdKind.PYTHON;
+        }
+        String lower = firstToken.toLowerCase();
+        switch (lower) {
+            case "ls":
+            case "dir":
+                return CmdKind.LIST;
+            case "type":
+            case "cat":
+                return CmdKind.READ;
+            case "pwd":
+                return CmdKind.PWD;
+            case "echo":
+                return CmdKind.ECHO;
+            default:
+                return CmdKind.UNKNOWN;
+        }
+    }
+
+    /**
+     * 命令级安全准入：命令白名单 + token 级元字符拒绝 + 按命令分发路径校验。
+     * 这是替换旧 isCommandSafe / rejectUnsafePath / containsShellMetachar 的统一入口。
+     *
+     * @param command 原始命令
+     * @return 拒绝原因；null 表示安全放行
+     */
+    String rejectUnsafePath(String command) {
+        if (command == null || command.isBlank()) {
+            return "命令为空";
+        }
+        String[] tokens = parseCommand(command);
+        if (tokens.length == 0) {
+            return "命令为空";
+        }
+        CmdKind kind = classify(tokens[0]);
+        if (kind == CmdKind.UNKNOWN) {
+            return "命令不在白名单，仅允许 python 及只读诊断命令（ls/dir/pwd/type/cat/echo）";
+        }
+
+        // token 级元字符拒绝（独立 token 形式的 shell 复合/重定向符，杜绝命令拼接）
+        String metaReason = rejectMetacharTokens(tokens);
+        if (metaReason != null) {
+            return metaReason;
+        }
+
+        switch (kind) {
+            case PYTHON:
+                if (tokens.length < 2) {
+                    return "python 命令缺少脚本路径";
                 }
-            } else {
-                // 直接执行可执行文件（简单命令）
-                String[] commandParts = parseCommand(processedCommand);
-                log.info("直接执行命令：{}", String.join(" ", commandParts));
-                processBuilder = new ProcessBuilder(commandParts);
+                return rejectPythonScript(tokens[1]);
+            case LIST:
+                return tokens.length > 1
+                        ? rejectDiagnosticPath(tokens[1], command, /*mustBeDir*/ true)
+                        : null;
+            case READ:
+                if (tokens.length < 2) {
+                    return "读文件命令缺少文件路径";
+                }
+                return rejectDiagnosticPath(tokens[1], command, false);
+            default:
+                // pwd / echo 无路径操作
+                return null;
+        }
+    }
+
+    /**
+     * 拒绝任何独立成 token 的 shell 复合/重定向元字符。
+     * 基于 token 而非 substring：引号内的 "a && b" 是单个 token，不会被误伤。
+     */
+    private String rejectMetacharTokens(String[] tokens) {
+        for (String token : tokens) {
+            if (token.startsWith("$(") || token.equals("`")
+                    || token.equals(";") || token.equals("&&") || token.equals("||")
+                    || token.equals("|") || token.equals(">") || token.equals(">>")
+                    || token.equals("<") || token.startsWith("${")) {
+                return "命令不允许包含 shell 复合/重定向元字符：" + token
+                        + "（不使用 shell，仅允许单条进程内/直 exec 命令）";
             }
-            
-            processBuilder.redirectErrorStream(true); // 合并标准输出和错误输出
-            
-            // 设置工作目录：如果命令包含技能路径，自动切换到技能目录
-            String workingDir = detectSkillWorkingDirectory(command);
-            if (workingDir != null) {
-                processBuilder.directory(new java.io.File(workingDir));
-                log.debug("设置工作目录：{}", workingDir);
+        }
+        return null;
+    }
+
+    /**
+     * python 特判：脚本 token 必须真实存在并 canonical 解析后仍落于某技能 scripts 目录内，
+     * 且不得使用解释器内联选项（-c/-m/-i）。cwd / 默认工作目录 / 下载目录的脚本一律拒绝。
+     */
+    private String rejectPythonScript(String scriptToken) {
+        String clean = unquote(scriptToken);
+        if (clean.isEmpty()) {
+            return "python 脚本路径为空";
+        }
+        // 拒绝解释器内联选项：必须执行脚本文件
+        if (clean.startsWith("-")) {
+            return "python 命令不允许使用解释器选项执行内联代码（如 -c/-m/-i），必须执行脚本文件";
+        }
+
+        // 允许的 python 根 = 所有技能 scripts 目录（canonical）
+        List<Path> allowedScriptRoots = skillScriptRoots();
+        if (allowedScriptRoots.isEmpty()) {
+            return "未配置任何技能脚本目录，无法执行 python 脚本";
+        }
+
+        // 脚本候选：绝对路径直接取；相对路径按技能根与工作目录分别解析
+        // （此点已由上方 allowedScriptRoots 非空校验保证 skillBase 已配置）
+        java.io.File wd = resolveWorkingDirectory(scriptToken);
+        java.io.File skillBaseFile = new java.io.File(skillBaseDir());
+        List<java.io.File> candidates = new ArrayList<>();
+        java.io.File rawFile = new java.io.File(clean);
+        if (rawFile.isAbsolute()) {
+            candidates.add(rawFile);
+        } else {
+            // 命令形如 {配置技能根目录名}/{name}/scripts/x.py，
+            // 需剥掉配置目录名前缀再定位到技能目录；无此前缀则原样保留。
+            String stripped = clean;
+            String prefix = skillDirName();
+            if (!prefix.isEmpty() && stripped.startsWith(prefix + "/")) {
+                stripped = stripped.substring(prefix.length() + 1);
             }
-            
+            candidates.add(new java.io.File(skillBaseFile, stripped));
+            candidates.add(new java.io.File(skillBaseFile, clean));
+            if (wd != null) {
+                candidates.add(new java.io.File(wd, clean));
+            }
+        }
+
+        for (java.io.File candidate : candidates) {
+            if (!candidate.exists()) {
+                continue;
+            }
+            Path real;
+            try {
+                real = candidate.toPath().toRealPath();
+            } catch (IOException e) {
+                continue;
+            }
+            if (isWithinAny(real, allowedScriptRoots)) {
+                return null;
+            }
+        }
+        return "python 脚本必须位于某技能 scripts 目录且真实存在（cwd/默认工作目录/下载目录的脚本一律拒绝）：" + clean;
+    }
+
+    /**
+     * 只读诊断命令路径校验：目标路径 canonical 后必须落在受信任根内。
+     *
+     * @param shellCmd 用于判定默认工作目录
+     */
+    private String rejectDiagnosticPath(String pathToken, String shellCmd, boolean mustBeDir) {
+        String clean = unquote(pathToken);
+        if (clean.isEmpty()) {
+            return "路径为空";
+        }
+        java.io.File wd = resolveWorkingDirectory(shellCmd);
+        if (wd == null) {
+            wd = new java.io.File(System.getProperty("user.dir"));
+        }
+        Path resolved = resolveWithinRoots(clean, wd);
+        if (resolved == null) {
+            return clean + " 不在受信任的只读路径范围内（仅 cwd、各技能 scripts、登记的信任目录），拒绝访问";
+        }
+        if (mustBeDir && !Files.isDirectory(resolved)) {
+            return clean + " 不是目录";
+        }
+        if (!mustBeDir && !Files.isRegularFile(resolved)) {
+            return clean + " 不是常规文件";
+        }
+        return null;
+    }
+
+    /**
+     * 执行 python 脚本（进程外直 exec，无 shell）。
+     */
+    private String runPython(String command, String[] tokens) {
+        // tokens[0] 已被 normalize 为 python 解释器路径，直接作为 argv
+        String[] commandParts = tokens;
+        log.debug("归一化后命令：{}", String.join(" ", commandParts));
+
+        java.io.File workingDir = resolveWorkingDirectory(command);
+        ProcessBuilder processBuilder = new ProcessBuilder(commandParts);
+        processBuilder.redirectErrorStream(true);
+
+        // 白名单重建子进程环境：默认 ProcessBuilder.environment() 会把父进程全部环境变量（含
+        // JWT_SECRET / DASHSCOPE_API_KEY 等密钥）同样拷贝给子进程。系统只运行可信预审批技能脚本，
+        // 但为避免密钥随脚本扩散，这里清空后仅保留脚本运行必需的最小变量集，再注入技能根目录。
+        // 保留项取舍：PATH/SystemRoot/SystemDrive 为解释器与 Windows 运行必需；TEMP/TMP/LANG/
+        // PYTHONIOENCODING/USERPROFILE/HOME 为 Python 标准库与编码解析所用，缺失会导致乱码或功能异常。
+        java.util.Map<String, String> env = processBuilder.environment();
+        env.clear();
+        copyEnv(env, "PATH");
+        copyEnv(env, "SystemRoot");
+        copyEnv(env, "SystemDrive");
+        copyEnv(env, "TEMP");
+        copyEnv(env, "TMP");
+        copyEnv(env, "LANG");
+        copyEnv(env, "PYTHONIOENCODING");
+        copyEnv(env, "USERPROFILE");
+        copyEnv(env, "HOME");
+        // 向技能脚本（含 file-manager）注入技能根目录，使其能动态识别 scripts 信任锚做只读守卫，避免脚本内硬编码路径
+        String skillBasePath = skillBaseDir();
+        if (skillBasePath != null) {
+            env.put("AGENT_SKILL_BASE", skillBasePath);
+        }
+        if (workingDir != null) {
+            processBuilder.directory(workingDir);
+            log.debug("设置工作目录：{}", workingDir.getAbsolutePath());
+        } else {
+            log.debug("未设置工作目录，沿用父进程工作目录");
+        }
+        return runWithTimeout(processBuilder, String.join(" ", commandParts));
+    }
+
+    /**
+     * 仅当源环境存在时，将其值放入子进程环境白名单（复制该键），用于最小化子进程暴露的敏感环境变量。
+     */
+    private void copyEnv(java.util.Map<String, String> env, String key) {
+        String value = System.getenv(key);
+        if (value != null) {
+            env.put(key, value);
+        }
+    }
+
+    /**
+     * 只读诊断命令的进程内实现（不产生子进程，天然无 shell 语义、无写操作）。
+     */
+    private String runDiagnostic(String command, CmdKind kind, String[] tokens) {
+        java.io.File wd = resolveWorkingDirectory(command);
+        if (wd == null) {
+            wd = new java.io.File(System.getProperty("user.dir"));
+        }
+        String target = tokens.length > 1 ? unquote(tokens[1]) : ".";
+        Path resolved = resolveWithinRoots(target, wd);
+        if (resolved == null) {
+            return "错误：路径不在受信任的只读范围内：" + target;
+        }
+
+        if (kind == CmdKind.LIST) {
+            if (!Files.isDirectory(resolved)) {
+                return "错误：不是目录：" + target;
+            }
+            try (java.util.stream.Stream<Path> stream = Files.list(resolved)) {
+                List<String> names = stream.map(p -> p.getFileName().toString()).sorted()
+                        .collect(Collectors.toList());
+                return "目录条目（" + names.size() + "）：" + String.join(", ", names);
+            } catch (IOException e) {
+                log.error("列出目录失败：{}", resolved, e);
+                return "错误：列出目录失败：" + e.getMessage();
+            }
+        }
+
+        // READ（type/cat）：只读查看文本文件
+        if (!Files.isRegularFile(resolved)) {
+            return "错误：不是常规文件：" + target;
+        }
+        try {
+            long size = Files.size(resolved);
+            if (size > MAX_DIAG_READ_BYTES) {
+                return "错误：文件过大（" + size + " 字节），仅允许查看 " + MAX_DIAG_READ_BYTES + " 字节以内";
+            }
+            return new String(Files.readAllBytes(resolved), StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            log.error("读取文件失败：{}", resolved, e);
+            return "错误：读取文件失败：" + e.getMessage();
+        }
+    }
+
+    private String runPwd(String command) {
+        java.io.File wd = resolveWorkingDirectory(command);
+        return "当前工作目录：" + (wd != null ? wd.getAbsolutePath() : System.getProperty("user.dir"));
+    }
+
+    private String runEcho(String[] tokens) {
+        if (tokens.length < 2) {
+            return "echo 无内容";
+        }
+        return String.join(" ", Arrays.copyOfRange(tokens, 1, tokens.length));
+    }
+
+    /**
+     * 统一执行 ProcessBuilder 并读取输出，带超时。
+     */
+    private String runWithTimeout(ProcessBuilder processBuilder, String displayCommand) {
+        try {
             Process process = processBuilder.start();
-            
-            // 等待命令执行完成（带超时）
             boolean completed = process.waitFor(COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
             if (!completed) {
                 process.destroyForcibly();
-                log.warn("命令执行超时（{}秒）：{}", COMMAND_TIMEOUT_SECONDS, command);
+                log.warn("命令执行超时（{}秒）：{}", COMMAND_TIMEOUT_SECONDS, displayCommand);
                 return "错误：命令执行超时（超过 " + COMMAND_TIMEOUT_SECONDS + " 秒）";
             }
-            
-            // 读取输出
             String output;
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
                 output = reader.lines().collect(Collectors.joining("\n"));
             }
-            
             int exitCode = process.exitValue();
             log.info("命令执行完成，退出码={}, 输出长度={}", exitCode, output.length());
-            
             if (exitCode == 0) {
                 return output.isEmpty() ? "命令执行成功，无输出" : output;
-            } else {
-                return "命令执行失败（退出码=" + exitCode + "）:\n" + output;
             }
-            
+            return "命令执行失败（退出码=" + exitCode + "）:\n" + output;
         } catch (IOException e) {
-            log.error("命令执行失败：{}", command, e);
+            log.error("命令执行失败：{}", displayCommand, e);
             return "命令执行失败：" + e.getMessage();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            log.error("命令执行被中断：{}", command, e);
+            log.error("命令执行被中断：{}", displayCommand, e);
             return "命令执行被中断";
         }
     }
 
     /**
-     * 预处理命令：根据操作系统转换命令语法
-     * 
-     * Windows (cmd.exe) 转换规则：
-     * 1. set VAR=value → set VAR=value（保持不变）
-     * 2. export VAR=value → set VAR=value
-     * 3. chcp 65001 && → （移除，不需要）
-     * 
-     * Unix (bash/sh) 转换规则：
-     * 1. set VAR=value → export VAR=value
-     * 2. chcp 65001 && → （移除，默认 UTF-8）
-     * 
-     * @param command 原始命令
-     * @return 转换后的命令
+     * 所有技能 scripts 目录的 canonical 路径集合（已存在的才纳入）。
      */
-    private String preprocessCommand(String command) {
-        if (command == null || command.isEmpty()) {
-            return command;
+    private List<Path> skillScriptRoots() {
+        List<Path> roots = new ArrayList<>();
+        String basePath = skillBaseDir();
+        if (basePath == null) {
+            return roots;
         }
-        
-        String processed = command;
-        String osName = System.getProperty("os.name").toLowerCase();
-        boolean isWindows = osName.contains("win");
-        
-        if (isWindows) {
-            // Windows 环境：转换为 cmd.exe 语法
-            
-            // 1. 移除 chcp 65001 &&
-            processed = processed.replaceAll("chcp\\s+65001\\s*&&\\s*", "");
-            
-            // 2. export VAR=value → set VAR=value
-            processed = processed.replaceAll("\\bexport\\s+([a-zA-Z_][a-zA-Z0-9_]*)=", "set $1=");
-            
-            log.debug("Windows 命令预处理：{} → {}", command, processed);
-        } else {
-            // Unix 环境：转换为 bash/sh 语法
-            
-            // 1. 移除 chcp 65001 &&
-            processed = processed.replaceAll("chcp\\s+65001\\s*&&\\s*", "");
-            
-            // 2. set VAR=value → export VAR=value
-            processed = processed.replaceAll("\\bset\\s+([a-zA-Z_][a-zA-Z0-9_]*)=", "export $1=");
-            
-            log.debug("Unix 命令预处理：{} → {}", command, processed);
+        java.io.File baseDir = new java.io.File(basePath);
+        java.io.File[] skillDirs = baseDir.listFiles();
+        if (skillDirs == null) {
+            return roots;
         }
-        
-        return processed;
+        for (java.io.File skillDir : skillDirs) {
+            if (!skillDir.isDirectory()) {
+                continue;
+            }
+            java.io.File scriptsDir = new java.io.File(skillDir, "scripts");
+            if (!scriptsDir.isDirectory()) {
+                continue;
+            }
+            try {
+                roots.add(scriptsDir.toPath().toRealPath());
+            } catch (IOException e) {
+                log.warn("技能脚本目录无法解析 canonical 路径，跳过：{}", scriptsDir.getAbsolutePath());
+            }
+        }
+        return roots;
     }
 
     /**
-     * 判断命令是否需要通过 Shell 执行
-     * 
-     * ProcessBuilder 直接执行可执行文件，不支持：
-     * - Shell 内建命令（export, cd, source, alias 等）
-     * - 管道（|）
-     * - 重定向（>, <, >>）
-     * - 逻辑运算符（&&, ||）
-     * - 通配符展开（*, ?）
-     * 
-     * @param command 命令
-     * @return true 如果需要 Shell 执行
+     * 将路径 token（相对或绝对）解析到受信任根内；命中则返回 canonical 路径，否则返回 null。
+     * 相对路径以工作目录为基准解析，与进程实际 cwd 保持一致。
      */
-    private boolean requiresShellExecution(String command) {
-        if (command == null || command.isEmpty()) {
-            return false;
+    private Path resolveWithinRoots(String clean, java.io.File wd) {
+        java.io.File raw = new java.io.File(clean);
+        java.io.File abs = raw.isAbsolute() ? raw : new java.io.File(wd, clean);
+        if (!abs.exists()) {
+            return null;
         }
-        
-        // 检查是否包含 Shell 特性
-        String[] shellFeatures = {
-            "&&", "||", "|",  // 逻辑运算符和管道
-            ">", "<", ">>", "2>", "&>",  // 重定向
-            ";",  // 命令分隔符
-            "$(", "`",  // 命令替换
-            "${",  // 变量展开
-            "*", "?", "[",  // 通配符（简单检查）
-            "export ", "cd ", "source ", "alias ",  // Shell 内建命令
-            "echo ", "printf "  // 可能需要 Shell 展开
-        };
-        
-        for (String feature : shellFeatures) {
-            if (command.contains(feature)) {
+        Path real;
+        try {
+            real = abs.toPath().toRealPath();
+        } catch (IOException e) {
+            return null;
+        }
+        List<Path> roots = diagnosticRoots(wd);
+        if (isWithinAny(real, roots)) {
+            return real;
+        }
+        return null;
+    }
+
+    /**
+     * 只读诊断命令允许的根：cwd + 各技能 scripts + 登记的信任目录。
+     */
+    private List<Path> diagnosticRoots(java.io.File wd) {
+        List<Path> roots = new ArrayList<>();
+        try {
+            roots.add(wd.toPath().toRealPath());
+        } catch (IOException e) {
+            roots.add(wd.toPath().toAbsolutePath().normalize());
+        }
+        roots.addAll(skillScriptRoots());
+        if (trustedDirs != null && !trustedDirs.isBlank()) {
+            for (String dir : trustedDirs.split(",")) {
+                String trimmed = dir.trim();
+                if (trimmed.isEmpty()) {
+                    continue;
+                }
+                java.io.File tf = new java.io.File(trimmed);
+                if (!tf.exists()) {
+                    continue;
+                }
+                try {
+                    roots.add(tf.toPath().toRealPath());
+                } catch (IOException e) {
+                    // 跳过无法解析的信任目录
+                }
+            }
+        }
+        return roots;
+    }
+
+    private boolean isWithinAny(Path real, List<Path> roots) {
+        for (Path root : roots) {
+            if (real.startsWith(root)) {
                 return true;
             }
         }
-        
         return false;
     }
 
-    /**
-     * 检查命令是否安全
-     * 禁止执行危险命令
-     */
-    private boolean isCommandSafe(String command) {
-        String lowerCommand = command.toLowerCase();
-        
-        // 禁止的危险命令列表
-        String[] dangerousCommands = {
-            "rm -rf", "rm -r", "rm ",  // 允许 rm 但禁止递归删除
-            "del ", "deltree ",
-            "format ", "mkfs",
-            "dd ",
-            "chmod 777", "chmod -R 777",
-            "chown -R",
-            "sudo rm", "sudo del",
-            "> /dev/", ">> /dev/",
-            "curl ", "wget ",  // 禁止下载执行
-            "bash -c", "sh -c"  // 禁止 shell 注入
-        };
-        
-        for (String dangerous : dangerousCommands) {
-            if (lowerCommand.contains(dangerous)) {
-                return false;
+    private String unquote(String token) {
+        if (token == null) {
+            return "";
+        }
+        String clean = token;
+        if (clean.length() >= 2) {
+            char first = clean.charAt(0);
+            char last = clean.charAt(clean.length() - 1);
+            if ((first == '"' && last == '"') || (first == '\'' && last == '\'')) {
+                clean = clean.substring(1, clean.length() - 1);
             }
         }
-        
-        // 允许执行 Python 命令的多种格式：
-        // 1. python / python3 - 系统 PATH 中的 Python
-        // 2. *.exe - Windows 上的 Python 可执行文件（如虚拟环境）
-        // 3. /path/to/python - Unix 上的 Python 可执行文件路径
-        if (isPythonCommand(lowerCommand)) {
-            return true;
-        }
-        
-        // 允许 file-manager 技能需要的安全系统命令
-        if (isSafeSystemCommand(lowerCommand)) {
-            return true;
-        }
-        
-        log.warn("不允许的命令前缀，只允许执行 python/python3 命令、Python 可执行文件路径或安全的系统命令：{}", command);
-        return false;
+        return clean;
     }
 
     /**
-     * 判断是否为安全的系统命令
-     * 支持 file-manager 技能需要的命令
+     * 判断是否为 python 解释器 token（python/python3/*.exe/绝对路径结尾 python）。
      */
-    private boolean isSafeSystemCommand(String command) {
-        // 允许 mkdir 命令（创建文件夹）
-        if (command.startsWith("mkdir ")) {
-            // 但要禁止危险参数
-            if (command.contains("sudo") || command.contains("rm -rf") || command.contains("del ")) {
-                return false;
-            }
+    private boolean isPythonExecutable(String token) {
+        if (token == null) {
+            return false;
+        }
+        String lower = token.toLowerCase();
+        if (lower.equals("python") || lower.equals("python3")) {
             return true;
         }
-        
-        // 允许 copy 命令（复制文件）
-        if (command.startsWith("copy ") || command.startsWith("xcopy ")) {
+        if (lower.contains("python.exe") || lower.contains("pythonw.exe")) {
             return true;
         }
-        
-        // 允许 move 命令（移动/重命名文件）
-        if (command.startsWith("move ")) {
+        if (lower.matches(".*[/\\\\]python3?[w]?$")) {
             return true;
         }
-        
-        // 允许 dir 命令（列出目录）
-        if (command.startsWith("dir ")) {
-            return true;
-        }
-        
-        // 允许 cd 命令（切换目录）
-        if (command.startsWith("cd ")) {
-            return true;
-        }
-        
-        // 允许 echo 命令（输出文本）
-        if (command.startsWith("echo ")) {
-            return true;
-        }
-        
-        // 允许 type 命令（查看文件内容，Windows）
-        if (command.startsWith("type ")) {
-            return true;
-        }
-        
-        return false;
+        return lower.equals(pythonExecPath.toLowerCase());
     }
 
     /**
-     * 判断是否为 Python 命令
-     * 支持多种格式：python, python3, *.exe, /path/to/python
-     */
-    private boolean isPythonCommand(String command) {
-        // 格式 1: python 或 python3 开头
-        if (command.startsWith("python ") || command.startsWith("python3 ")) {
-            return true;
-        }
-        
-        // 格式 2: Windows Python 可执行文件路径（包含 python.exe 或 pythonw.exe）
-        if (command.contains("python.exe ") || command.contains("pythonw.exe ")) {
-            return true;
-        }
-        
-        // 格式 3: Unix Python 路径（以 /python 或 /python3 结尾的路径）
-        // 例如：/usr/bin/python3, /home/user/.venv/bin/python
-        if (command.matches(".*[/\\\\]python3?[w]?\\..*") || 
-            command.matches(".*[/\\\\]python3?[w]?\\s+.*")) {
-            return true;
-        }
-        
-        return false;
-    }
-
-    /**
-     * 替换命令中的 Python 路径为配置路径
-     * 统一将所有 Python 命令替换为配置的 python-exec-path
-     * 
-     * 检测模式：
-     * 1. python 开头（系统 PATH 中的 Python）
-     * 2. python3 开头（系统 PATH 中的 Python3）
-     * 3. Windows 绝对路径：D:/path/to/python.exe 或 D:/path/to/pythonw.exe
-     * 4. Unix 绝对路径：/usr/bin/python 或 /home/user/venv/bin/python
-     * 
-     * @param command 原始命令
-     * @return 替换后的命令
+     * 替换命令中的 Python 路径为配置的 python-exec-path。
+     * 支持 python / python3 开头、Windows 绝对路径（python.exe/pythonw.exe）、Unix 路径。
+     * 非 python 命令原样返回。
      */
     String normalizePythonPath(String command) {
         if (command == null || command.isEmpty()) {
             return command;
         }
-        
         String normalized = command;
-        
-        // 模式 1: python 或 python3 开头（后面跟空格）
         if (normalized.startsWith("python ") || normalized.startsWith("python3 ")) {
-            // 移除 python/python3 及其后的空格，保留脚本路径和参数
             String scriptAndArgs = normalized.substring(normalized.indexOf(' ') + 1);
             normalized = pythonExecPath + " " + scriptAndArgs;
             log.debug("替换 Python 命令：{} → {}", command, normalized);
             return normalized;
         }
-        
-        // 模式 2: Windows Python 可执行文件路径（包含 python.exe 或 pythonw.exe）
-        // 匹配 D:/path/to/python.exe 或 D:\path\to\python.exe
         if (normalized.matches("^[A-Za-z]:.*python[w]?\\.exe\\s+.*")) {
-            // 提取脚本路径和参数
             int firstSpace = normalized.indexOf(' ');
             if (firstSpace > 0) {
-                String scriptAndArgs = normalized.substring(firstSpace + 1);
-                normalized = pythonExecPath + " " + scriptAndArgs;
+                normalized = pythonExecPath + " " + normalized.substring(firstSpace + 1);
                 log.debug("替换 Windows Python 路径：{} → {}", command, normalized);
                 return normalized;
             }
         }
-        
-        // 模式 3: Unix Python 路径（以 /python 或 /python3 结尾的路径）
-        // 例如：/usr/bin/python3, /home/user/.venv/bin/python
         if (normalized.matches("^[/\\\\].*python3?[w]?\\s+.*")) {
-            // 提取脚本路径和参数
             int firstSpace = normalized.indexOf(' ');
             if (firstSpace > 0) {
-                String scriptAndArgs = normalized.substring(firstSpace + 1);
-                normalized = pythonExecPath + " " + scriptAndArgs;
+                normalized = pythonExecPath + " " + normalized.substring(firstSpace + 1);
                 log.debug("替换 Unix Python 路径：{} → {}", command, normalized);
                 return normalized;
             }
         }
-        
-        // 不匹配任何模式，保持原样
         return command;
     }
 
     /**
-     * 解析命令为数组
-     * 支持简单的空格分隔，后续可以改进为支持引号等复杂情况
+     * 将命令行解析为参数数组（引号感知）。与旧版一致，处理引号、转义与空白切分，
+     * 使 `100 * 25` 中的 `*` 原样作为参数传递，绝不被当作元字符/通配符。
      */
     private String[] parseCommand(String command) {
-        // 简单的空格分隔，后续可以改进为支持引号等复杂情况
-        return command.split("\\s+");
+        if (command == null || command.isBlank()) {
+            return new String[0];
+        }
+        List<String> tokens = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        boolean inQuote = false;
+        char quoteChar = 0;
+        boolean hasToken = false;
+
+        for (int i = 0; i < command.length(); i++) {
+            char c = command.charAt(i);
+            if (inQuote) {
+                if (c == quoteChar) {
+                    inQuote = false;
+                    quoteChar = 0;
+                } else if (c == '\\' && i + 1 < command.length()) {
+                    current.append(command.charAt(++i));
+                } else {
+                    current.append(c);
+                }
+            } else {
+                if (c == '"' || c == '\'') {
+                    inQuote = true;
+                    quoteChar = c;
+                    hasToken = true;
+                } else if (c == '\\' && i + 1 < command.length()) {
+                    current.append(command.charAt(++i));
+                    hasToken = true;
+                } else if (Character.isWhitespace(c)) {
+                    if (hasToken) {
+                        tokens.add(current.toString());
+                        current.setLength(0);
+                        hasToken = false;
+                    }
+                } else {
+                    current.append(c);
+                    hasToken = true;
+                }
+            }
+        }
+        if (hasToken || inQuote) {
+            tokens.add(current.toString());
+        }
+        return tokens.toArray(new String[0]);
     }
 
     /**
-     * 检测技能工作目录
-     * 根据命令中的路径自动推断技能目录，设置工作目录以支持相对路径
-     * 
-     * @param command 完整命令
-     * @return 工作目录路径，如果无法检测则返回 null
+     * 解析命令的工作目录，采用三段式回退：
+     * 1. 命令匹配到技能 → 技能目录
+     * 2. 未匹配技能 → 配置的默认工作目录（app.default-work-dir，自动创建）
+     * 3. 默认目录不可用 → null
+     */
+    java.io.File resolveWorkingDirectory(String command) {
+        if (command == null || command.isBlank()) {
+            return null;
+        }
+        String skillDir = detectSkillWorkingDirectory(command);
+        if (skillDir != null) {
+            return new java.io.File(skillDir);
+        }
+        if (defaultWorkDir != null && !defaultWorkDir.isBlank()) {
+            java.io.File defaultDir = new java.io.File(defaultWorkDir);
+            if (!defaultDir.exists()) {
+                try {
+                    java.nio.file.Files.createDirectories(defaultDir.toPath());
+                    log.info("默认工作目录不存在，已自动创建：{}", defaultDir.getAbsolutePath());
+                } catch (IOException e) {
+                    log.error("创建默认工作目录失败：{}", defaultDir.getAbsolutePath(), e);
+                }
+            }
+            if (defaultDir.isDirectory()) {
+                return defaultDir;
+            }
+            log.warn("默认工作目录不可用，回退到父进程工作目录：{}", defaultWorkDir);
+        }
+        return null;
+    }
+
+    /**
+     * 从命令文本中检测命中的技能目录（{配置技能根目录名}/{name}/ 写法）。
      */
     private String detectSkillWorkingDirectory(String command) {
-        // 匹配模式：skills/{skill-name}/scripts/
-        // 例如：skills/file-manager/scripts/file_manager.py
-        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("skills/([^/]+)/scripts/");
+        String prefix = skillDirName();
+        if (prefix.isEmpty()) {
+            return null;
+        }
+        java.util.regex.Pattern pattern =
+                java.util.regex.Pattern.compile(java.util.regex.Pattern.quote(prefix) + "/([^/]+)/");
         java.util.regex.Matcher matcher = pattern.matcher(command);
-        
         if (matcher.find()) {
             String skillName = matcher.group(1);
-            // 构建技能目录路径（相对于项目根目录）
-            String userDir = System.getProperty("user.dir");
-            String skillDir = userDir + "/agent_skills/" + skillName;
-            
-            // 验证目录是否存在
-            java.io.File dir = new java.io.File(skillDir);
-            if (dir.exists() && dir.isDirectory()) {
-                return skillDir;
+            java.io.File skillDir = new java.io.File(skillBaseDir(), skillName);
+            if (skillDir.isDirectory()) {
+                return skillDir.getAbsolutePath();
             }
+            log.warn("技能目录不存在，忽略技能匹配：{}", skillDir.getAbsolutePath());
         }
-        
         return null;
+    }
+
+    /** 技能根目录的绝对路径；未配置 app.skill-base 时返回 null（表示无技能，python 一律拒绝）。 */
+    private String skillBaseDir() {
+        if (skillBase == null || skillBase.isBlank()) {
+            return null;
+        }
+        return new java.io.File(skillBase).getAbsolutePath();
+    }
+
+    /** 技能根目录的目录名，作为命令中技能前缀；未配置时返回空串。 */
+    private String skillDirName() {
+        String base = skillBaseDir();
+        if (base == null) {
+            return "";
+        }
+        return new java.io.File(base).getName();
     }
 }

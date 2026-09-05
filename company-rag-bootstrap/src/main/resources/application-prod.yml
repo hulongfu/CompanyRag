@@ -14,7 +14,7 @@ spring:
             file-system:
               enabled: true
               paths:
-                - ./agent_skills
+                - ${AGENT_SKILL_BASE:./agent_skills}
     # 统一使用 OpenAI 兼容接口，chat 用通义千问，embedding/rerank 用硅基流动
     openai:
       # Chat 模型配置（通义千问 - OpenAI 兼容模式）

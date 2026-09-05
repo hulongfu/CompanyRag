@@ -48,10 +48,12 @@ public class AgentConfig {
     @Description("ReactAgent for autonomous tool and skill invocation")
     public ReactAgent reactAgent(
             ChatModel chatModel,
-            ToolCallbackProvider toolCallbackProvider) {
-        
-        // 配置 Skills 注册中心，扫描 ./agent_skills 目录
-        String skillsPath = "./agent_skills";
+            ToolCallbackProvider toolCallbackProvider,
+            @org.springframework.beans.factory.annotation.Value(
+                    "${app.skill-base:./agent_skills}") String skillBase) {
+
+        // 配置 Skills 注册中心，扫描 yaml 中 app.skill-base（与 ExecuteTool 同源），避免硬编码
+        String skillsPath = skillBase;
         log.info("扫描 Skills 目录内容：{}", skillsPath);
         try {
             java.nio.file.Path path = java.nio.file.Paths.get(skillsPath);
