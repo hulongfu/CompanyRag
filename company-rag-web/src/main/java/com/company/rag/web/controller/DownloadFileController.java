@@ -12,8 +12,10 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.util.UriUtils;
 
 import java.io.File;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 
 /**
@@ -56,27 +58,38 @@ public class DownloadFileController {
         // 1. 从请求 URI 中提取 fileId
         // URI 格式：/api/download/20260831/tenant-1/user-100/report.md
         String requestUri = request.getRequestURI();
+        String requestUrl = request.getRequestURL().toString();
+        String queryString = request.getQueryString();
         
         // 从 URI 中提取 fileId：移除 /api/download 前缀
         // fileId 格式：20260831/tenant-1/user-100/report.md
         String fileId = extractFileIdFromUri(requestUri, "/api/download");
         
-        // 【安全检查】验证 fileId 是否包含路径穿越字符
-        if (!validateFileId(fileId)) {
-            log.warn("路径穿越攻击检测：fileId={}", fileId);
+        // 【调试日志】记录原始请求信息，诊断 URL 编码问题
+        log.debug("DEBUG: requestUri={}, fileId={}", requestUri, fileId);
+        log.debug("DEBUG: requestUrl={}, queryString={}", requestUrl, queryString);
+        
+        // 【URL 解码】对 fileId 进行 URL 解码，处理中文文件名
+        // Spring MVC 的 getRequestURI() 返回的 URI 中的中文字符可能未被正确解码
+        String decodedFileId = UriUtils.decode(fileId, StandardCharsets.UTF_8);
+        log.debug("DEBUG: decodedFileId={}", decodedFileId);
+        
+        // 【安全检查】验证解码后的 fileId 是否包含路径穿越字符
+        if (!validateFileId(decodedFileId)) {
+            log.warn("路径穿越攻击检测：fileId={}", decodedFileId);
             return ResponseEntity.badRequest().build();
         }
         
-        log.info("下载文件：{}", fileId);
+        log.info("下载文件：{}", decodedFileId);
         
         // 2. 异步触发清理过期目录
         // 使用 Caffeine 缓存标识，避免重复清理
         downloadService.cleanupOldDirectoriesAsync();
         
-        // 3. 获取文件路径
-        Path filePath = downloadService.getFilePath(fileId);
+        // 3. 获取文件路径（使用解码后的 fileId）
+        Path filePath = downloadService.getFilePath(decodedFileId);
         if (filePath == null) {
-            log.warn("文件不存在或已过期：{}", fileId);
+            log.warn("文件不存在或已过期：{}", decodedFileId);
             return ResponseEntity.notFound().build();
         }
         
@@ -87,14 +100,14 @@ public class DownloadFileController {
             return ResponseEntity.notFound().build();
         }
         
-        // 5. 增加下载次数（简化版不实际存储）
-        downloadService.incrementDownloadCount(fileId);
+        // 5. 增加下载次数（使用解码后的 fileId）
+        downloadService.incrementDownloadCount(decodedFileId);
         
-        // 6. 推断 Content-Type
-        String contentType = inferContentType(fileId);
+        // 6. 推断 Content-Type（使用解码后的 fileId）
+        String contentType = inferContentType(decodedFileId);
         
-        // 7. 提取文件名
-        String filename = extractFilename(fileId);
+        // 7. 提取文件名（使用解码后的 fileId）
+        String filename = extractFilename(decodedFileId);
         
         // 8. 返回文件流
         return ResponseEntity.ok()
@@ -206,8 +219,9 @@ public class DownloadFileController {
      * 推断 Content-Type
      */
     private String inferContentType(String fileId) {
+        // 对于 .md 文件，使用 application/octet-stream 强制浏览器下载而非预览
         if (fileId.endsWith(".md")) {
-            return "text/markdown";
+            return "application/octet-stream";
         } else if (fileId.endsWith(".txt")) {
             return "text/plain";
         } else if (fileId.endsWith(".json")) {

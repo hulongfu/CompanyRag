@@ -1,6 +1,8 @@
 package com.company.rag.rag.tools;
 
 import com.company.rag.agent.tool.AgentTool;
+import com.company.rag.common.model.AuditLogContext;
+import com.company.rag.common.service.AuditLogService;
 import com.company.rag.common.tool.ToolCallRecorder;
 import com.company.rag.rag.model.KnowledgeBaseResult;
 import com.company.rag.rag.model.RagQuery;
@@ -10,6 +12,7 @@ import com.company.rag.tenant.context.TenantContext;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.LinkedHashMap;
@@ -30,8 +33,11 @@ public class KnowledgeBaseTool implements AgentTool {
     private final RagSearchService ragSearchService;
     private final ToolCallRecorder recorder;
     
+    @Autowired
+    private AuditLogService auditLogService;
+    
     public KnowledgeBaseTool(RagSearchService ragSearchService,
-                            ToolCallRecorder recorder) {
+                             ToolCallRecorder recorder) {
         this.ragSearchService = ragSearchService;
         this.recorder = recorder;
     }
@@ -82,8 +88,10 @@ public class KnowledgeBaseTool implements AgentTool {
             
             if (response.isSuccess()) {
                 recorder.recordEnd("searchKnowledgeBase", startTime, "success");
+                recordAudit(question, topK, true, null);
             } else {
                 recorder.recordEnd("searchKnowledgeBase", startTime, "failed");
+                recordAudit(question, topK, false, response.getError());
             }
             
             return response;
@@ -91,7 +99,30 @@ public class KnowledgeBaseTool implements AgentTool {
         } catch (Exception e) {
             log.error("知识库工具调用失败：question={}, err={}", question, e.getMessage());
             recorder.recordEnd("searchKnowledgeBase", startTime, "failed", e.getMessage());
+            recordAudit(question, topK, false, "工具调用失败：" + e.getMessage());
             return KnowledgeBaseResult.failed("工具调用失败：" + e.getMessage());
+        }
+    }
+    
+    /**
+     * 记录知识库检索审计：检索为公司知识敏感操作，检索成功后异步落审计（失败不抛出）。
+     * detail 记录检索的问题和返回结果数量。
+     */
+    private void recordAudit(String question, Integer topK, boolean success, String errorMsg) {
+        try {
+            String detail = success
+                    ? "执行知识库检索：问题=%s, topK=%s".formatted(question, topK)
+                    : "知识库检索失败：问题=%s, 原因：%s".formatted(question, errorMsg);
+            auditLogService.recordAsync(AuditLogContext.builder()
+                    .actionType("KNOWLEDGE_BASE_SEARCH")
+                    .targetType("tool")
+                    .targetId(getName())
+                    .detail(detail)
+                    .tenantId(TenantContext.getTenantId() != null ? String.valueOf(TenantContext.getTenantId()) : null)
+                    .userId(TenantContext.getUserId())
+                    .build());
+        } catch (Exception e) {
+            log.warn("知识库检索审计失败，不影响检索结果：{}", question, e);
         }
     }
     

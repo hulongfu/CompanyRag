@@ -1,8 +1,12 @@
 package com.company.rag.agent.tool;
 
+import com.company.rag.common.model.AuditLogContext;
+import com.company.rag.common.service.AuditLogService;
+import com.company.rag.tenant.context.TenantContext;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -28,6 +32,9 @@ public class CodeSearchTool implements AgentTool {
 
     /** 项目根目录，默认使用 user.dir（当前工作目录） */
     private final Path projectRoot;
+
+    @Autowired
+    private AuditLogService auditLogService;
 
     public CodeSearchTool(@Value("${app.code-search.src-base:#{null}}") String srcBase) {
         // 如果配置了 srcBase，优先使用；否则使用 user.dir
@@ -132,7 +139,34 @@ public class CodeSearchTool implements AgentTool {
         }
         
         String finalResult = result.length() > 0 ? result.toString() : "未找到匹配的代码";
-        log.info("代码搜索完成，找到{}个匹配", result.length() > 0 ? result.toString().split("\n").length : 0);
+        int matchCount = result.length() > 0 ? result.toString().split("\n").length : 0;
+        log.info("代码搜索完成，找到{}个匹配", matchCount);
+        
+        // 记录代码搜索审计：代码检索为敏感操作，搜索成功后异步落审计（失败不抛出）
+        recordCodeSearchAudit(keyword, fileExtension, matchCount, true, null);
+        
         return finalResult;
+    }
+    
+    /**
+     * 记录代码搜索审计：代码检索为公司代码敏感操作，搜索成功后异步落审计（失败不抛出）。
+     * detail 记录搜索的关键词、文件扩展名和匹配数量。
+     */
+    private void recordCodeSearchAudit(String keyword, String fileExtension, int matchCount, boolean success, String errorMsg) {
+        try {
+            String detail = success
+                    ? "执行代码检索：关键词=%s, 扩展名=%s, 匹配数=%d".formatted(keyword, fileExtension, matchCount)
+                    : "代码检索失败：关键词=%s, 原因：%s".formatted(keyword, errorMsg);
+            auditLogService.recordAsync(AuditLogContext.builder()
+                    .actionType("CODE_SEARCH")
+                    .targetType("tool")
+                    .targetId(getName())
+                    .detail(detail)
+                    .tenantId(TenantContext.getTenantId() != null ? String.valueOf(TenantContext.getTenantId()) : null)
+                    .userId(TenantContext.getUserId())
+                    .build());
+        } catch (Exception e) {
+            log.warn("代码搜索审计失败，不影响搜索结果：{}", keyword, e);
+        }
     }
 }

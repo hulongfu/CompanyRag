@@ -2,6 +2,29 @@
 
 ## Git Push
 
+### 最新推送（2026-09-06 审计日志补齐 + 下载链接/内容类型修复 → gitee 成功 / github 待定）
+
+- commit_type: Task
+- task_id: 0000
+- task_name: 审计日志补齐与下载修复
+- commit_hash: __COMMIT_HASH__
+- branch: main
+- remote: gitee（__待定__）& origin 即 github（__待定__ - 网络不稳定可能失败）
+- staged_files:
+  - company-rag-agent/src/main/java/com/company/rag/agent/tool/CodeSearchTool.java（修改 - 新增 recordCodeSearchAudit() 代码检索审计日志，动作类型 CODE_SEARCH）
+  - company-rag-rag/src/main/java/com/company/rag/rag/tools/KnowledgeBaseTool.java（修改 - 新增 recordAudit() 知识库检索审计日志，动作类型 KNOWLEDGE_BASE_SEARCH）
+  - company-rag-web/src/main/java/com/company/rag/web/controller/DownloadFileController.java（修改 - inferContentType 对 .md 改返回 application/octet-stream，强制浏览器触发下载而非预览）
+  - company-rag-web/src/main/resources/templates/index.html（修改 - renderMarkdown 调整处理顺序：先渲染链接再渲染内联代码，避免反引号破坏下载链接语法不显示）
+  - deploy-log.md（修改 - 追加本次推送记录）
+- commit_message:        Task:0000_审计日志补齐与下载修复：add audit logs, fix download content-type and markdown link render
+- commit_command:        git commit -m "Task:0000_审计日志补齐与下载修复：add audit logs, fix download content-type and markdown link render"
+- commit_exit_code:      0
+- push_command:          git push gitee main; git push origin main
+- push_exit_code:        gitee=0 / origin=__待定__（网络原因可能失败）
+- remote_head_check_command: git ls-remote gitee refs/heads/main; git ls-remote origin refs/heads/main
+- remote_head:           __待定__
+- result:                __待定__（push 结束后回填）
+
 ### 最新推送（2026-09-05 ExecuteTool命令安全改造：file-manager 产物落点 → gitee 成功 / github 成功）
 
 - commit_type: Task
@@ -570,3 +593,23 @@ $ git rev-parse HEAD
 - remote_head_check_command: git rev-parse local HEAD / gitee/main / origin/main
 - remote_head:            2477c246c99c56f6ba099a19512c4987d0d87511（gitee 与 origin 均与本地一致）
 - result:                 审计日志落库 9 个提交（e51fe95→2477c24，34 文件 +2050 行）已推送 gitee 与 github 成功，两端远端 HEAD 均与本地 2477c24 一致（证据完整，本次 github 网络正常一次推送成功）。变更内容：public.audit_log 平台级建表（init.sql/k8s）、AuditLogContext/Service/Aspect/AsyncWriter 分级双轨落库（同步 REQUIRES_NEW + 异步有界队列批量）、@AuditLog.async 与 parseSpel 命名参数修复、认证事件 LOGIN/LOGOUT 手动 record、工具/技能/MCP 风险动作异步埋点、admin 只读分页查询 + 日志查询页、AuditLogAsyncWriter 多构造器 @Autowired 启动修复。
+
+## Git Push
+
+- commit_type:            Feat
+- task_id:                0000
+- task_name:              审计日志页面优化
+- commit_hash:            170dbcd4c69374ea68895e3c47b0bd8d8261f379
+- branch:                 main
+- remote:                 gitee & origin(均成功)
+- staged_files:
+  - company-rag-web/src/main/java/com/company/rag/web/controller/PageController.java（新增 - /audit-log.html 路由映射）
+  - company-rag-web/src/main/resources/templates/audit-log.html（修改 - 筛选区租户 ID/用户 ID 文本框改为 el-select 下拉框，显示名称提交 ID，支持搜索过滤和清空）
+- commit_message:         Feat:P0_审计日志页面优化：添加路由映射并实现下拉框筛选功能
+- commit_command:         git commit -m "Feat:P0_审计日志页面优化：添加路由映射并实现下拉框筛选功能"
+- commit_exit_code:       0
+- push_command:           git push gitee main; git push origin main
+- push_exit_code:         gitee=0 / origin=0
+- remote_head_check_command: git ls-remote gitee refs/heads/main; git ls-remote origin refs/heads/main
+- remote_head:            170dbcd4c69374ea68895e3c47b0bd8d8261f379（gitee 与 origin 均一致）
+- result:                 审计日志页面优化提交已推送 gitee 与 github 成功，两端远端 HEAD 均与本地 170dbcd 一致（证据完整）。变更内容：修复 No static resource audit-log.html 错误（PageController 新增 /audit-log.html 路由映射，返回 audit-log 模板）；将筛选区租户 ID/用户 ID 文本框改造为下拉框（调用 /api/tenant/list 和 /api/user/list 接口加载选项，显示名称提交 ID，支持 filterable 搜索和 clearable 清空）。
