@@ -7,9 +7,9 @@
 - commit_type: Task
 - task_id: 0000
 - task_name: 审计日志补齐与下载修复
-- commit_hash: __COMMIT_HASH__
-- branch: main
-- remote: gitee（__待定__）& origin 即 github（__待定__ - 网络不稳定可能失败）
+- commit_hash:            8672bc9f6c34ea2309b73384d19a82feb06f515b
+- branch:                 main
+- remote:                 gitee（成功）& origin 即 github（成功）
 - staged_files:
   - company-rag-agent/src/main/java/com/company/rag/agent/tool/CodeSearchTool.java（修改 - 新增 recordCodeSearchAudit() 代码检索审计日志，动作类型 CODE_SEARCH）
   - company-rag-rag/src/main/java/com/company/rag/rag/tools/KnowledgeBaseTool.java（修改 - 新增 recordAudit() 知识库检索审计日志，动作类型 KNOWLEDGE_BASE_SEARCH）
@@ -17,13 +17,13 @@
   - company-rag-web/src/main/resources/templates/index.html（修改 - renderMarkdown 调整处理顺序：先渲染链接再渲染内联代码，避免反引号破坏下载链接语法不显示）
   - deploy-log.md（修改 - 追加本次推送记录）
 - commit_message:        Task:0000_审计日志补齐与下载修复：add audit logs, fix download content-type and markdown link render
-- commit_command:        git commit -m "Task:0000_审计日志补齐与下载修复：add audit logs, fix download content-type and markdown link render"
+- commit_command:        git commit -F .commit-msg.txt
 - commit_exit_code:      0
 - push_command:          git push gitee main; git push origin main
-- push_exit_code:        gitee=0 / origin=__待定__（网络原因可能失败）
-- remote_head_check_command: git ls-remote gitee refs/heads/main; git ls-remote origin refs/heads/main
-- remote_head:           __待定__
-- result:                __待定__（push 结束后回填）
+- push_exit_code:        gitee=0 / origin=0
+- remote_head_check_command: git rev-parse HEAD && git ls-remote gitee refs/heads/main && git ls-remote origin refs/heads/main
+- remote_head:           8672bc9f6c34ea2309b73384d19a82feb06f515b（本地 / gitee / origin 三处一致）
+- result:                代码提交 8672bc9 已推送 gitee 与 github 均成功，两端远端 HEAD 均与本地 8672bc9 一致（证据完整，本次 github 网络正常一次推送成功）。变更内容：为 KnowledgeBaseTool、CodeSearchTool 补齐审计日志埋点（KNOWLEDGE_BASE_SEARCH / CODE_SEARCH，异步 recordAsync 不阻塞工具执行）；修复下载文件在浏览器直接展示而非弹窗问题（.md 的 Content-Type 由 text/markdown 改为 application/octet-stream 强制触发下载）；修复 AI 回复中下载链接不显示问题（renderMarkdown 先处理链接再处理内联代码，避免反引号破坏链接语法）。company-rag-rag / company-rag-agent / company-rag-web 三模块编译通过。
 
 ### 最新推送（2026-09-05 ExecuteTool命令安全改造：file-manager 产物落点 → gitee 成功 / github 成功）
 
