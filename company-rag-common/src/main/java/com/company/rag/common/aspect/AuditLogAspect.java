@@ -9,6 +9,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
+import org.aspectj.lang.reflect.MethodSignature;
 import org.springframework.expression.Expression;
 import org.springframework.expression.ExpressionParser;
 import org.springframework.expression.spel.standard.SpelExpressionParser;
@@ -103,13 +104,19 @@ public class AuditLogAspect {
         }
 
         StandardEvaluationContext context = new StandardEvaluationContext();
-        String[] paramNames = point.getSignature().getName().split("\\(");
+        // 用 MethodSignature 获取真实参数名（项目开启 -parameters 编译以保留之）
+        String[] paramNames = null;
+        if (point.getSignature() instanceof MethodSignature signature) {
+            paramNames = signature.getParameterNames();
+        }
         Object[] args = point.getArgs();
 
         for (int i = 0; i < args.length; i++) {
+            // 始终绑定 arg{i}（位置参数），如 #arg0
             context.setVariable("arg" + i, args[i]);
-            if (paramNames.length > 0) {
-                context.setVariable(paramNames[0], args[i]);
+            // 存在真实参数名时绑定命名参数，如 #request、#id
+            if (paramNames != null && i < paramNames.length && paramNames[i] != null) {
+                context.setVariable(paramNames[i], args[i]);
             }
         }
 

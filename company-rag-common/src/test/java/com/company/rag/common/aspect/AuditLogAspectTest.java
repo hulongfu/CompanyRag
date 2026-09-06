@@ -59,6 +59,11 @@ class AuditLogAspectTest {
     public void noSpelMethod() {
     }
 
+    @AuditLog(actionType = "DELETE_DOCUMENT", targetType = "document",
+            targetId = "#docId", detail = "'删除文档：' + #docId")
+    public void namedParamMethod(Long docId) {
+    }
+
     @BeforeEach
     void setUp() throws Throwable {
         aspect = new AuditLogAspect(auditLogService);
@@ -78,6 +83,9 @@ class AuditLogAspectTest {
     private Method mount(Method method, Object... args) throws Throwable {
         MethodSignature signature = mock(MethodSignature.class);
         lenient().when(signature.getName()).thenReturn(method.getName());
+        lenient().when(signature.getParameterNames()).thenReturn(
+                java.util.Arrays.stream(method.getParameters())
+                        .map(java.lang.reflect.Parameter::getName).toArray(String[]::new));
         lenient().when(joinPoint.getSignature()).thenReturn(signature);
         lenient().when(joinPoint.getArgs()).thenReturn(args);
         return method;
@@ -173,5 +181,20 @@ class AuditLogAspectTest {
         Object result = aspect.around(joinPoint, annotation);
 
         assertEquals(null, result, "主方法结果应正常返回，无异常泄漏");
+    }
+
+    @Test
+    void resolvesNamedParameterSpel() throws Throwable {
+        // 用真实参数名（#docId）而非 #arg0，验证命名参数 SpEL 能解析
+        Method m = mount(AuditLogAspectTest.class.getMethod("namedParamMethod", Long.class), 42L);
+        AuditLog annotation = m.getAnnotation(AuditLog.class);
+
+        aspect.around(joinPoint, annotation);
+
+        ArgumentCaptor<AuditLogContext> captor = ArgumentCaptor.forClass(AuditLogContext.class);
+        verify(auditLogService).record(captor.capture());
+        AuditLogContext ctx = captor.getValue();
+        assertEquals("42", ctx.getTargetId());
+        assertEquals("删除文档：42", ctx.getDetail());
     }
 }
