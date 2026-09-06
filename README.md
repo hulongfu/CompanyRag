@@ -109,6 +109,15 @@
 - **筛选查询**：支持按角色/租户/状态/用户名模糊搜索
 - **实现路径**：Superpowers 工作流，REST API 见 `/api/user`
 
+### 🛡️ 审计日志（管理员专属）
+- **平台级落库**：`public.audit_log` 平台级表，独立于租户 Schema（`sys_tenant`/租户业务表豁免租户隔离），记录全租户风险动作
+- **分级双轨写入**：认证等关键事件同步落库（REQUIRES_NEW 独立事务）；工具/技能/MCP 等高频动作异步写入（有界队列批量落库），不阻塞主流程
+- **统一埋点**：AOP 切面自动采集（`@AuditLog` 注解）+ 手动 `AuditLogService.record()` 双通道
+- **覆盖动作**：登录 LOGIN / 登出 LOGOUT / 登录失败 LOGIN_FAILED、文档上传 UPLOAD_DOCUMENT、Agent 工具（EXECUTE_TOOL / DATABASE_QUERY / DOWNLOAD / CODE_SEARCH / MCP_TOOL）、知识库检索 KNOWLEDGE_BASE_SEARCH
+- **管理员只读查询**：平台管理员可分页查询全部租户的审计记录（`/api/admin/audit-logs`），支持动作类型/租户/用户/时间区间筛选
+- **审计页面**：访问 `http://localhost:8080/audit-log.html`（需 admin 权限），筛选区支持租户/用户下拉选择、动作类型与时间区间过滤
+- **实现路径**：Superpowers 工作流（设计文档 + 6 项实现计划），REST API 见 `/api/admin/audit-logs`
+
 ## 技术栈
 
 | 组件 | 技术选型 |
@@ -823,6 +832,48 @@ X-Tenant-Id: 1
 **权限控制：**
 - 所有用户管理 API 需要 `admin` 角色权限（后端 `@PreAuthorize("hasRole('ADMIN')")`）
 - 前端仅管理员可见"👤 用户"导航按钮
+
+### 审计日志（仅管理员）
+```bash
+# 分页查询审计日志（支持筛选）
+GET /api/admin/audit-logs?page=1&size=20&action=LOGIN&tenantId=1&userId=1&startTime=2026-09-01 00:00:00&endTime=2026-09-06 23:59:59
+Authorization: Bearer <token>   # 需 admin 权限
+```
+
+**请求参数：**
+- `page` / `size`：分页（默认 1 / 20）
+- `action`：动作类型（`LOGIN`/`LOGOUT`/`LOGIN_FAILED`/`UPLOAD_DOCUMENT`/`EXECUTE_TOOL`/`DATABASE_QUERY`/`DOWNLOAD`/`CODE_SEARCH`/`KNOWLEDGE_BASE_SEARCH`/`MCP_TOOL`）
+- `tenantId`：租户 ID（可选）
+- `userId`：用户 ID（可选）
+- `startTime` / `endTime`：时间区间（可选，格式 `yyyy-MM-dd HH:mm:ss`）
+
+**响应（`R<PageResult>`）：**
+```json
+{
+  "code": 200,
+  "msg": "success",
+  "data": {
+    "records": [
+      {
+        "id": 1,
+        "tenantId": "1",
+        "userId": 1,
+        "actionType": "LOGIN",
+        "targetType": "AUTH",
+        "targetId": null,
+        "detail": "用户登录成功",
+        "ipAddress": "127.0.0.1",
+        "createdAt": "2026-09-06 09:30:00"
+      }
+    ],
+    "total": 1024,
+    "page": 1,
+    "size": 20
+  }
+}
+```
+
+> **审计页面**：浏览器访问 `http://localhost:8080/audit-log.html`（需 admin 权限）即可在可视化界面查询。
 
 ## Agent 工具详解
 
