@@ -27,6 +27,8 @@ public class DocumentController {
      */
     @PostMapping("/upload")
     @PreAuthorize("hasAnyRole('ADMIN', 'USER')")
+    @AuditLog(actionType = "UPLOAD_DOCUMENT", targetType = "document",
+              detail = "'上传文档：' + arg0.getOriginalFilename()", async = true)
     public R<Document> upload(@RequestParam("file") MultipartFile file) {
         // 从租户上下文获取租户 ID（由 TenantInterceptor 设置）
         Long tenantId = TenantContext.getTenantId();

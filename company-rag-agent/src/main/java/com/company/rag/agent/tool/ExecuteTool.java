@@ -1,8 +1,12 @@
 package com.company.rag.agent.tool;
 
+import com.company.rag.common.model.AuditLogContext;
+import com.company.rag.common.service.AuditLogService;
+import com.company.rag.tenant.context.TenantContext;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -58,6 +62,9 @@ public class ExecuteTool implements AgentTool {
     // 登记的受信任目录白名单（逗号分隔）；仅放行只读诊断访问，不放行 python 脚本执行
     @Value("${app.trusted-dirs:}")
     private String trustedDirs;
+
+    @Autowired
+    private AuditLogService auditLogService;
 
     @Override
     public String getName() {
@@ -134,6 +141,7 @@ public class ExecuteTool implements AgentTool {
         String rejectedReason = rejectUnsafePath(command);
         if (rejectedReason != null) {
             log.warn("命令被拒绝：{}，原因：{}", command, rejectedReason);
+            recordExecuteAudit(command, "拒绝：" + rejectedReason);
             return "错误：" + rejectedReason;
         }
 
@@ -142,18 +150,47 @@ public class ExecuteTool implements AgentTool {
         String[] tokens = parseCommand(normalizedCommand);
         CmdKind kind = classify(tokens[0]);
 
+        String result;
         switch (kind) {
             case PYTHON:
-                return runPython(command, tokens);
+                result = runPython(command, tokens);
+                break;
             case LIST:
             case READ:
-                return runDiagnostic(command, kind, tokens);
+                result = runDiagnostic(command, kind, tokens);
+                break;
             case PWD:
-                return runPwd(command);
+                result = runPwd(command);
+                break;
             case ECHO:
-                return runEcho(tokens);
+                result = runEcho(tokens);
+                break;
             default:
-                return "错误：命令不在白名单";
+                result = "错误：命令不在白名单";
+        }
+        recordExecuteAudit(command, null);
+        return result;
+    }
+
+    /**
+     * 记录命令执行审计：命令为敏感操作，无论放行或拒绝均异步落审计（失败不抛出）。
+     * detail 用于记录原始命令；拒绝场景补充拒绝原因。
+     */
+    private void recordExecuteAudit(String command, String rejectDetail) {
+        try {
+            String detail = rejectDetail != null
+                    ? "拒绝执行命令：%s，原因：%s".formatted(command, rejectDetail)
+                    : "执行命令：" + command;
+            auditLogService.recordAsync(AuditLogContext.builder()
+                    .actionType("EXECUTE_TOOL")
+                    .targetType("tool")
+                    .targetId(getName())
+                    .detail(detail)
+                    .tenantId(TenantContext.getTenantId() != null ? String.valueOf(TenantContext.getTenantId()) : null)
+                    .userId(TenantContext.getUserId())
+                    .build());
+        } catch (Exception e) {
+            log.warn("命令审计记录失败，不影响命令执行：{}", command, e);
         }
     }
 

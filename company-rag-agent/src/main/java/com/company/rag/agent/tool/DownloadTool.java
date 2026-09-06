@@ -1,9 +1,12 @@
 package com.company.rag.agent.tool;
 
 import com.company.rag.agent.service.DownloadService;
+import com.company.rag.common.model.AuditLogContext;
+import com.company.rag.common.service.AuditLogService;
 import com.company.rag.tenant.context.TenantContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.HashMap;
@@ -32,6 +35,9 @@ import java.util.Map;
 public class DownloadTool implements AgentTool {
     
     private final DownloadService downloadService;
+
+    @Autowired
+    private AuditLogService auditLogService;
     
     @Override
     public String getName() {
@@ -113,7 +119,10 @@ public class DownloadTool implements AgentTool {
             String downloadUrl = "/api/download/" + fileId;
             String markdownLink = String.format("[📥 点击下载 `%s`](%s)", 
                 filename != null ? filename : "下载文件", downloadUrl);
-            
+
+            // 3.5 记录下载动作审计：文件已成功生成，异步落审计（失败不抛出）
+            recordDownloadAudit(fileId, filename);
+
             // 4. 返回下载信息 (自然语言格式，方便 Agent 理解)
             return String.format("""
                 ✅ 文件已生成成功！
@@ -138,6 +147,25 @@ public class DownloadTool implements AgentTool {
         } catch (Exception e) {
             log.error("文件生成异常", e);
             return "❌ 文件生成失败：" + e.getMessage();
+        }
+    }
+
+    /**
+     * 记录下载动作审计：文件生成成功后异步落审计（失败不抛出）。
+     * detail 记录文件名与生成的文件 ID。
+     */
+    private void recordDownloadAudit(String fileId, String filename) {
+        try {
+            auditLogService.recordAsync(AuditLogContext.builder()
+                    .actionType("DOWNLOAD")
+                    .targetType("tool")
+                    .targetId(getName())
+                    .detail("生成下载文件：" + (filename != null ? filename : "自动生成") + "，fileId=" + fileId)
+                    .tenantId(TenantContext.getTenantId() != null ? String.valueOf(TenantContext.getTenantId()) : null)
+                    .userId(TenantContext.getUserId())
+                    .build());
+        } catch (Exception e) {
+            log.warn("下载动作审计失败，不影响文件生成：fileId={}", fileId, e);
         }
     }
 }

@@ -2,10 +2,13 @@ package com.company.rag.agent.tool;
 
 import com.company.rag.agent.security.SqlSecurityValidator;
 import com.company.rag.common.exception.BizException;
+import com.company.rag.common.model.AuditLogContext;
+import com.company.rag.common.service.AuditLogService;
 import com.company.rag.tenant.context.TenantContext;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
@@ -34,6 +37,9 @@ public class DatabaseQueryTool implements AgentTool {
 
     private final JdbcTemplate jdbcTemplate;
     private static final int MAX_ROWS = 100;
+
+    @Autowired
+    private AuditLogService auditLogService;
     
     /** 
      * 匹配表名的正则：FROM 或 JOIN 后面的表名（可带 schema 前缀）
@@ -167,10 +173,30 @@ public class DatabaseQueryTool implements AgentTool {
 
         try {
             List<Map<String, Object>> result = jdbcTemplate.queryForList(qualifiedSql);
+            recordDatabaseAudit(qualifiedSql);
             return formatResult(result);
         } catch (Exception e) {
             log.error("数据库查询失败：{}", e.getMessage());
             return "查询失败：" + e.getMessage();
+        }
+    }
+
+    /**
+     * 记录数据库查询审计：查询为公司数据敏感操作，查询成功后异步落审计（失败不抛出）。
+     * detail 记录实际执行的（已加租户前缀的）SQL。
+     */
+    private void recordDatabaseAudit(String sql) {
+        try {
+            auditLogService.recordAsync(AuditLogContext.builder()
+                    .actionType("DATABASE_QUERY")
+                    .targetType("tool")
+                    .targetId(getName())
+                    .detail("执行数据库查询：" + sql)
+                    .tenantId(TenantContext.getTenantId() != null ? String.valueOf(TenantContext.getTenantId()) : null)
+                    .userId(TenantContext.getUserId())
+                    .build());
+        } catch (Exception e) {
+            log.warn("数据库查询审计失败，不影响查询结果：{}", sql, e);
         }
     }
 

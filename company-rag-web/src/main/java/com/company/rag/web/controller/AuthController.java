@@ -18,6 +18,8 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
 import org.springframework.security.web.context.SecurityContextRepository;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -81,6 +83,7 @@ public class AuthController {
                     .detail("用户登录成功：" + securityUser.getUsername())
                     .userId(userId)
                     .tenantId(securityUser.getTenantId() != null ? String.valueOf(securityUser.getTenantId()) : null)
+                    .ipAddress(resolveIp())
                     .build());
 
             log.info("用户登录成功：{}, userId={}, tenantIds={}, currentTenantId={}, role={}", 
@@ -102,6 +105,18 @@ public class AuthController {
 
         } catch (Exception e) {
             log.warn("用户登录失败：{}, 原因：{}", request.getUsername(), e.getMessage(), e);
+            // 登录失败作为安全风险动作同步留痕（归属未知，仅记录用户名与客户端 IP）
+            try {
+                auditLogService.record(AuditLogContext.builder()
+                        .actionType("LOGIN_FAILED")
+                        .targetType("USER")
+                        .targetId(request.getUsername())
+                        .detail("用户登录失败：" + request.getUsername())
+                        .ipAddress(resolveIp())
+                        .build());
+            } catch (Exception ex) {
+                log.warn("登录失败审计记录失败，不影响登录响应：{}", ex.getMessage());
+            }
             return R.fail(401, "用户名或密码错误");
         }
     }
@@ -193,6 +208,7 @@ public class AuthController {
                         .detail("用户登出：" + securityUser.getUsername())
                         .userId(userId)
                         .tenantId(securityUser.getTenantId() != null ? String.valueOf(securityUser.getTenantId()) : null)
+                        .ipAddress(resolveIp())
                         .build());
 
                 log.info("用户登出：{}, userId={}", securityUser.getUsername(), userId);
@@ -221,5 +237,26 @@ public class AuthController {
     public static class RefreshTokenRequest {
         private String refreshToken;
 
+    }
+
+    /**
+     * 从请求上下文解析真实客户端 IP：X-Forwarded-For（取首个）→ X-Real-IP → remoteAddr；无请求返回 null。
+     */
+    private String resolveIp() {
+        ServletRequestAttributes attrs =
+                (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
+        if (attrs == null) {
+            return null;
+        }
+        HttpServletRequest request = attrs.getRequest();
+        String forwarded = request.getHeader("X-Forwarded-For");
+        if (forwarded != null && !forwarded.isBlank()) {
+            return forwarded.split(",")[0].trim();
+        }
+        String realIp = request.getHeader("X-Real-IP");
+        if (realIp != null && !realIp.isBlank()) {
+            return realIp.trim();
+        }
+        return request.getRemoteAddr();
     }
 }

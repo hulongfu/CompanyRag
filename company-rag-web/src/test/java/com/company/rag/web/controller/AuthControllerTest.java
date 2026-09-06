@@ -101,4 +101,25 @@ class AuthControllerTest {
         assertEquals(9L, ctx.getUserId());
         assertEquals("5", ctx.getTenantId());
     }
+
+    @Test
+    void loginFailureRecordsLoginFailedAudit() {
+        // 认证失败：authenticate 抛异常 → 401 + LOGIN_FAILED 审计（无归属，仅用户名与 IP）
+        when(authenticationManager.authenticate(any(UsernamePasswordAuthenticationToken.class)))
+                .thenThrow(new RuntimeException("bad credentials"));
+
+        AuthRequest request = new AuthRequest();
+        request.setUsername("mallory");
+        request.setPassword("wrong");
+        R<AuthResponse> result = controller.login(request);
+
+        assertEquals(401, result.getCode());
+
+        ArgumentCaptor<AuditLogContext> captor = ArgumentCaptor.forClass(AuditLogContext.class);
+        verify(auditLogService).record(captor.capture());
+        AuditLogContext ctx = captor.getValue();
+        assertEquals("LOGIN_FAILED", ctx.getActionType());
+        assertEquals("mallory", ctx.getTargetId());
+        assertTrue(ctx.getDetail().contains("mallory"));
+    }
 }
