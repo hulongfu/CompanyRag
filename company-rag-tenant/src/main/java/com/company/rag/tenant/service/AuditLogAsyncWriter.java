@@ -5,6 +5,7 @@ import com.company.rag.tenant.mapper.AuditLogMapper;
 import com.company.rag.tenant.model.AuditLog;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
@@ -40,7 +41,10 @@ public class AuditLogAsyncWriter {
 
     /**
      * Spring 构造：自建队列与后台调度线程，启动周期 flush。
+     * 类存在 2 个构造器，须显式 {@code @Autowired} 指明 Spring 注入用哪个构造器，
+     * 否则多构造器且无标注时 Spring 裸走无参构造 → 抛 NoSuchMethodException。
      */
+    @Autowired
     public AuditLogAsyncWriter(AuditLogMapper auditLogMapper) {
         this(auditLogMapper, new ArrayBlockingQueue<>(QUEUE_CAPACITY));
         // 仅生产路径启动后台周期 flush；测试构造函数不调度，由测试手动触发
