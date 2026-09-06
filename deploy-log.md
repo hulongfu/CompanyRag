@@ -533,3 +533,40 @@ $ git rev-parse HEAD
 - remote_head_check_command: git ls-remote gitee refs/heads/main; git ls-remote origin refs/heads/main
 - remote_head:            ca9df210b13fb374ca9ebab8a2cdbfcf569af643（gitee 与 origin 均一致）
 - result:                 设计文档 + 实现计划 tasks（6 个已提交 commit 05037cf→ca9df21）已推送 gitee 与 github，两端远端 HEAD 均与本地 ca9df21 一致（证据完整）。变更内容：审计日志入库设计文档 + 6 项实现计划任务（含方案1：init.sql/k8s 建 public.audit_log 平台级表、三硬伤修复、AOP/认证/工具埋点、admin 查询）。实现计划待用户后续审核通过后再改码。
+
+## Git Push
+
+- commit_type:            Feat
+- task_id:                0000
+- task_name:              审计日志落库（分级双轨 + admin 只读查询）
+- commit_hash:            2477c246c99c56f6ba099a19512c4987d0d87511
+- branch:                 main
+- remote:                 gitee & origin(均成功)
+- staged_files:
+  - company-rag-common/.../annotation/AuditLog.java（+async 属性）
+  - company-rag-common/.../aspect/AuditLogAspect.java（AOP 归属采集/分发 + parseSpel 命名参数修复）
+  - company-rag-common/.../model/AuditLogContext.java（新增）
+  - company-rag-common/.../service/AuditLogService.java（+record/recordAsync）
+  - company-rag-tenant/.../model/AuditLog.java（@TableName public.audit_log 标准 schema 写法）
+  - company-rag-tenant/.../config/TenantMyBatisPlusConfig.java（ignoreTable 加 audit_log 豁免）
+  - company-rag-tenant/.../service/AuditLogServiceImpl.java（同步 REQUIRES_NEW + 异步入队）
+  - company-rag-tenant/.../service/AuditLogAsyncWriter.java（新增，有界队列批量落库 + @Autowired 修复）
+  - company-rag-tenant/.../service/AuditLogQueryService.java（新增 admin 分页查询）
+  - company-rag-web/.../controller/AuthController.java（LOGIN/LOGOUT/LOGIN_FAILED 手动 record）
+  - company-rag-web/.../controller/DocumentController.java（upload UPLOAD_DOCUMENT）
+  - company-rag-web/.../controller/AuditLogController.java（新增 GET /api/admin/audit-logs）
+  - company-rag-agent/.../tool/ExecuteTool.java（EXECUTE_TOOL）
+  - company-rag-agent/.../tool/DatabaseQueryTool.java（DATABASE_QUERY）
+  - company-rag-agent/.../tool/DownloadTool.java（DOWNLOAD）
+  - company-rag-agent/.../tool/AgentToolRegistry.java（MCP_TOOL 尝试即记录）
+  - sql/init.sql + k8s/initdb-configmap.yaml（public.audit_log 建表 + 两索引）
+  - company-rag-web/.../templates/index.html + audit-log.html（日志查询页）
+  - 及对应单测：AuditLogAspectTest/AuditLogServiceImplTest/AuditLogAsyncWriterTest/AuditLogQueryServiceTest/AuditLogControllerTest/AuthControllerTest/ToolAuditTest/TenantServiceImplAuditTest/AuditLogIgnoreTableTest 等
+- commit_message:         e51fe95…2477c24 共 9 个审计实现提交（Feat + BugFix + refactor）
+- commit_command:         已提交 commit（e51fe95→2477c24 共 9 个），本次仅推送，无新提交
+- commit_exit_code:       N/A（无新增提交）
+- push_command:           git push gitee main; git push origin main
+- push_exit_code:         gitee=0 / origin=0
+- remote_head_check_command: git rev-parse local HEAD / gitee/main / origin/main
+- remote_head:            2477c246c99c56f6ba099a19512c4987d0d87511（gitee 与 origin 均与本地一致）
+- result:                 审计日志落库 9 个提交（e51fe95→2477c24，34 文件 +2050 行）已推送 gitee 与 github 成功，两端远端 HEAD 均与本地 2477c24 一致（证据完整，本次 github 网络正常一次推送成功）。变更内容：public.audit_log 平台级建表（init.sql/k8s）、AuditLogContext/Service/Aspect/AsyncWriter 分级双轨落库（同步 REQUIRES_NEW + 异步有界队列批量）、@AuditLog.async 与 parseSpel 命名参数修复、认证事件 LOGIN/LOGOUT 手动 record、工具/技能/MCP 风险动作异步埋点、admin 只读分页查询 + 日志查询页、AuditLogAsyncWriter 多构造器 @Autowired 启动修复。
