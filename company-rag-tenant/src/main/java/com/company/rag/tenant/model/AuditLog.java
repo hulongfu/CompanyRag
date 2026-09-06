@@ -10,7 +10,7 @@ import java.time.LocalDateTime;
  * 审计日志实体
  */
 @Data
-@TableName("audit_log")
+@TableName("public.audit_log")
 public class AuditLog {
 
     @TableId(type = IdType.AUTO)

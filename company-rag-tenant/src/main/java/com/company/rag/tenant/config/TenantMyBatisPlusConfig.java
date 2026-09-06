@@ -43,9 +43,11 @@ public class TenantMyBatisPlusConfig {
                 // sys_tenant 表忽略租户隔离
                 // sys_user 表忽略租户隔离（用户登录时需要跨租户查询）
                 // sys_user_tenant_rel 表忽略租户隔离（用户 - 租户关联表，登录时需要查询）
+                // audit_log 表忽略租户隔离（平台级审计表，存放所有租户的审计记录）
                 return "sys_tenant".equalsIgnoreCase(tableName) 
                     || "sys_user".equalsIgnoreCase(tableName)
-                    || "sys_user_tenant_rel".equalsIgnoreCase(tableName);
+                    || "sys_user_tenant_rel".equalsIgnoreCase(tableName)
+                    || "audit_log".equalsIgnoreCase(tableName);
             }
         }));
 
