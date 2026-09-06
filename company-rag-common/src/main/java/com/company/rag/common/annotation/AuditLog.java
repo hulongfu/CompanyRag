@@ -30,4 +30,9 @@ public @interface AuditLog {
      * 操作详情的 SpEL 表达式
      */
     String detail() default "";
+
+    /**
+     * 是否异步记录（数据类高吞吐为 true；管理类默认 false 同步）
+     */
+    boolean async() default false;
 }
