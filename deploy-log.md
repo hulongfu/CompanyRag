@@ -2,6 +2,25 @@
 
 ## Git Push
 
+### 最新推送（2026-09-06 README 审计日志文档补充 → gitee 成功 / github 成功）
+
+- commit_type:            Task
+- task_id:                0000
+- task_name:              README审计日志文档补充
+- commit_hash:            8f2fc946b017abd0be7f4100497d12fd13f594d3
+- branch:                 main
+- remote:                 gitee（成功）& origin 即 github（成功，本次网络推通；ls-remote 回读网络抖动）
+- staged_files:
+  - README.md（修改 - 补充审计日志功能说明：核心特性下新增「审计日志（管理员专属）」小节；API 文档新增「审计日志（仅管理员）」接口说明与响应示例。字段经 AuditLog 实体核对）
+- commit_message:         Task:0000_README审计日志文档补充：add audit log feature and API docs to README
+- commit_command:         git commit -F .commit-msg.txt
+- commit_exit_code:       0
+- push_command:           git push gitee main; git push origin main
+- push_exit_code:         gitee=0 / origin=0（push 成功，8564a78..8f2fc94）
+- remote_head_check_command: git rev-parse HEAD && git ls-remote gitee refs/heads/main && git ls-remote origin refs/heads/main
+- remote_head:            gitee=8f2fc946b017abd0be7f4100497d12fd13f594d3（与本地一致，有 ls-remote 佐证）；github origin push exit=0（8564a78..8f2fc94）但 ls-remote 回读时网络抖动（curl 28 / 443 无法连接），未能二次确认，以 push exit=0 为准
+- result:                 README 文档提交 8f2fc94 已推送。gitee/main = 8f2fc94 与本地一致（证据完整）；github/main 推送成功（push exit=0，8564a78..8f2fc94），随后 ls-remote 回读因 github 网络抖动未能二次确认，以 push exit=0 为准。变更内容：根目录 README.md 此前未包含审计日志；本次在「核心特性」新增「审计日志（管理员专属）」小节（平台级 public.audit_log 落库、分级双轨写入、AOP+手动双通道埋点、覆盖动作清单、admin 只读查询、audit-log.html 页面），并在「API 文档」新增 /api/admin/audit-logs 接口说明与响应示例（响应字段已对照 company-rag-tenant AuditLog 实体核对，避免含不存在的 userAgent/success 字段）。
+
 ### 最新推送（2026-09-06 审计日志补齐 + 下载链接/内容类型修复 → gitee 成功 / github 待定）
 
 - commit_type: Task
