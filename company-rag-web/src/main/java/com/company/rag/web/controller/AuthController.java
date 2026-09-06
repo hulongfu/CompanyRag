@@ -1,9 +1,11 @@
 package com.company.rag.web.controller;
 
+import com.company.rag.common.model.AuditLogContext;
 import com.company.rag.common.model.R;
 import com.company.rag.common.security.JwtProperties;
 import com.company.rag.common.security.JwtTokenProvider;
 import com.company.rag.common.security.SecurityUser;
+import com.company.rag.common.service.AuditLogService;
 import com.company.rag.tenant.service.TenantService;
 import com.company.rag.web.model.AuthRequest;
 import com.company.rag.web.model.AuthResponse;
@@ -38,6 +40,7 @@ public class AuthController {
     private final JwtTokenProvider jwtTokenProvider;
     private final JwtProperties jwtProperties;
     private final TenantService tenantService;
+    private final AuditLogService auditLogService;
     private final SecurityContextRepository securityContextRepository = new HttpSessionSecurityContextRepository();
 
     /**
@@ -70,9 +73,15 @@ public class AuthController {
             String accessToken = jwtTokenProvider.generateAccessToken(userId, securityUser.getUsername(), tenantIds, role);
             String refreshToken = jwtTokenProvider.generateRefreshToken(userId);
 
-            // 4. 记录审计日志
-            tenantService.recordAuditLog("LOGIN", "USER", String.valueOf(userId), 
-                    "用户登录成功：" + request.getUsername());
+            // 4. 记录审计日志（同步，登录成功即留痕；归属从 SecurityUser 取，不依赖切面）
+            auditLogService.record(AuditLogContext.builder()
+                    .actionType("LOGIN")
+                    .targetType("USER")
+                    .targetId(String.valueOf(userId))
+                    .detail("用户登录成功：" + securityUser.getUsername())
+                    .userId(userId)
+                    .tenantId(securityUser.getTenantId() != null ? String.valueOf(securityUser.getTenantId()) : null)
+                    .build());
 
             log.info("用户登录成功：{}, userId={}, tenantIds={}, currentTenantId={}, role={}", 
                     request.getUsername(), userId, tenantIds, currentTenantId, role);
@@ -176,9 +185,15 @@ public class AuthController {
                 SecurityUser securityUser = (SecurityUser) authentication.getPrincipal();
                 Long userId = securityUser.getUserId();
 
-                // 2. 记录审计日志
-                tenantService.recordAuditLog("LOGOUT", "USER", String.valueOf(userId),
-                        "用户登出：" + securityUser.getUsername());
+                // 2. 记录审计日志（同步；归属从当前认证主体取）
+                auditLogService.record(AuditLogContext.builder()
+                        .actionType("LOGOUT")
+                        .targetType("USER")
+                        .targetId(String.valueOf(userId))
+                        .detail("用户登出：" + securityUser.getUsername())
+                        .userId(userId)
+                        .tenantId(securityUser.getTenantId() != null ? String.valueOf(securityUser.getTenantId()) : null)
+                        .build());
 
                 log.info("用户登出：{}, userId={}", securityUser.getUsername(), userId);
             }

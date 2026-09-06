@@ -3,6 +3,7 @@ package com.company.rag.tenant.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.company.rag.common.exception.BizException;
 import com.company.rag.common.security.SecurityUser;
+import com.company.rag.common.service.AuditLogService;
 import com.company.rag.tenant.mapper.TenantMapper;
 import com.company.rag.tenant.mapper.UserMapper;
 import com.company.rag.tenant.mapper.UserTenantRelMapper;
@@ -29,6 +30,7 @@ public class TenantServiceImpl implements TenantService {
     private final UserMapper userMapper;
     private final UserTenantRelMapper userTenantRelMapper;
     private final JdbcTemplate jdbcTemplate;
+    private final AuditLogService auditLogService;
 
     @Override
     public Tenant getByCode(String tenantCode) {
@@ -405,7 +407,7 @@ public class TenantServiceImpl implements TenantService {
 
     @Override
     public void recordAuditLog(String actionType, String targetType, String targetId, String detail) {
-        // TODO: 审计日志表创建后再实现，先留空
-        log.info("审计日志：action={}, target={}, id={}, detail={}", actionType, targetType, targetId, detail);
+        // 委托 AuditLogServiceImpl 落库（4 参兼容入口，无归属信息走同步）
+        auditLogService.recordAuditLog(actionType, targetType, targetId, detail);
     }
 }
