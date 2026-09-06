@@ -28,4 +28,9 @@ public class PageController {
     public String admin() {
         return "admin";
     }
+
+    @GetMapping("/audit-log.html")
+    public String auditLog() {
+        return "audit-log";
+    }
 }

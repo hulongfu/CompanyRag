@@ -39,11 +39,15 @@
             <div class="card">
                 <h3>🔍 筛选条件 <span class="readonly-tip">审计记录只读不可修改</span></h3>
                 <el-form :inline="true" :model="filters">
-                    <el-form-item label="租户ID">
-                        <el-input v-model="filters.tenantId" placeholder="租户ID" clearable size="small" style="width:140px;" />
+                    <el-form-item label="租户">
+                        <el-select v-model="filters.tenantId" placeholder="全部租户" clearable filterable size="small" style="width:180px;" @focus="loadTenants">
+                            <el-option v-for="t in tenantOptions" :key="t.id" :label="t.name" :value="t.id" />
+                        </el-select>
                     </el-form-item>
-                    <el-form-item label="用户ID">
-                        <el-input v-model="filters.userId" placeholder="用户ID" clearable size="small" style="width:140px;" />
+                    <el-form-item label="用户">
+                        <el-select v-model="filters.userId" placeholder="全部用户" clearable filterable size="small" style="width:180px;" @focus="loadUsers">
+                            <el-option v-for="u in userOptions" :key="u.id" :label="u.name" :value="u.id" />
+                        </el-select>
                     </el-form-item>
                     <el-form-item label="动作类型">
                         <el-select v-model="filters.actionType" placeholder="全部" clearable size="small" style="width:180px;">
@@ -78,7 +82,7 @@
                                 <th style="width:80px;">用户</th>
                                 <th style="width:120px;">动作类型</th>
                                 <th style="width:90px;">目标类型</th>
-                                <th style="width:90px;">目标ID</th>
+                                <th style="width:90px;">目标 ID</th>
                                 <th>详情</th>
                                 <th style="width:165px;">IP</th>
                                 <th style="width:175px;">时间</th>
@@ -128,12 +132,12 @@
         <p style="margin-bottom:8px;color:#909399;font-size:12px;">审计记录不可修改</p>
         <el-descriptions :column="1" border>
             <el-descriptions-item label="ID">{{ current.id }}</el-descriptions-item>
-            <el-descriptions-item label="租户ID">{{ current.tenantId }}</el-descriptions-item>
-            <el-descriptions-item label="用户ID">{{ current.userId }}</el-descriptions-item>
+            <el-descriptions-item label="租户 ID">{{ current.tenantId }}</el-descriptions-item>
+            <el-descriptions-item label="用户 ID">{{ current.userId }}</el-descriptions-item>
             <el-descriptions-item label="动作类型">{{ current.actionType }}</el-descriptions-item>
             <el-descriptions-item label="目标类型">{{ current.targetType }}</el-descriptions-item>
-            <el-descriptions-item label="目标ID">{{ current.targetId }}</el-descriptions-item>
-            <el-descriptions-item label="来源IP">{{ current.ipAddress }}</el-descriptions-item>
+            <el-descriptions-item label="目标 ID">{{ current.targetId }}</el-descriptions-item>
+            <el-descriptions-item label="来源 IP">{{ current.ipAddress }}</el-descriptions-item>
             <el-descriptions-item label="时间">{{ current.createdAt }}</el-descriptions-item>
             <el-descriptions-item label="详情">
                 <pre style="white-space:pre-wrap;word-break:break-word;font-family:inherit;">{{ current.detail }}</pre>
@@ -157,7 +161,8 @@ const { createApp, ref, onMounted } = Vue;
 createApp({
     setup() {
         const role = ref(localStorage.getItem('role') || '');
-        const filters = ref({ tenantId: '', userId: '', actionType: '', startTime: '', endTime: '' });
+        // filters 中的 tenantId 和 userId 存储的是 ID 值（数字），但下拉框显示的是名称
+        const filters = ref({ tenantId: null, userId: null, actionType: '', startTime: '', endTime: '' });
         const actionTypes = ['LOGIN', 'LOGOUT', 'LOGIN_FAILED', 'CREATE', 'UPDATE', 'DELETE', 'UPLOAD', 'TOOL_CALL', 'MCP'];
         const rows = ref([]);
         const total = ref(0);
@@ -166,6 +171,12 @@ createApp({
         const loading = ref(false);
         const drawerVisible = ref(false);
         const current = ref({});
+        
+        // 租户和用户下拉选项
+        const tenantOptions = ref([]);
+        const userOptions = ref([]);
+        const tenantsLoaded = ref(false);
+        const usersLoaded = ref(false);
 
         function getToken() {
             return localStorage.getItem('token') || '';
@@ -194,10 +205,45 @@ createApp({
             return json;
         }
 
+        // 加载租户列表（只加载一次）
+        async function loadTenants() {
+            if (tenantsLoaded.value) return;
+            try {
+                const json = await apiRequest('/api/tenant/list');
+                if (json && json.code === 200 && json.data) {
+                    tenantOptions.value = json.data.map(t => ({
+                        id: t.id,
+                        name: t.tenantName
+                    }));
+                    tenantsLoaded.value = true;
+                }
+            } catch (e) {
+                console.error('加载租户列表失败', e);
+            }
+        }
+
+        // 加载用户列表（只加载一次）
+        async function loadUsers() {
+            if (usersLoaded.value) return;
+            try {
+                const json = await apiRequest('/api/user/list');
+                if (json && json.code === 200 && json.data) {
+                    userOptions.value = json.data.map(u => ({
+                        id: u.id,
+                        name: u.displayName || u.username
+                    }));
+                    usersLoaded.value = true;
+                }
+            } catch (e) {
+                console.error('加载用户列表失败', e);
+            }
+        }
+
         function buildQuery() {
             const params = new URLSearchParams();
             params.append('page', page.value);
             params.append('pageSize', pageSize.value);
+            // filters.tenantId 和 filters.userId 存储的是 ID 值，直接传递给后端
             if (filters.value.tenantId) params.append('tenantId', filters.value.tenantId);
             if (filters.value.userId) params.append('userId', filters.value.userId);
             if (filters.value.actionType) params.append('actionType', filters.value.actionType);
@@ -227,7 +273,7 @@ createApp({
 
         function search() { page.value = 1; loadLogs(); }
         function resetFilters() {
-            filters.value = { tenantId: '', userId: '', actionType: '', startTime: '', endTime: '' };
+            filters.value = { tenantId: null, userId: null, actionType: '', startTime: '', endTime: '' };
             search();
         }
         function changePage(p) { page.value = p; loadLogs(); }
@@ -236,8 +282,11 @@ createApp({
 
         onMounted(() => { if (role.value === 'admin') loadLogs(); });
 
-        return { role, filters, actionTypes, rows, total, page, pageSize, loading,
-                 drawerVisible, current, loadLogs, search, resetFilters, changePage, showDetail, goHome };
+        return { 
+            role, filters, actionTypes, rows, total, page, pageSize, loading,
+            drawerVisible, current, tenantOptions, userOptions,
+            loadTenants, loadUsers, loadLogs, search, resetFilters, changePage, showDetail, goHome 
+        };
     }
 }).use(ElementPlus).mount('#app');
 </script>
