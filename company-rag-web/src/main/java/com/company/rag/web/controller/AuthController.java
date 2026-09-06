@@ -104,19 +104,10 @@ public class AuthController {
             return R.ok(response);
 
         } catch (Exception e) {
+            // 登录失败不记审计：失败时尚无 SecurityUser，取不到 tenant_id，而
+            // audit_log.tenant_id 为 NOT NULL，插 null 会违反约束导致记录丢失。
+            // 登录失败行为可依据更通用的安全事件监控（如 fail2ban / 网关层）追溯。
             log.warn("用户登录失败：{}, 原因：{}", request.getUsername(), e.getMessage(), e);
-            // 登录失败作为安全风险动作同步留痕（归属未知，仅记录用户名与客户端 IP）
-            try {
-                auditLogService.record(AuditLogContext.builder()
-                        .actionType("LOGIN_FAILED")
-                        .targetType("USER")
-                        .targetId(request.getUsername())
-                        .detail("用户登录失败：" + request.getUsername())
-                        .ipAddress(resolveIp())
-                        .build());
-            } catch (Exception ex) {
-                log.warn("登录失败审计记录失败，不影响登录响应：{}", ex.getMessage());
-            }
             return R.fail(401, "用户名或密码错误");
         }
     }

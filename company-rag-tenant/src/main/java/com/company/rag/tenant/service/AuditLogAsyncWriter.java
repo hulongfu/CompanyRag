@@ -72,7 +72,9 @@ public class AuditLogAsyncWriter {
     }
 
     /**
-     * 批量落库：drain 至多 {@link #BATCH_SIZE} 条写入。单条失败仅记录，不抛。
+     * drain 至多 {@link #BATCH_SIZE} 条，逐条 insert 落库（非 SQL 级批量）。
+     * 队列量不大时性能足够；如未来吞吐上来，可换成 {@code saveBatch} 提升写入效率。
+     * 单条失败仅记录，不抛。
      */
     synchronized void flush() {
         List<AuditLogContext> batch = new ArrayList<>(BATCH_SIZE);

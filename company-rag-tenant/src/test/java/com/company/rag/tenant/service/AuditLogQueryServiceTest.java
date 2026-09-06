@@ -122,8 +122,10 @@ class AuditLogQueryServiceTest {
 
     @Test
     void tableNameIsPublicAuditLog() {
-        // @TableName("public.audit_log") 必须生效，防止回退裸表名被租户行级插件污染
+        // 标准写法：value=audit_log + schema=public，生成的 SQL 仍以 public.audit_log 落库，
+        // 防止回退裸表名被租户行级插件污染
         TableName tableName = AuditLog.class.getAnnotation(TableName.class);
-        assertThat(tableName.value()).isEqualTo("public.audit_log");
+        assertThat(tableName.value()).isEqualTo("audit_log");
+        assertThat(tableName.schema()).isEqualTo("public");
     }
 }

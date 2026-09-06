@@ -103,8 +103,10 @@ class AuthControllerTest {
     }
 
     @Test
-    void loginFailureRecordsLoginFailedAudit() {
-        // 认证失败：authenticate 抛异常 → 401 + LOGIN_FAILED 审计（无归属，仅用户名与 IP）
+    void loginFailureReturns401AndDoesNotAudit() {
+        // 认证失败：authenticate 抛异常 → 401。
+        // 登录失败不记审计：无 SecurityUser 取不到 tenant_id，audit_log.tenant_id NOT NULL，
+        // 记了也会因约束违规被 try/catch 吞掉而丢失。
         when(authenticationManager.authenticate(any(UsernamePasswordAuthenticationToken.class)))
                 .thenThrow(new RuntimeException("bad credentials"));
 
@@ -114,12 +116,7 @@ class AuthControllerTest {
         R<AuthResponse> result = controller.login(request);
 
         assertEquals(401, result.getCode());
-
-        ArgumentCaptor<AuditLogContext> captor = ArgumentCaptor.forClass(AuditLogContext.class);
-        verify(auditLogService).record(captor.capture());
-        AuditLogContext ctx = captor.getValue();
-        assertEquals("LOGIN_FAILED", ctx.getActionType());
-        assertEquals("mallory", ctx.getTargetId());
-        assertTrue(ctx.getDetail().contains("mallory"));
+        // 验证未调用审计记录（LOGIN_FAILED 已移除）
+        verify(auditLogService, org.mockito.Mockito.never()).record(any());
     }
 }

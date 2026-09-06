@@ -91,6 +91,10 @@ public class AuditLogAspect {
     }
 
     private SecurityUser getCurrentUser() {
+        // 无认证上下文（未登录/系统调用）时 getAuthentication() 可能为 null，需先判空
+        if (SecurityContextHolder.getContext().getAuthentication() == null) {
+            return null;
+        }
         Object principal = SecurityContextHolder.getContext().getAuthentication().getPrincipal();
         if (principal instanceof SecurityUser) {
             return (SecurityUser) principal;

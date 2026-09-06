@@ -40,14 +40,15 @@ public class TenantMyBatisPlusConfig {
 
             @Override
             public boolean ignoreTable(String tableName) {
-                // sys_tenant 表忽略租户隔离
-                // sys_user 表忽略租户隔离（用户登录时需要跨租户查询）
-                // sys_user_tenant_rel 表忽略租户隔离（用户 - 租户关联表，登录时需要查询）
-                // audit_log 表忽略租户隔离（平台级审计表，存放所有租户的审计记录）
-                return "sys_tenant".equalsIgnoreCase(tableName) 
+                // sys_tenant / sys_user / sys_user_tenant_rel 表忽略租户隔离（全局/登录需跨租户查询）
+                // audit_log 平台级审计表忽略租户隔离：存放所有租户记录，admin 需跨租户可见
+                // 匹配点：MP 的 ignoreTable 收到的是 jsqlparser Table.getName()（纯表名，不含 schema）。
+                // 仍追加 endsWith(".audit_log") 以防御未来传入带 schema 前缀的表名。
+                return "sys_tenant".equalsIgnoreCase(tableName)
                     || "sys_user".equalsIgnoreCase(tableName)
                     || "sys_user_tenant_rel".equalsIgnoreCase(tableName)
-                    || "audit_log".equalsIgnoreCase(tableName);
+                    || "audit_log".equalsIgnoreCase(tableName)
+                    || (tableName != null && tableName.toLowerCase().endsWith(".audit_log"));
             }
         }));
 
