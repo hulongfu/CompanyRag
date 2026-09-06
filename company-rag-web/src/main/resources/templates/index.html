@@ -112,6 +112,7 @@
             <button class="hdr-btn" :class="{ active: currentTab === 'chat' }" @click="currentTab = 'chat'">💬 对话</button>
             <button class="hdr-btn" :class="{ active: currentTab === 'tenant' }" @click="currentTab = 'tenant'">🏢 租户</button>
             <button class="hdr-btn" v-if="role === 'admin'" :class="{ active: currentTab === 'user' }" @click="currentTab = 'user'">👤 用户</button>
+            <button class="hdr-btn" v-if="role === 'admin'" @click="goAuditLog">📋 日志</button>
             <button class="hdr-btn" v-if="role !== 'viewer'" @click="showUpload = true">📤 上传文件</button>
             <button class="hdr-btn" :class="{ active: showMetrics }" @click="showMetrics = !showMetrics">📊 实时指标</button>
             <button class="hdr-btn" @click="showAdvanced = !showAdvanced" title="高级设置">⚙️ 设置</button>
@@ -1208,6 +1209,10 @@ createApp({
             window.location.href = '/login';
         }
 
+        function goAuditLog() {
+            window.location.href = '/audit-log.html';
+        }
+
         onMounted(() => {
             // 已登录，加载数据
             loadDocuments();
@@ -1236,7 +1241,7 @@ createApp({
             // 高级模式
             chatMode, showAdvanced,
             // 认证
-            handleLogout
+            handleLogout, goAuditLog
         };
     }
 }).use(ElementPlus).mount('#app');
