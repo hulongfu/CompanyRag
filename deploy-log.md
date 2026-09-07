@@ -2,6 +2,25 @@
 
 ## Git Push
 
+### 最新推送（2026-09-07 rag_session.user_id 收敛 NOT NULL → 待推送 gitee & github）
+
+- commit_type:            Task
+- task_id:                0000
+- task_name:              rag_session.user_id 收敛为 NOT NULL
+- commit_hash:            d139592
+- branch:                 main
+- remote:                 待推送到 gitee 与 github
+- staged_files:
+  - sql/init.sql（修改 - rag_session.user_id 改 BIGINT NOT NULL）
+  - company-rag-tenant/.../TenantServiceImpl.java（修改 - createTenantSchema 建表 user_id NOT NULL）
+  - company-rag-bootstrap/.../SchemaMigrationConfig.java（修改 - 新增 migrateRagSessionUserIdNotNull：先回填 NULL→1 再 SET NOT NULL）
+  - sql/migrations/V3__init_platform_admin.sql（修改 - 存档脚本 user_id NOT NULL，保持定义一致）
+  - company-rag-bootstrap/.../resources/db/migration/V3__init_platform_admin.sql（修改 - 存档脚本 user_id NOT NULL）
+- commit_message:         Task:0000_rag_session.user_id 收敛为 NOT NULL：同步三处定义+老库迁移
+- commit_exit_code:       0
+- push_command:           git push gitee main; git push origin main
+- result:                 待推送。变更内容：应用层三条写入路径（ChatController/ChatRouter/RagSearchServiceImpl）均已保证 user_id 非空（null 兜底用户 1），故 DB 层收紧为 NOT NULL 一致兜底。三处定义（init.sql/TenantServiceImpl/两处存档 V3）同步；新增 SchemaMigrationConfig 迁移，老库先回填 NULL→1 再 SET NOT NULL。验证：mvn compile BUILD SUCCESS。
+
 ### 最新推送（2026-09-07 P1 部署漂移修复 → 待推送 gitee & github）
 
 - commit_type:            Fix
