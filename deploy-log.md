@@ -2,6 +2,25 @@
 
 ## Git Push
 
+### 最新推送（2026-09-07 反馈闭环最小方案 → 待推送 gitee & github）
+
+- commit_type:            Feat
+- task_id:                0000
+- task_name:              反馈闭环最小方案
+- commit_hash:            cec6543
+- branch:                 main
+- remote:                 待推送到 gitee 与 github
+- staged_files:
+  - sql/init.sql（修改 - rag_session 表增加 feedback SMALLINT DEFAULT 0 列 + idx_session_feedback 索引）
+  - company-rag-rag/.../entity/RagSession.java（修改 - 新增 feedback Short 字段，注释-1=👎/0=未标记/1=👍）
+  - company-rag-rag/.../service/RagSessionService.java（修改 - 新增 updateFeedback 接口）
+  - company-rag-rag/.../service/impl/RagSessionServiceImpl.java（修改 - 实现 updateFeedback：校验 feedback 值、按租户 + 用户+sessionId 过滤、批量更新会话所有记录）
+  - company-rag-web/.../controller/ChatController.java（修改 - 新增 POST /api/chat/feedback 端点，从 SecurityContext 获取 userId、从 header 获取 tenantId，调用 service.updateFeedback）
+- commit_message:         Feat:0000_反馈闭环最小方案：add feedback column and updateFeedback endpoint
+- commit_exit_code:       0
+- push_command:           git push gitee main; git push origin main
+- result:                 待推送。变更内容：最小反馈闭环实现——rag_session 表增加 feedback 列（SMALLINT，-1/0/1 分别表示👎/未标记/👍），新增 updateFeedback 端点（POST /api/chat/feedback?sessionId=xxx&feedback=1），按租户 + 用户+sessionId 三级隔离更新，确保多租户安全。验证：mvn compile BUILD SUCCESS（53+19 源文件编译通过）。
+
 ### 最新推送（2026-09-07 缓存失效租户版本号机制 + JWT_SECRET Profile 守卫 → 待推送 gitee & github）
 
 - commit_type:            Task + BugFix
