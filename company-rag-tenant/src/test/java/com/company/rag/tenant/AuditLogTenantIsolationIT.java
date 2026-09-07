@@ -2,6 +2,7 @@ package com.company.rag.tenant;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.boot.test.context.SpringBootTest;
 
 import java.sql.Connection;
@@ -24,9 +25,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  * <p>
  * 前置：已由 init.sql/k8s 建立 {@code public.audit_log} 表与索引；TenantLine 对 audit_log 豁免
  * （否则 TenantLine 会为其追加 tenant_id 条件，admin 跨租户查询被截断）。
- * 无 PG 环境跳过（同 RlsIsolationTest，本 commit 仅提供可编译、含正确断言的验收脚本）。
+ * <p>
+ * 需要真实 PG：仅当系统属性 {@code it.pg=true} 时启用，否则整类跳过，避免无 PG 环境下抛异常断构建
+ * （同 RlsIsolationTest，本 commit 仅提供可编译、含正确断言的验收脚本）。
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@EnabledIfSystemProperty(named = "it.pg", matches = "true")
 class AuditLogTenantIsolationIT {
 
     private static final String TEST_URL = "jdbc:postgresql://localhost:5432/company_rag";

@@ -3,6 +3,7 @@ package com.company.rag.tenant;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -24,8 +25,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * 1. 设置 app.tenant_id 后只能访问对应租户的数据
  * 2. 未设置 app.tenant_id 时返回 0 行（安全失败）
  * 3. 越权 INSERT 被 WITH CHECK 拒绝
+ * <p>
+ * 需要真实 PG：仅当系统属性 {@code it.pg=true} 时启用，否则整类跳过，
+ * 避免无 PG 环境下 {@code mvn test} 抛异常断构建。
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@EnabledIfSystemProperty(named = "it.pg", matches = "true")
 class RlsIsolationTest {
 
     @Autowired
