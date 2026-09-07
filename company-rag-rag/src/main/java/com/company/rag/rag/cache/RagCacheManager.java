@@ -14,10 +14,16 @@ import java.util.concurrent.TimeUnit;
  * RAG 缓存管理器
  * 基于 Redis Redisson 的 RMapCache 实现
  * 缓存策略：
- * - 缓存 Key：tenantId:query:topK:strategy:rerank（避免不同参数组合错误命中）
+ * - 缓存 Key：version:tenantId:query:topK:strategy:rerank（避免不同参数组合错误命中）
  * - 相同查询和参数的检索结果缓存 5 分钟（TTL）
- * - 文档变更时通过租户级事件主动失效缓存
+ * - 文档变更时通过租户级事件递增租户版本号触发失效，旧版本 key 交由 TTL 回收
  * - 热点问题自动延长 TTL 至 30 分钟
+ *
+ * 失效机制（租户版本号）：
+ * - 每个租户维护一个原子版本号（AtomicLong），缓存的检索 key 拼接当前版本号；
+ * - invalidateByTenant 仅递增版本号（O(1)），不再全桶遍历删除；
+ * - 版本号变更后，旧版本 key 无法再被命中，天然消除"失效 vs 并发写缓存"的竞态
+ *   （旧 key 由 5 分钟 TTL 兜底回收，无锁、无阻塞）。
  */
 @Slf4j
 @Component
@@ -30,12 +36,29 @@ public class RagCacheManager {
     private static final long DEFAULT_TTL_MINUTES = 5;
     // 热点缓存过期时间：30分钟
     private static final long HOT_TTL_MINUTES = 30;
+    // 租户版本号 key 前缀：用于失效缓存（递增版本使旧 key 失效）
+    private static final String VERSION_KEY_PREFIX = RagConstant.CACHE_DOC_VECTOR + "version:";
 
     /**
      * 获取缓存map实例
      */
     private RMapCache<String, RagResult> getCache() {
         return redissonClient.getMapCache(RagConstant.CACHE_DOC_VECTOR + "search");
+    }
+
+    /**
+     * 获取当前租户的缓存版本号（默认 0）。
+     * 检索 key 拼接该版本号，版本越新越先命中；版本递增后旧版本 key 自动失效。
+     */
+    public long currentVersion(Long tenantId) {
+        return redissonClient.getAtomicLong(versionKey(tenantId)).get();
+    }
+
+    /**
+     * 租户版本号 key。
+     */
+    private String versionKey(Long tenantId) {
+        return VERSION_KEY_PREFIX + tenantId;
     }
 
     /**
@@ -66,26 +89,16 @@ public class RagCacheManager {
     }
 
     /**
-     * 失效指定租户的所有缓存
-     * 使用租户级全量失效，因为检索结果通常跨多个文档
+     * 失效指定租户的所有缓存。
+     * 通过递增租户版本号实现（O(1)）：检索 key 拼接版本号，版本变更后旧 key 无法命中，
+     * 由 TTL(5min) 兜底回收。避免全桶 keySet() 遍历删除的性能开销与并发写缓存竞态。
      */
     public void invalidateByTenant(Long tenantId) {
-        RMapCache<String, RagResult> cache = getCache();
-        // Cache key 格式: company:rag:vector:{tenantId}:{query}
-        String prefix = RagConstant.CACHE_DOC_VECTOR + tenantId + ":";
-
         try {
-            int deletedCount = 0;
-            for (String key : cache.keySet()) {
-                if (key.startsWith(prefix)) {
-                    cache.remove(key);
-                    deletedCount++;
-                }
-            }
-
-            log.info("失效租户缓存成功 | tenantId={} | deletedCount={}", tenantId, deletedCount);
+            redissonClient.getAtomicLong(versionKey(tenantId)).incrementAndGet();
+            log.info("租户缓存版本递增触发失效 | tenantId={}", tenantId);
         } catch (Exception e) {
-            log.error("失效租户缓存失败 | tenantId={} | error={}", tenantId, e.getMessage());
+            log.error("租户缓存失效失败 | tenantId={} | error={}", tenantId, e.getMessage());
         }
     }
 

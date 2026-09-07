@@ -235,8 +235,9 @@ public class RagSearchServiceImpl implements RagSearchService {
     }
 
     private String buildCacheKey(RagQuery query) {
-        // 使用租户 ID + 查询文本 + 检索参数作为缓存键，避免不同参数组合错误命中缓存
-        // 格式：company:rag:vector:{tenantId}:{query}:{topK}:{strategy}:{rerank}:{rerankTopK}:{maxPerDoc}:{fusionTopK}:{scoreThreshold}
+        // 使用租户 ID + 缓存版本 + 查询文本 + 检索参数作为缓存键，避免不同参数组合错误命中缓存
+        // 版本号由 RagCacheManager 维护，文档变更递增版本使旧缓存整体失效
+        // 格式：company:rag:vector:{tenantId}:{version}:{query}:{topK}:{strategy}:{rerank}:{rerankTopK}:{maxPerDoc}:{fusionTopK}:{scoreThreshold}
         String normalizedQuery = query.getQuery().trim().toLowerCase();
         String strategy = query.getRetrievalStrategy() != null ? query.getRetrievalStrategy() : "HYBRID";
         int topK = query.getTopK() != null ? query.getTopK() : 10;
@@ -249,6 +250,7 @@ public class RagSearchServiceImpl implements RagSearchService {
                 ? String.valueOf(query.getScoreThreshold()) : "null";
         
         return RagConstant.CACHE_DOC_VECTOR + query.getTenantId() + ":" + 
+               cacheManager.currentVersion(query.getTenantId()) + ":" +
                normalizedQuery + ":" + topK + ":" + strategy + ":" + 
                (enableRerank ? "1" : "0") + ":" + rerankTopK + ":" + maxPerDoc + ":" + 
                fusionTopK + ":" + scoreThreshold;

@@ -6,10 +6,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.redisson.api.RAtomicLong;
 import org.redisson.api.RMapCache;
 import org.redisson.api.RedissonClient;
-
-import java.util.Set;
 
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
@@ -23,6 +22,9 @@ class RagCacheManagerTest {
     @Mock
     private RMapCache<Object, Object> cache;
 
+    @Mock
+    private RAtomicLong versionCounter;
+
     private RagCacheManager manager;
 
     @BeforeEach
@@ -31,22 +33,38 @@ class RagCacheManagerTest {
     }
 
     @Test
-    void invalidateByTenant_shouldRemoveMatchingKeys() {
-        // Given — 租户 1 和租户 2 的缓存 key（新格式：tenantId:query:topK:strategy:rerank）
-        String prefix = RagConstant.CACHE_DOC_VECTOR;
-        String key1 = prefix + "1:test query:10:HYBRID:1";
-        String key2 = prefix + "1:another query:10:HYBRID:0";
-        String key3 = prefix + "2:other tenant query:10:HYBRID:1";
-        when(redissonClient.getMapCache(eq(prefix + "search"))).thenReturn(cache);
-        when(cache.keySet()).thenReturn(Set.of(key1, key2, key3));
+    void currentVersion_shouldReturnIncrementedVersionAfterInvalidate() {
+        // Given — 租户 1 初始版本为 0
+        String versionKey = RagConstant.CACHE_DOC_VECTOR + "version:1";
+        when(redissonClient.getAtomicLong(eq(versionKey))).thenReturn(versionCounter);
+        when(versionCounter.get()).thenReturn(0L);
 
-        // When
+        // When — 首次读取版本
+        long v1 = manager.currentVersion(1L);
+
+        // When — 失效后版本递增
+        when(versionCounter.get()).thenReturn(1L);
         manager.invalidateByTenant(1L);
 
-        // Then — 只删除租户 1 的 key
-        verify(cache).remove(eq(key1));
-        verify(cache).remove(eq(key2));
-        verify(cache, never()).remove(eq(key3));
+        // Then — 版本号已递增
+        long v2 = manager.currentVersion(1L);
+        org.assertj.core.api.Assertions.assertThat(v1).isEqualTo(0L);
+        org.assertj.core.api.Assertions.assertThat(v2).isEqualTo(1L);
+        verify(versionCounter).incrementAndGet();
+    }
+
+    @Test
+    void currentVersion_shouldReturnZeroWhenNoVersionExists() {
+        // Given — 未初始化版本号（get() 返回 long 基元，语义上默认 0）
+        String versionKey = RagConstant.CACHE_DOC_VECTOR + "version:9";
+        when(redissonClient.getAtomicLong(eq(versionKey))).thenReturn(versionCounter);
+        when(versionCounter.get()).thenReturn(0L);
+
+        // When
+        long v = manager.currentVersion(9L);
+
+        // Then — 返回默认 0
+        org.assertj.core.api.Assertions.assertThat(v).isEqualTo(0L);
     }
 
     @Test
