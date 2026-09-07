@@ -2,6 +2,44 @@
 
 ## Git Push
 
+### 最新推送（2026-09-07 缓存失效租户版本号机制 + JWT_SECRET Profile 守卫 → 待推送 gitee & github）
+
+- commit_type:            Task + BugFix
+- task_id:                0000
+- task_name:              缓存失效改租户版本号机制；JWT_SECRET按Profile校验守卫
+- commit_hash:            2c2d974（缓存版本号）+ 78945fd（JWT 守卫）
+- branch:                 main
+- remote:                 本批两个提交待推送到 gitee 与 github（本轮含此前未推送至 github 的 db3e56f）
+- staged_files:
+  - company-rag-bootstrap/.../CompanyRagApplication.java（提交 78945fd - JWT_SECRET 强校验改为仅 prod Profile 启用：新增 resolveActiveProfile() 读 spring.profiles.active(优先) 或 SPRING_PROFILES_ACTIVE 环境变量；isProd 时才校验 JWT_SECRET 非空非默认值，否则跳过；删除临时禁用注释块）
+  - company-rag-rag/.../cache/RagCacheManager.java（提交 2c2d974 - invalidateByTenant 由 O(n) keySet 遍历删除改为 O(1) 递增租户版本号 incrementAndGet()；新增 VERSION_KEY_PREFIX/versionKey/currentVersion；旧 key 靠 5min TTL 回收，无锁）
+  - company-rag-rag/.../service/impl/RagSearchServiceImpl.java（提交 2c2d974 - buildCacheKey 在 tenantId 之后插入 cacheManager.currentVersion，key 形如 company:rag:vector:{tenantId}:{version}:{query}:...）
+  - company-rag-rag/.../cache/RagCacheManagerTest.java（提交 2c2d974 - 断言改为验证版本读取/递增/默认 0；RAtomicLong.get() 返回原始 long 不能 stub null 修复）
+- commit_message:         BugFix:0000_JWT_SECRET按Profile校验守卫：enforce JWT_SECRET validation only in prod profile（78945fd）；Task:0000_缓存失效改租户版本号机制：replace O(n) keySet sweep with per-tenant version counter（2c2d974）
+- commit_exit_code:       0 / 0
+- push_command:           git push gitee main; git push origin main
+- result:                 待推送。变更内容：① JWT_SECRET 校验从"全环境禁用"改为"仅 prod Profile 启用"——此前 validateProductionEnvironment 临时禁用 JWT_SECRET 检查，现通过 resolveActiveProfile() 探测当前 Profile，仅生产环境强制校验强随机密钥，本地开发/测试跳过以允许快速启动；② 缓存失效从全桶遍历删除改为租户版本号递增——失效 O(1) 无锁，检索 key 拼接版本号，文档变更递增版本使旧缓存整体失效，消除"失效 vs 并发写缓存"竞态，旧 key 由 TTL 兜底回收。验证（窄范围，此前已完成）：mvn -pl company-rag-rag -am compile 通过；RagCacheManagerTest + CacheInvalidationListenerTest 共 5 tests / 0 failures，BUILD SUCCESS。
+
+### 最新推送（2026-09-07 租户 IT 测试无 PG 跳过守卫 → gitee 成功 / github 网络失败）
+
+- commit_type:            BugFix
+- task_id:                33415
+- task_name:              修复IT测试无PG环境断构建
+- commit_hash:            db3e56f858e9f011c96c91ea7221ceee96fa0fee
+- branch:                 main
+- remote:                 gitee（成功，db3e56f 一致）& origin 即 github（失败 - 网络原因，Connection reset）
+- staged_files:
+  - company-rag-tenant/src/test/java/com/company/rag/tenant/AuditLogTenantIsolationIT.java（修改 - import 改普通导入新增 org.junit.jupiter.api.condition.EnabledIfSystemProperty；类加 @EnabledIfSystemProperty(named="it.pg", matches="true") 跳过守卫；修正注释为「需真实 PG，仅当 it.pg=true 启用」）
+  - company-rag-tenant/src/test/java/com/company/rag/tenant/RlsIsolationTest.java（修改 - 同上：普通 import + 类级 @EnabledIfSystemProperty(it.pg) + 修正注释）
+- commit_message:         BugFix:33415_修复IT测试无PG环境断构建：add it.pg skip guard for tenant IT tests
+- commit_command:         git commit -m "BugFix:33415_修复IT测试无PG环境断构建：add it.pg skip guard for tenant IT tests"
+- commit_exit_code:       0
+- push_command:           git push gitee main; git push origin main
+- push_exit_code:         gitee=0（f539aa4..db3e56f）；origin=128（fatal: unable to access github: Recv failure: Connection was reset）
+- remote_head_check_command: git rev-parse HEAD && git ls-remote gitee main
+- remote_head:            gitee/main=db3e56f858e9f011c96c91ea7221ceee96fa0fee（与本地一致，有 ls-remote 佐证）；github 因连接被重置无法推送/main 停留此前提交，待网络恢复补推
+- result:                代码提交 db3e56f 已推送 gitee 成功，gitee/main=db3e56f 与本地一致（证据完整）；github(origin) 因网络原因推送失败（Connection was reset，push exit=128），main 未同步，待网络恢复后补推。变更内容：为两个需真实 PG 的租户 IT 测试（AuditLogTenantIsolationIT、RlsIsolationTest）添加 @EnabledIfSystemProperty(named="it.pg", matches="true") 类级跳过守卫——无 PG 环境下 mvn test 直接执行会因 DriverManager.getConnection 连 localhost:5432 抛 SQLException 断构建；加守卫后仅当显式传 -Dit.pg=true 才启用，否则整类跳过。调试中发现：静态导入 import static org.junit.jupiter.api.condition.EnabledIfSystemProperty 在 --release 17 javac 路径下报「仅从类和接口静态导入 / 找不到符号 condition」，改用普通 import 后编译通过。验证（窄范围，无 PG）：mvn -pl company-rag-tenant test-compile BUILD SUCCESS（13 源文件）；surefire 无 it.pg 运行 AuditLogTenantIsolationIT=>Skipped:1、RlsIsolationTest=>Skipped:6，0 失败 0 错误。
+
 ### 最新推送（2026-09-06 README 审计日志文档补充 → gitee 成功 / github 成功）
 
 - commit_type:            Task
