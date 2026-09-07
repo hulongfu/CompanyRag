@@ -53,27 +53,24 @@ public class CompanyRagApplication {
     private static void validateProductionEnvironment() {
         log.info("开始生产环境安全检查...");
         
-        // 临时禁用 JWT_SECRET 检查以允许开发环境启动
-        // TODO: 生产环境必须启用此检查
-        log.info("开发环境：跳过 JWT_SECRET 检查");
-        /*
-        // 检查 JWT_SECRET
-        String jwtSecret = System.getProperty("JWT_SECRET");
-        log.info("DEBUG: JWT_SECRET 从 System.getProperty 读取到的值 = '{}'", jwtSecret);
-        log.info("DEBUG: JWT_SECRET 是否为 null = {}", jwtSecret == null);
-        log.info("DEBUG: JWT_SECRET 是否为空 = {}", jwtSecret != null && jwtSecret.trim().isEmpty());
-        log.info("DEBUG: JWT_SECRET 是否等于默认值 = {}", "your_jwt_secret_key_here_must_be_strong_random_string".equals(jwtSecret));
-        if (jwtSecret == null || jwtSecret.trim().isEmpty() || 
-            "your_jwt_secret_key_here_must_be_strong_random_string".equals(jwtSecret)) {
-            log.error("========================================");
-            log.error("【安全警告】JWT_SECRET 未配置或使用默认值！");
-            log.error("生产环境必须设置强随机密钥，否则 Token 可被伪造。");
-            log.error("生成方法：openssl rand -base64 32");
-            log.error("========================================");
-            throw new IllegalStateException("JWT_SECRET 未配置或使用默认值，启动终止");
+        // JWT_SECRET 强校验：仅生产 Profile（prod）启用，本地开发/测试跳过以允许快速启动
+        String activeProfile = resolveActiveProfile();
+        boolean isProd = activeProfile != null && activeProfile.toLowerCase().contains("prod");
+        if (isProd) {
+            String jwtSecret = System.getProperty("JWT_SECRET");
+            if (jwtSecret == null || jwtSecret.trim().isEmpty() ||
+                "your_jwt_secret_key_here_must_be_strong_random_string".equals(jwtSecret)) {
+                log.error("========================================");
+                log.error("【安全警告】JWT_SECRET 未配置或使用默认值！");
+                log.error("生产环境必须设置强随机密钥，否则 Token 可被伪造。");
+                log.error("生成方法：openssl rand -base64 32");
+                log.error("========================================");
+                throw new IllegalStateException("JWT_SECRET 未配置或使用默认值，启动终止");
+            }
+            log.info("✓ JWT_SECRET 已配置");
+        } else {
+            log.info("非生产 Profile（{}），跳过 JWT_SECRET 强校验", activeProfile);
         }
-        log.info("✓ JWT_SECRET 已配置");
-        */
         
         // 检查数据库密码
         String dbPassword = System.getProperty("POSTGRES_PASSWORD");
@@ -102,6 +99,22 @@ public class CompanyRagApplication {
         }
         
         log.info("生产环境安全检查完成");
+    }
+
+    /**
+     * 解析当前激活的 Spring Profile
+     * <p>
+     * validateProductionEnvironment() 在 SpringApplication.run 之前执行，Environment 尚未就绪，
+     * 因此需手动读取 spring.profiles.active（JVM 参数优先，回退到 SPRING_PROFILES_ACTIVE 环境变量）。
+     * .env 已通过 Dotenv 加载为 System properties，故此处直接用 getProperty 即可覆盖两种来源。
+     */
+    private static String resolveActiveProfile() {
+        // 优先读 JVM 参数 -Dspring.profiles.active；否则回退 .env/环境变量注入的 SPRING_PROFILES_ACTIVE
+        String profile = System.getProperty("spring.profiles.active");
+        if (profile == null || profile.trim().isEmpty()) {
+            profile = System.getProperty("SPRING_PROFILES_ACTIVE");
+        }
+        return profile;
     }
 
     /**
