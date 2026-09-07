@@ -96,7 +96,7 @@ public class TenantServiceImpl implements TenantService {
                 id BIGSERIAL PRIMARY KEY,
                 session_id VARCHAR(128) NOT NULL,
                 tenant_id BIGINT NOT NULL,
-                user_id BIGINT,
+                user_id BIGINT NOT NULL,
                 query TEXT NOT NULL,
                 answer TEXT,
                 context TEXT,

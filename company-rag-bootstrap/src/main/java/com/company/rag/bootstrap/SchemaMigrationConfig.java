@@ -96,4 +96,74 @@ public class SchemaMigrationConfig {
             }
         };
     }
+
+    /**
+     * 将 rag_session 表的 user_id 列收紧为 NOT NULL
+     * 
+     * 应用层三条写入路径（ChatController / ChatRouter / RagSearchServiceImpl）
+     * 均已保证 user_id 非空（null 时兜底用户 1），因此 DB 层应收紧约束以一致兜底。
+     * 历史可能存在 NULL 行，需先回填为兜底用户 1，再 SET NOT NULL，否则 ALTER 会失败。
+     */
+    @Bean
+    public ApplicationRunner migrateRagSessionUserIdNotNull() {
+        return args -> {
+            log.info("开始执行 rag_session 表 user_id NOT NULL 迁移...");
+
+            try {
+                List<String> tenantSchemas = jdbcTemplate.queryForList(
+                        "SELECT schema_name FROM information_schema.schemata " +
+                        "WHERE schema_name LIKE 'tenant_%'",
+                        String.class
+                );
+
+                int migratedCount = 0;
+                int skippedCount = 0;
+
+                for (String schemaName : tenantSchemas) {
+                    try {
+                        // 检查 user_id 是否已是 NOT NULL
+                        Boolean isNotNull = jdbcTemplate.queryForObject(
+                                "SELECT is_nullable = 'NO' FROM information_schema.columns " +
+                                "WHERE table_schema = ? AND table_name = 'rag_session' AND column_name = 'user_id'",
+                                Boolean.class,
+                                schemaName
+                        );
+
+                        if (Boolean.TRUE.equals(isNotNull)) {
+                            log.debug("Schema [{}] 的 rag_session.user_id 已是 NOT NULL，跳过", schemaName);
+                            skippedCount++;
+                            continue;
+                        }
+
+                        // 回填历史 NULL 行（与代码兜底逻辑一致，使用用户 1）
+                        String backfillSql = String.format(
+                                "UPDATE %s.rag_session SET user_id = 1 WHERE user_id IS NULL",
+                                schemaName
+                        );
+                        jdbcTemplate.execute(backfillSql);
+
+                        // 收紧为 NOT NULL
+                        String alterSql = String.format(
+                                "ALTER TABLE %s.rag_session ALTER COLUMN user_id SET NOT NULL",
+                                schemaName
+                        );
+                        jdbcTemplate.execute(alterSql);
+
+                        log.info("Schema [{}] 的 rag_session.user_id 已收紧为 NOT NULL", schemaName);
+                        migratedCount++;
+
+                    } catch (Exception e) {
+                        log.error("Schema [{}] 的 user_id NOT NULL 迁移失败：{}", schemaName, e.getMessage());
+                        // 继续处理下一个 schema，不中断整体迁移
+                    }
+                }
+
+                log.info("rag_session.user_id NOT NULL 迁移完成：成功 {} 个，跳过 {} 个", migratedCount, skippedCount);
+
+            } catch (Exception e) {
+                log.error("rag_session.user_id NOT NULL 迁移失败：{}", e.getMessage(), e);
+                // 不抛出异常，避免启动失败
+            }
+        };
+    }
 }
