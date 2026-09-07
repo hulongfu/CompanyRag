@@ -2,7 +2,22 @@
 
 ## Git Push
 
-### 最新推送（2026-09-07 反馈闭环最小方案 → 待推送 gitee & github）
+### 最新推送（2026-09-07 P1 部署漂移修复 → 待推送 gitee & github）
+
+- commit_type:            Fix
+- task_id:                P1
+- task_name:              部署漂移修复
+- commit_hash:            c022010
+- branch:                 main
+- remote:                 待推送到 gitee 与 github
+- staged_files:
+  - company-rag-bootstrap/.../bootstrap/SchemaMigrationConfig.java（新增 - ApplicationRunner 自动迁移脚本）
+- commit_message:         Fix:P1_部署漂移：add SchemaMigrationConfig auto-migrate feedback column for existing tenant schemas
+- commit_exit_code:       0
+- push_command:           git push gitee main; git push origin main
+- result:                 待推送。变更内容：解决 Flyway 被 exclude 导致的部署漂移问题——新增 SchemaMigrationConfig，应用启动时自动遍历所有 tenant_% schema，检查并为 rag_session 表添加 feedback 列（SMALLINT NOT NULL DEFAULT 0）+ 索引。幂等设计：列已存在则跳过，不影响全新部署。验证：mvn compile BUILD SUCCESS（6 源文件编译通过）。
+
+### 最新推送（2026-09-07 反馈闭环最小方案 → 已推送 gitee & github）
 
 - commit_type:            Feat
 - task_id:                0000
