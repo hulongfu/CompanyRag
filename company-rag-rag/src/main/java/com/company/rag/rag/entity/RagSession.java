@@ -34,5 +34,10 @@ public class RagSession {
 
     private Integer latencyMs;
 
+    /**
+     * 用户反馈：-1=👎, 0=未标记，1=👍
+     */
+    private Short feedback;
+
     private LocalDateTime createTime;
 }

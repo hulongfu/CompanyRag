@@ -204,4 +204,36 @@ public class RagSessionServiceImpl implements RagSessionService {
             log.info("更新会话信息 | tenantId={} userId={} sessionId={}", tenantId, userId, sessionId);
         }
     }
+
+    @Override
+    @Transactional
+    public void updateFeedback(Long tenantId, Long userId, String sessionId, Short feedback) {
+        // 校验 feedback 值：-1=👎, 0=清除，1=👍
+        if (feedback == null || feedback < -1 || feedback > 1) {
+            throw new IllegalArgumentException("feedback 值必须为 -1/0/1");
+        }
+
+        // 先查会话是否存在（按租户 + 用户 + sessionId 过滤，确保隔离）
+        List<RagSession> sessions = sessionMapper.selectList(
+                new LambdaQueryWrapper<RagSession>()
+                        .eq(RagSession::getTenantId, tenantId)
+                        .eq(RagSession::getUserId, userId)
+                        .eq(RagSession::getSessionId, sessionId)
+        );
+
+        if (sessions.isEmpty()) {
+            log.warn("会话不存在，无法更新反馈 | tenantId={} userId={} sessionId={}", tenantId, userId, sessionId);
+            return;
+        }
+
+        // 批量更新该会话的所有对话记录的 feedback
+        int updatedCount = 0;
+        for (RagSession session : sessions) {
+            session.setFeedback(feedback);
+            updatedCount += sessionMapper.updateById(session);
+        }
+
+        log.info("更新会话反馈成功 | tenantId={} userId={} sessionId={} feedback={} updatedCount={}",
+                tenantId, userId, sessionId, feedback, updatedCount);
+    }
 }

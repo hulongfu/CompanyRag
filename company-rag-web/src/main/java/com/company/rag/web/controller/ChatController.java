@@ -174,4 +174,42 @@ public class ChatController {
         
         return R.ok(result);
     }
+
+    /**
+     * 更新会话反馈（👍/👎）
+     * 
+     * @param sessionId 会话 ID
+     * @param feedback 反馈值：-1=👎, 0=清除，1=👍
+     * @return 操作结果
+     */
+    @PostMapping("/chat/feedback")
+    @PreAuthorize("isAuthenticated()")
+    public R<Void> updateFeedback(@RequestParam String sessionId,
+                                   @RequestParam Short feedback,
+                                   @RequestHeader(value = "X-Tenant-Id", required = false) Long headerTenantId) {
+        log.info("收到反馈更新请求：sessionId={}, feedback={}, headerTenantId={}", sessionId, feedback, headerTenantId);
+        
+        // 【安全关键】租户 ID 必须从请求头获取（已经过 JwtAuthenticationFilter 验证）
+        if (headerTenantId == null) {
+            log.error("租户 ID 缺失，拒绝服务：sessionId={}", sessionId);
+            throw new IllegalArgumentException("租户 ID 不能为空");
+        }
+        
+        // 【安全关键】用户 ID 必须从已认证的安全上下文中获取
+        Object principal = SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        Long verifiedUserId = null;
+        if (principal instanceof SecurityUser) {
+            verifiedUserId = ((SecurityUser) principal).getUserId();
+        }
+        
+        if (verifiedUserId == null) {
+            log.error("用户 ID 缺失，拒绝服务：sessionId={}", sessionId);
+            throw new IllegalStateException("用户 ID 不能为空");
+        }
+        
+        // 调用 Service 更新反馈
+        ragSessionService.updateFeedback(headerTenantId, verifiedUserId, sessionId, feedback);
+        
+        return R.ok();
+    }
 }

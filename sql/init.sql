@@ -137,6 +137,7 @@ CREATE TABLE rag_session (
     tokens_input INTEGER DEFAULT 0,
     tokens_output INTEGER DEFAULT 0,
     latency_ms INTEGER DEFAULT 0,
+    feedback SMALLINT DEFAULT 0,
     create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -145,6 +146,7 @@ CREATE INDEX idx_doc_tenant ON rag_document(tenant_id);
 CREATE INDEX idx_chunk_document ON doc_chunk(document_id);
 CREATE INDEX idx_chunk_document_tenant ON doc_chunk(tenant_id, document_id);
 CREATE INDEX idx_session_tenant ON rag_session(tenant_id, session_id);
+CREATE INDEX idx_session_feedback ON rag_session(tenant_id, feedback);
 CREATE INDEX idx_chunk_content_trgm ON doc_chunk USING gin (content gin_trgm_ops);
 CREATE INDEX idx_document_title_trgm ON rag_document USING gin (title gin_trgm_ops);
 
