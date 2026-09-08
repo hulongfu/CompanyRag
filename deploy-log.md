@@ -723,3 +723,19 @@ $ git rev-parse HEAD
 - remote_head_check_command: git ls-remote gitee refs/heads/main; git ls-remote origin refs/heads/main
 - remote_head:            170dbcd4c69374ea68895e3c47b0bd8d8261f379（gitee 与 origin 均一致）
 - result:                 审计日志页面优化提交已推送 gitee 与 github 成功，两端远端 HEAD 均与本地 170dbcd 一致（证据完整）。变更内容：修复 No static resource audit-log.html 错误（PageController 新增 /audit-log.html 路由映射，返回 audit-log 模板）；将筛选区租户 ID/用户 ID 文本框改造为下拉框（调用 /api/tenant/list 和 /api/user/list 接口加载选项，显示名称提交 ID，支持 filterable 搜索和 clearable 清空）。
+
+## Git Push
+
+- commit_type:            Feat
+- task_id:                0000
+- task_name:              反馈粒度改为按问答行
+- commit_hash:            662a5cd25bc6cbec33a6b675ea560f48cddb77ec
+- branch:                 main
+- remote:                 gitee & origin(均成功)
+- staged_files:
+  - company-rag-rag/src/main/java/com/company/rag/rag/service/RagSessionService.java（修改 - updateFeedback 接口新增 sessionRowId 参数）
+  - company-rag-rag/src/main/java/com/company/rag/rag/service/impl/RagSessionServiceImpl.java（修改 - 从更新整个会话所有行改为按行 id 定位单条问答记录反馈）
+  - company-rag-web/src/main/java/com/company/rag/web/controller/ChatController.java（修改 - /api/chat/feedback 端点新增必填 sessionRowId 参数）
+- commit_message:         Feat:0000_反馈粒度改为按问答行：updateFeedback 支持 sessionRowId 单行更新
+- commit_command:         git commit -m "Feat:0000_反馈粒度改为按问答行：updateFeedback 支持 sessionRowId 单行更新"
+- result:                 反馈语义由会话级改为问答行级：updateFeedback 引入 sessionRowId（rag_session 行主键），按 租户+用户+会话+行主键 四级条件定位并只更新单条问答记录，杜绝同一会话内多行反馈一致性的冗余写入与跨会话/跨租户风险。前端 index.html 无该端点调用，无需同步。编译通过（company-rag-rag,company-rag-web）。

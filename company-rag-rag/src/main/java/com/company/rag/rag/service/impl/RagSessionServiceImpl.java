@@ -207,33 +207,36 @@ public class RagSessionServiceImpl implements RagSessionService {
 
     @Override
     @Transactional
-    public void updateFeedback(Long tenantId, Long userId, String sessionId, Short feedback) {
+    public void updateFeedback(Long tenantId, Long userId, String sessionId, Long sessionRowId, Short feedback) {
         // 校验 feedback 值：-1=👎, 0=清除，1=👍
         if (feedback == null || feedback < -1 || feedback > 1) {
             throw new IllegalArgumentException("feedback 值必须为 -1/0/1");
         }
+        // 行主键必填（按单次回复定位反馈）
+        if (sessionRowId == null) {
+            throw new IllegalArgumentException("sessionRowId 不能为空");
+        }
 
-        // 先查会话是否存在（按租户 + 用户 + sessionId 过滤，确保隔离）
-        List<RagSession> sessions = sessionMapper.selectList(
+        // 按 租户 + 用户 + 会话 + 行主键 定位单条问答记录（确保隔离，防止跨会话/跨租户更新）
+        RagSession session = sessionMapper.selectOne(
                 new LambdaQueryWrapper<RagSession>()
                         .eq(RagSession::getTenantId, tenantId)
                         .eq(RagSession::getUserId, userId)
                         .eq(RagSession::getSessionId, sessionId)
+                        .eq(RagSession::getId, sessionRowId)
         );
 
-        if (sessions.isEmpty()) {
-            log.warn("会话不存在，无法更新反馈 | tenantId={} userId={} sessionId={}", tenantId, userId, sessionId);
+        if (session == null) {
+            log.warn("会话记录不存在，无法更新反馈 | tenantId={} userId={} sessionId={} sessionRowId={}",
+                    tenantId, userId, sessionId, sessionRowId);
             return;
         }
 
-        // 批量更新该会话的所有对话记录的 feedback
-        int updatedCount = 0;
-        for (RagSession session : sessions) {
-            session.setFeedback(feedback);
-            updatedCount += sessionMapper.updateById(session);
-        }
+        // 仅更新该单条问答记录的 feedback
+        session.setFeedback(feedback);
+        int updatedCount = sessionMapper.updateById(session);
 
-        log.info("更新会话反馈成功 | tenantId={} userId={} sessionId={} feedback={} updatedCount={}",
-                tenantId, userId, sessionId, feedback, updatedCount);
+        log.info("更新单条会话反馈成功 | tenantId={} userId={} sessionId={} sessionRowId={} feedback={} updatedCount={}",
+                tenantId, userId, sessionId, sessionRowId, feedback, updatedCount);
     }
 }

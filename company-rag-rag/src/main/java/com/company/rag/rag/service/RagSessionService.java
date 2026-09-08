@@ -51,11 +51,12 @@ public interface RagSessionService {
     void updateSessionMeta(String sessionId, String lastQuery, int messageCount);
 
     /**
-     * 更新用户反馈（👍/👎）
+     * 更新用户反馈（👍/👎）——按单个问答行反馈
      * @param tenantId 租户 ID
      * @param userId 用户 ID
-     * @param sessionId 会话 ID
+     * @param sessionId 会话 ID（归属校验）
+     * @param sessionRowId rag_session 行主键（定位具体某次回复）
      * @param feedback 反馈值：-1=👎, 0=清除，1=👍
      */
-    void updateFeedback(Long tenantId, Long userId, String sessionId, Short feedback);
+    void updateFeedback(Long tenantId, Long userId, String sessionId, Long sessionRowId, Short feedback);
 }

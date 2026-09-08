@@ -185,9 +185,11 @@ public class ChatController {
     @PostMapping("/chat/feedback")
     @PreAuthorize("isAuthenticated()")
     public R<Void> updateFeedback(@RequestParam String sessionId,
+                                   @RequestParam Long sessionRowId,
                                    @RequestParam Short feedback,
                                    @RequestHeader(value = "X-Tenant-Id", required = false) Long headerTenantId) {
-        log.info("收到反馈更新请求：sessionId={}, feedback={}, headerTenantId={}", sessionId, feedback, headerTenantId);
+        log.info("收到反馈更新请求：sessionId={}, sessionRowId={}, feedback={}, headerTenantId={}",
+                sessionId, sessionRowId, feedback, headerTenantId);
         
         // 【安全关键】租户 ID 必须从请求头获取（已经过 JwtAuthenticationFilter 验证）
         if (headerTenantId == null) {
@@ -207,8 +209,8 @@ public class ChatController {
             throw new IllegalStateException("用户 ID 不能为空");
         }
         
-        // 调用 Service 更新反馈
-        ragSessionService.updateFeedback(headerTenantId, verifiedUserId, sessionId, feedback);
+        // 调用 Service 更新反馈（按具体问答行定位）
+        ragSessionService.updateFeedback(headerTenantId, verifiedUserId, sessionId, sessionRowId, feedback);
         
         return R.ok();
     }
