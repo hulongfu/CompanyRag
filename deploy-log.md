@@ -798,3 +798,20 @@ $ git rev-parse HEAD
   - deploy-log.md（修改 - 记录本次整理）
 - result:                 仓库卫生整理。将根目录 9 个一次性历史清理遗留物（Git 敏感信息清理脚本、已清空的替换表达式文件、一次性报告、GenPass 工具源码）以 `git mv` 方式归档至 `docs/_archive/`，保留各文件 git 历史；删除编译产物 `GenPass.class` 与未跟踪的 `agent_skills/file-manager/scripts/__pycache__/`（均已被现有 `*.class` / 新增 `.gitignore` 规则忽略）；补充 `.gitignore` 忽略规则规范 Python 产物落盘；新增盘点文档 `docs/known-improvements-inventory.md` 与归档说明。验证：`git status` 确认 9 个 rename 到位、目标产物不再可见。
 
+## Git Push
+
+- commit_type:            Task
+- task_id:                0000
+- task_name:              仓库卫生整理
+- commit_hash:            af6a1b9aa672fcfd4763287d5ecb77bcf5e426dd
+- branch:                 main
+- remote:                 gitee + origin(github)
+- staged_files:           13 files（9 个 rename 归档至 docs/_archive/、docs/_archive/README.md、docs/known-improvements-inventory.md、.gitignore、deploy-log.md）
+- commit_message:         Task:0000_仓库卫生整理：归档一次性脚本与报告、补充 .gitignore
+- commit_command:         git add -A && git commit -m "Task:0000_仓库卫生整理：归档一次性脚本与报告、补充 .gitignore"
+- commit_exit_code:       0
+- push_command:           git push gitee main && git push origin main
+- push_exit_code:         0（gitee）/ 0（origin/github）
+- remote_head_check_command: git ls-remote gitee refs/heads/main; git ls-remote origin refs/heads/main
+- remote_head:            af6a1b9aa672fcfd4763287d5ecb77bcf5e426dd（gitee）/ af6a1b9aa672fcfd4763287d5ecb77bcf5e426dd（origin/github）
+- result:                推送证据完整。gitee 与 github 两端 main 均已推送到 af6a1b9，且与本地 HEAD 一致（ls-remote 校验通过）。本次 github 网络正常，未出现历史网络失败，两端均 push_exit_code=0。
