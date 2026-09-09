@@ -757,3 +757,44 @@ $ git rev-parse HEAD
 - commit_message:         Feat:0000_前端反馈入口：消息气泡下按问答行点赞/点踩
 - commit_command:         git commit -m "Feat:0000_前端反馈入口：消息气泡下按问答行点赞/点踩"
 - result:                 前端补全反馈入口：assistant 每条回复气泡下展示 👍/👎 按钮（灰态未反馈、彩色已反馈、再次点击清除）；历史会话加载时携带 item.id 与 item.feedback 用于定位与回显；新消息从 /api/chat 响应新增的 sessionRowId 拿到刚保存的问答行主键。saveConversation 由 void 改为 Long（MyBatis-Plus insert 回填自增 id）。编译通过（company-rag-rag,company-rag-web）。
+
+## 技术债记录
+
+> 以下为 systematic-debugging 评估结论，均**未改代码**，仅记录备查。
+
+### TD-1 · 反馈消费侧未接（收集闭环、消费开环）
+- 现象：`rag_session.feedback` 的👍/👎已可落库（updateFeedback + 前端弹层），但 `rag/eval/` 无 main 调用方消费，无管理端查询、无定时灌 EvalCase。
+- 评估：非缺陷，不影响反馈功能本身。消费属产品/算法级后续（积分/评测/调参），`RetrievalEvalRunner` 为免 DB 评测器、不依赖 feedback。
+- 处置：暂不落地。最小收口候选——`GET /api/admin/feedback?feedback=-1` 管理端查询，或定时任务将负反馈灌为 EvalCase（需 referenceChunkIds 地面真值，二元点赞不满足，硬灌产生恒 0 召回假用例，不推荐）。
+
+### TD-2 · 无 sessionId 的新对话不落库（设计使然）
+- 现象：`ChatController.java:120` 守卫 `if (sessionId != null)`，首条消息未建会话时该答无法反馈。
+- 评估：设计使然（前端"先建会话再聊"；sessionId 缺失时不读历史避免"读不到旧记忆却存到租户 1"的割裂，见 L13-14 注释）。放开需跨 Controller+Service+前端时序改动，实践场景小，引入重复建会话风险。
+- 处置：保持现状，不建议改。
+
+### TD-3 · feedback 单列索引价值有限（原"冗余索引"判断有误）
+- 澄清：init.sql `idx_session_feedback(tenant_id,feedback)` 与 SchemaMigrationConfig 的 `idx_{schema}_session_feedback(feedback)` **不在同一 schema、索引名不同，不构成冗余**。init.sql 业务表无 schema 前缀（落在 initdb search_path），tenant_% 租户 rag_session 唯一 feedback 索引正是 SchemaMigrationConfig 建的这一支。
+- 真实可优化点：updateFeedback 按 `tenant_id+user_id+session_id+id`（主键）定位，feedback 列几乎不被独立范围查询，单列索引价值有限。
+- 处置（可选低优先级）：迁移可改为"只补列"，由生产按需建 `(tenant_id, feedback)` 复合索引替代单列。需连同 init.sql 与 TenantServiceImpl 的索引策略一并评估，超出最小改动原则故暂不动。
+
+## Git Push（2026-09-09 仓库卫生整理 → 待推送 gitee & github）
+
+- commit_type:            Task
+- task_id:                0000
+- task_name:              仓库卫生整理
+- staged_files:
+  - cleanup-env-from-history.sh → docs/_archive/（重命名归档）
+  - cleanup-env-simple.sh → docs/_archive/（重命名归档）
+  - secret-replacements.txt → docs/_archive/（重命名归档）
+  - api-key-replacements.txt → docs/_archive/（重命名归档）
+  - temp-replacements.txt → docs/_archive/（重命名归档）
+  - 修复完成报告.md → docs/_archive/（重命名归档）
+  - 最终修复说明.md → docs/_archive/（重命名归档）
+  - SESSION_HISTORY_FIX.md → docs/_archive/（重命名归档）
+  - GenPass.java → docs/_archive/（重命名归档）
+  - docs/_archive/README.md（新增 - 归档目录说明与文件清单）
+  - docs/known-improvements-inventory.md（新增 - 已知待完善项盘点清单）
+  - .gitignore（修改 - 追加 Python 运行产物 `__pycache__/`、`*.pyc` 忽略规则）
+  - deploy-log.md（修改 - 记录本次整理）
+- result:                 仓库卫生整理。将根目录 9 个一次性历史清理遗留物（Git 敏感信息清理脚本、已清空的替换表达式文件、一次性报告、GenPass 工具源码）以 `git mv` 方式归档至 `docs/_archive/`，保留各文件 git 历史；删除编译产物 `GenPass.class` 与未跟踪的 `agent_skills/file-manager/scripts/__pycache__/`（均已被现有 `*.class` / 新增 `.gitignore` 规则忽略）；补充 `.gitignore` 忽略规则规范 Python 产物落盘；新增盘点文档 `docs/known-improvements-inventory.md` 与归档说明。验证：`git status` 确认 9 个 rename 到位、目标产物不再可见。
+

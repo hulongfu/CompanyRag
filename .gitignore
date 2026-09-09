@@ -16,6 +16,10 @@ node_modules/
 uploads/*
 !uploads/.gitkeep
 
+# Python 运行产物（技能脚本）
+__pycache__/
+*.pyc
+
 # 环境变量配置文件（包含敏感信息）
 .env
 .env.docker
