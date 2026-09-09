@@ -22,6 +22,11 @@ public class ChatResponse {
     private String answer;
 
     /**
+     * 本次回答对应的 rag_session 行主键（用于按问答行反馈定位）
+     */
+    private Long sessionRowId;
+
+    /**
      * 引用来源列表
      */
     private List<String> sources;

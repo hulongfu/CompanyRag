@@ -739,3 +739,21 @@ $ git rev-parse HEAD
 - commit_message:         Feat:0000_反馈粒度改为按问答行：updateFeedback 支持 sessionRowId 单行更新
 - commit_command:         git commit -m "Feat:0000_反馈粒度改为按问答行：updateFeedback 支持 sessionRowId 单行更新"
 - result:                 反馈语义由会话级改为问答行级：updateFeedback 引入 sessionRowId（rag_session 行主键），按 租户+用户+会话+行主键 四级条件定位并只更新单条问答记录，杜绝同一会话内多行反馈一致性的冗余写入与跨会话/跨租户风险。前端 index.html 无该端点调用，无需同步。编译通过（company-rag-rag,company-rag-web）。
+
+## Git Push
+
+- commit_type:            Feat
+- task_id:                0000
+- task_name:              前端按问答行反馈入口
+- commit_hash:            （推送后核验回填）
+- branch:                 main
+- remote:                 gitee & origin(均成功)
+- staged_files:
+  - company-rag-web/src/main/resources/templates/index.html（修改 - assistant 消息气泡下新增 👍/👎 反馈按钮，历史会话回显已反馈态，新消息从 /api/chat 响应 sessionRowId 定位）
+  - company-rag-rag/src/main/java/com/company/rag/rag/response/ChatResponse.java（修改 - 新增 sessionRowId 字段用于返回新保存的问答行主键）
+  - company-rag-rag/src/main/java/com/company/rag/rag/service/RagSessionService.java（修改 - saveConversation 接口返回 Long 行主键）
+  - company-rag-rag/src/main/java/com/company/rag/rag/service/impl/RagSessionServiceImpl.java（修改 - saveConversation 改为 Long 返回，insert 后回填自增主键 id）
+  - company-rag-web/src/main/java/com/company/rag/web/controller/ChatController.java（修改 - 捕获 saveConversation 返回值并设置在 ChatResponse.sessionRowId 上）
+- commit_message:         Feat:0000_前端反馈入口：消息气泡下按问答行点赞/点踩
+- commit_command:         git commit -m "Feat:0000_前端反馈入口：消息气泡下按问答行点赞/点踩"
+- result:                 前端补全反馈入口：assistant 每条回复气泡下展示 👍/👎 按钮（灰态未反馈、彩色已反馈、再次点击清除）；历史会话加载时携带 item.id 与 item.feedback 用于定位与回显；新消息从 /api/chat 响应新增的 sessionRowId 拿到刚保存的问答行主键。saveConversation 由 void 改为 Long（MyBatis-Plus insert 回填自增 id）。编译通过（company-rag-rag,company-rag-web）。

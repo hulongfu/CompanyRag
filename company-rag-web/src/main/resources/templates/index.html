@@ -58,6 +58,10 @@
         .message.assistant .bubble { background: white; color: #303133; border-bottom-left-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
         .message .bubble .sources { margin-top: 8px; padding-top: 8px; border-top: 1px solid #e4e7ed; font-size: 12px; color: #909399; }
         .message .bubble .sources span { display: inline-block; margin-right: 8px; color: #1a73e8; cursor: pointer; }
+        .message .bubble .feedback-row { margin-top: 8px; padding-top: 8px; border-top: 1px solid #f0f2f5; display: flex; gap: 8px; }
+        .message .bubble .feedback-btn { cursor: pointer; font-size: 14px; opacity: 0.5; filter: grayscale(1); transition: all 0.2s; user-select: none; }
+        .message .bubble .feedback-btn:hover { opacity: 1; filter: none; transform: scale(1.1); }
+        .message .bubble .feedback-btn.active { opacity: 1; filter: none; }
         .chat-input-area { padding: 16px 24px; background: white; border-top: 1px solid #e4e7ed; }
         .chat-input-row { display: flex; gap: 12px; align-items: center; }
         .chat-input-row .el-input { flex: 1; }
@@ -451,6 +455,17 @@
                         <div v-if="msg.sources && msg.sources.length" class="sources">
                             📎 来源: <span v-for="s in msg.sources">{{ s }}</span>
                         </div>
+                        <!-- 仅 assistant 消息展示按问答行反馈按钮 -->
+                        <div v-if="msg.role === 'assistant' && msg.rowId" class="feedback-row">
+                            <span class="feedback-btn"
+                                  :class="{ active: msg.feedback === 1 }"
+                                  title="回答有帮助"
+                                  @click="setFeedback(msg, 1)">👍</span>
+                            <span class="feedback-btn"
+                                  :class="{ active: msg.feedback === -1 }"
+                                  title="回答无帮助"
+                                  @click="setFeedback(msg, -1)">👎</span>
+                        </div>
                     </div>
                 </div>
                 <div v-if="isLoading" class="message assistant">
@@ -739,7 +754,13 @@ createApp({
                     const history = [];
                     for (const item of json.data) {
                         history.push({ role: 'user', content: item.query });
-                        history.push({ role: 'assistant', content: item.answer, sources: [] });
+                        history.push({
+                            role: 'assistant',
+                            content: item.answer,
+                            sources: [],
+                            rowId: item.id,
+                            feedback: item.feedback || 0
+                        });
                     }
                     messages.value = history;
                     sessionMessagesMap.value[sessionId] = [...history];
@@ -882,7 +903,9 @@ createApp({
                     messages.value.push({
                         role: 'assistant',
                         content: data.answer || '抱歉，没有找到相关答案。',
-                        sources: data.sessions || []
+                        sources: data.sessions || [],
+                        rowId: data.sessionRowId,
+                        feedback: 0
                     });
                     if (data.metrics) {
                         metrics.value.totalRequests++;
@@ -904,6 +927,33 @@ createApp({
                     chatContainer.value.scrollTop = chatContainer.value.scrollHeight;
                 }
             });
+        }
+
+        // 按问答行提交用户反馈（👍/👎，再次点击同一图标视为清除）
+        async function setFeedback(msg, value) {
+            if (!msg.rowId || !currentSessionId.value) return;
+            // 同一反馈再次点击则清除（置 0）
+            const next = msg.feedback === value ? 0 : value;
+            try {
+                const json = await apiRequest('/api/chat/feedback', {
+                    method: 'POST',
+                    headers: { 'X-Tenant-Id': currentTenantId.value },
+                    body: new URLSearchParams({
+                        sessionId: currentSessionId.value,
+                        sessionRowId: msg.rowId,
+                        feedback: next
+                    })
+                });
+                if (json && json.code === 200) {
+                    msg.feedback = next;
+                    ElementPlus.ElMessage.success(next === 0 ? '已清除反馈' : '感谢您的反馈');
+                } else if (json) {
+                    ElementPlus.ElMessage.error('反馈失败：' + (json.msg || ''));
+                }
+            } catch(e) {
+                console.error('提交反馈失败', e);
+                ElementPlus.ElMessage.error('提交反馈失败');
+            }
         }
 
         function beforeUpload(file) {
@@ -1233,6 +1283,7 @@ createApp({
             deleteDocument,
             // 会话管理
             sessions, currentSessionId, createNewSession, switchSession, deleteSession, formatTime,
+            setFeedback,
             // 租户管理
             currentTab, tenants, loadingTenants, creating, tenantForm,
             loadTenants, createTenant, resetForm, viewTenantDetail, selectTenant, deleteTenant,

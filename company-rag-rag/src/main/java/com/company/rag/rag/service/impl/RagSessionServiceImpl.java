@@ -70,7 +70,7 @@ public class RagSessionServiceImpl implements RagSessionService {
     }
 
     @Override
-    public void saveConversation(Long tenantId, String sessionId, Long userId,
+    public Long saveConversation(Long tenantId, String sessionId, Long userId,
                                  String query, String answer, String context,
                                  Integer tokensInput, Integer tokensOutput, Integer latencyMs) {
         // 检查会话是否存在，不存在则创建
@@ -104,10 +104,13 @@ public class RagSessionServiceImpl implements RagSessionService {
         session.setTokensOutput(tokensOutput != null ? tokensOutput : 0);
         session.setLatencyMs(latencyMs != null ? latencyMs : 0);
 
+        // insert 后由 MyBatis-Plus 回填自增主键 id，供按行反馈定位
         sessionMapper.insert(session);
 
         // 异步更新会话元数据
         updateSessionMetaAsync(sessionId, query);
+
+        return session.getId();
     }
 
     /**

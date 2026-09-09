@@ -116,8 +116,9 @@ public class ChatController {
             
             // 保存会话和聊天记录（包含自动重命名逻辑）
             // 如果有 sessionId，无论 tenantId 是否为空都保存（为空时使用默认租户 1）
+            Long savedRowId = null;
             if (request.getSessionId() != null) {
-                ragSessionService.saveConversation(
+                savedRowId = ragSessionService.saveConversation(
                         request.getTenantId(),
                         request.getSessionId(),
                         request.getUserId(),
@@ -126,12 +127,13 @@ public class ChatController {
                         result.getToolContext(),
                         null, null, null
                 );
-                log.debug("保存会话记录：sessionId={}, tenantId={}, userId={}", 
-                        request.getSessionId(), request.getTenantId(), request.getUserId());
+                log.debug("保存会话记录：sessionId={}, tenantId={}, userId={}, savedRowId={}", 
+                        request.getSessionId(), request.getTenantId(), request.getUserId(), savedRowId);
             }
             
             ChatResponse response = ChatResponse.builder()
                     .answer(result.getAnswer())
+                    .sessionRowId(savedRowId)
                     .build();
             
             log.info("聊天响应完成：answerLength={}, toolContext={}", 

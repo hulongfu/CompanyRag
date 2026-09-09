@@ -18,8 +18,9 @@ public interface RagSessionService {
 
     /**
      * 保存对话记录
+     * @return 新保存的 rag_session 行主键 id（用于按行反馈定位）
      */
-    void saveConversation(Long tenantId, String sessionId, Long userId,
+    Long saveConversation(Long tenantId, String sessionId, Long userId,
                           String query, String answer, String context,
                           Integer tokensInput, Integer tokensOutput, Integer latencyMs);
 
