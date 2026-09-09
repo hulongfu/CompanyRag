@@ -745,7 +745,7 @@ $ git rev-parse HEAD
 - commit_type:            Feat
 - task_id:                0000
 - task_name:              前端按问答行反馈入口
-- commit_hash:            （推送后核验回填）
+- commit_hash:            1105a45（前端反馈入口功能提交）
 - branch:                 main
 - remote:                 gitee & origin(均成功)
 - staged_files:
