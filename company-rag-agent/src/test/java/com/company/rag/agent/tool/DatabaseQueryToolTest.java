@@ -4,8 +4,14 @@ import com.company.rag.tenant.context.TenantContext;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.jdbc.core.ConnectionCallback;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import java.sql.Connection;
+import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.List;
 import java.util.Map;
 
@@ -21,11 +27,65 @@ class DatabaseQueryToolTest {
 
     private JdbcTemplate mockJdbcTemplate;
     private DatabaseQueryTool databaseQueryTool;
+    private Connection mockConnection;
+    private Statement mockStatement;
+    private ResultSet mockResultSet;
+    private ResultSetMetaData mockMetaData;
+
+    /**
+     * 配置 mock JdbcTemplate.execute(ConnectionCallback) 返回给定行集。
+     * 返回行集通过 mock JDBC 链（stmt.executeQuery -> rs）模拟，SQL 内容据此可被 verify。
+     */
+    private void stubExecuteResult(List<Map<String, Object>> rows) throws SQLException {
+        // 空结果只需声明列数为 0 且 next() 默认为 false，无需注册 getObject/next stub。
+        // 若在此注册 getObject stub，后续测试再对同一 mock 注册相同签名时，
+        // Mockito 会在注册临时调用中触发旧 stub（导致 labels 空越界）。
+        if (rows.isEmpty()) {
+            when(mockMetaData.getColumnCount()).thenReturn(0);
+            return;
+        }
+        List<String> labels = new java.util.ArrayList<>(rows.get(0).keySet());
+        when(mockMetaData.getColumnCount()).thenReturn(labels.size());
+        for (int i = 0; i < labels.size(); i++) {
+            when(mockMetaData.getColumnLabel(i + 1)).thenReturn(labels.get(i));
+        }
+        java.util.Iterator<Map<String, Object>> it = rows.iterator();
+        final Map<String, Object>[] current = new Map[1];
+        when(mockResultSet.next()).thenAnswer(inv -> {
+            if (it.hasNext()) {
+                current[0] = it.next();
+                return true;
+            }
+            return false;
+        });
+        when(mockResultSet.getObject(anyInt())).thenAnswer(inv -> {
+            int idx = ((Number) inv.getArgument(0)).intValue();
+            return current[0].get(labels.get(idx - 1));
+        });
+    }
 
     @BeforeEach
-    void setUp() {
+    void setUp() throws SQLException {
         mockJdbcTemplate = mock(JdbcTemplate.class);
+        mockConnection = mock(Connection.class);
+        mockStatement = mock(Statement.class);
+        mockResultSet = mock(ResultSet.class);
+        mockMetaData = mock(ResultSetMetaData.class);
         databaseQueryTool = new DatabaseQueryTool(mockJdbcTemplate);
+
+        // DatabaseQueryTool 在同一连接上先 SET 租户上下文再查询：
+        // conn.createStatement() 被调用两次（SET 块 + 查询块），均返回同一 mock Statement。
+        when(mockConnection.createStatement()).thenReturn(mockStatement);
+        when(mockStatement.executeQuery(anyString())).thenReturn(mockResultSet);
+        when(mockResultSet.getMetaData()).thenReturn(mockMetaData);
+        // 让 JdbcTemplate.execute 真正执行回调（传入 mock 连接），从而走通 SET + 查询路径。
+        when(mockJdbcTemplate.execute(any(ConnectionCallback.class))).thenAnswer(inv -> {
+            @SuppressWarnings("unchecked")
+            ConnectionCallback<List<Map<String, Object>>> cb = inv.getArgument(0);
+            return cb.doInConnection(mockConnection);
+        });
+        // 默认空结果；需要非空结果时由测试调用 stubExecuteResult 覆盖
+        stubExecuteResult(List.of());
     }
 
     @AfterEach
@@ -83,21 +143,15 @@ class DatabaseQueryToolTest {
     }
 
     @Test
-    void testExecuteWithTenantContext() {
+    void testExecuteWithTenantContext() throws Exception {
         // 设置租户上下文
         TenantContext.setSchema("tenant_123");
-        
-        // Mock 查询结果
-        List<Map<String, Object>> mockResult = List.of(
-            Map.of("id", 1, "name", "测试用户")
-        );
-        when(mockJdbcTemplate.queryForList(anyString())).thenReturn(mockResult);
         
         Map<String, Object> params = Map.of("sql", "SELECT * FROM users");
         String result = databaseQueryTool.execute(params);
         
         // 验证 SQL 被重写，添加了 schema 前缀
-        verify(mockJdbcTemplate).queryForList(argThat(sql -> 
+        verify(mockStatement).executeQuery(argThat(sql -> 
             sql.contains("tenant_123.users") && sql.contains("LIMIT")
         ));
         
@@ -106,18 +160,17 @@ class DatabaseQueryToolTest {
     }
 
     @Test
-    void testExecuteWithTableWhitelist() {
+    void testExecuteWithTableWhitelist() throws Exception {
         // 设置租户上下文
         TenantContext.setSchema("tenant_123");
         
         // Mock 查询结果
-        when(mockJdbcTemplate.queryForList(anyString())).thenReturn(List.of());
-        
+                
         // 测试白名单为空时允许查询所有表
         Map<String, Object> params = Map.of("sql", "SELECT * FROM users");
         String result = databaseQueryTool.execute(params);
         
-        verify(mockJdbcTemplate).queryForList(anyString());
+        verify(mockStatement).executeQuery(anyString());
         
         // 注意：白名单配置通过@Value 从配置文件注入
         // 单元测试中默认白名单为空，允许所有表
@@ -125,49 +178,46 @@ class DatabaseQueryToolTest {
     }
 
     @Test
-    void testExecuteWithJoinQuery() {
+    void testExecuteWithJoinQuery() throws Exception {
         // 设置租户上下文
         TenantContext.setSchema("tenant_123");
         
         // Mock 查询结果
-        when(mockJdbcTemplate.queryForList(anyString())).thenReturn(List.of());
-        
+                
         Map<String, Object> params = Map.of(
             "sql", "SELECT u.name, o.amount FROM users u JOIN orders o ON u.id = o.user_id"
         );
         String result = databaseQueryTool.execute(params);
         
         // 验证两个表都被添加了 schema 前缀
-        verify(mockJdbcTemplate).queryForList(argThat(sql -> 
+        verify(mockStatement).executeQuery(argThat(sql -> 
             sql.contains("tenant_123.users") && sql.contains("tenant_123.orders")
         ));
     }
 
     @Test
-    void testExecuteWithCustomLimit() {
+    void testExecuteWithCustomLimit() throws Exception {
         // 设置租户上下文
         TenantContext.setSchema("tenant_123");
         
-        when(mockJdbcTemplate.queryForList(anyString())).thenReturn(List.of());
-        
+                
         Map<String, Object> params = Map.of(
             "sql", "SELECT * FROM users",
             "limit", 50
         );
         String result = databaseQueryTool.execute(params);
         
-        verify(mockJdbcTemplate).queryForList(argThat(sql -> 
+        verify(mockStatement).executeQuery(argThat(sql -> 
             sql.contains("LIMIT 50")
         ));
     }
 
     @Test
-    void testExecuteWithExistingLimit() {
+    void testExecuteWithExistingLimit() throws Exception {
         // 设置租户上下文
         TenantContext.setSchema("tenant_123");
         
-        when(mockJdbcTemplate.queryForList(anyString())).thenReturn(List.of());
-        
+                
         // SQL 已有 LIMIT
         Map<String, Object> params = Map.of(
             "sql", "SELECT * FROM users LIMIT 10"
@@ -175,7 +225,7 @@ class DatabaseQueryToolTest {
         String result = databaseQueryTool.execute(params);
         
         // 不应该再添加 LIMIT
-        verify(mockJdbcTemplate).queryForList(argThat(sql -> 
+        verify(mockStatement).executeQuery(argThat(sql -> 
             !sql.contains("LIMIT 10 LIMIT")
         ));
     }
@@ -226,8 +276,7 @@ class DatabaseQueryToolTest {
         // 测试 public. 前缀会被替换为当前租户 schema（安全修复）
         TenantContext.setSchema("tenant_123");
         
-        when(mockJdbcTemplate.queryForList(anyString())).thenReturn(List.of());
-        
+                
         // SQL 有 public. 前缀
         Map<String, Object> params = Map.of(
             "sql", "SELECT * FROM public.users"
@@ -273,13 +322,12 @@ class DatabaseQueryToolTest {
     }
 
     @Test
-    void testExecuteWithSubqueryInjection() {
+    void testExecuteWithSubqueryInjection() throws Exception {
         // 测试子查询注入被 JSqlParser 验证通过（子查询本身合法）
         TenantContext.setSchema("tenant_123");
         
         // Mock 查询结果
-        when(mockJdbcTemplate.queryForList(anyString())).thenReturn(List.of());
-        
+                
         Map<String, Object> params = Map.of(
             "sql", "SELECT * FROM (SELECT * FROM users) AS subquery"
         );
@@ -289,7 +337,7 @@ class DatabaseQueryToolTest {
         // JSqlParser 会递归验证子查询，确保子查询也是 SELECT
         assertNotNull(result);
         // 验证添加了 schema 前缀
-        verify(mockJdbcTemplate).queryForList(argThat(sql -> 
+        verify(mockStatement).executeQuery(argThat(sql -> 
             sql.contains("tenant_123.users")
         ));
     }
@@ -309,15 +357,14 @@ class DatabaseQueryToolTest {
     }
 
     @Test
-    void testExecuteWithDangerousFunction_PgReadFile() {
+    void testExecuteWithDangerousFunction_PgReadFile() throws Exception {
         // 测试 PostgreSQL 危险函数 PG_READ_FILE
         // 注意：JSqlParser 只检查语法结构，不检查函数名
         // 但 PG_READ_FILE 需要超级用户权限，普通用户无法执行
         TenantContext.setSchema("tenant_123");
         
         // Mock 查询结果（实际会因权限不足失败）
-        when(mockJdbcTemplate.queryForList(anyString())).thenReturn(List.of());
-        
+                
         Map<String, Object> params = Map.of(
             "sql", "SELECT PG_READ_FILE('/etc/passwd')"
         );
@@ -326,19 +373,18 @@ class DatabaseQueryToolTest {
         // JSqlParser 会通过语法验证（因为 PG_READ_FILE 是合法函数）
         // 但实际执行会因权限不足失败
         // 这里只验证 SQL 被执行（添加了 schema 前缀）
-        verify(mockJdbcTemplate).queryForList(argThat(sql -> 
+        verify(mockStatement).executeQuery(argThat(sql -> 
             sql.contains("PG_READ_FILE")
         ));
     }
 
     @Test
-    void testExecuteWithCommentBypass() {
+    void testExecuteWithCommentBypass() throws Exception {
         // 测试注释绕过被 JSqlParser 拦截
         TenantContext.setSchema("tenant_123");
         
         // Mock 查询结果
-        when(mockJdbcTemplate.queryForList(anyString())).thenReturn(List.of());
-        
+                
         // 注释中的 DELETE 不会被执行，因为 removeComments() 会移除注释
         Map<String, Object> params = Map.of(
             "sql", "SELECT * FROM users -- DELETE FROM users"
@@ -349,7 +395,7 @@ class DatabaseQueryToolTest {
         // 但 JSqlParser 会验证 SQL 语法，查询应该成功执行
         assertNotNull(result);
         // 验证注释被移除
-        verify(mockJdbcTemplate).queryForList(argThat(sql -> 
+        verify(mockStatement).executeQuery(argThat(sql -> 
             !sql.contains("--") && !sql.contains("DELETE")
         ));
     }
@@ -413,12 +459,11 @@ class DatabaseQueryToolTest {
     }
 
     @Test
-    void testExecuteWithValidComplexSelect() {
+    void testExecuteWithValidComplexSelect() throws Exception {
         // 测试合法的多表 JOIN 查询通过 JSqlParser 验证
         TenantContext.setSchema("tenant_123");
         
-        when(mockJdbcTemplate.queryForList(anyString())).thenReturn(List.of());
-        
+                
         // 避免使用可能包含危险关键字的列名（如 product_name 包含 create）
         Map<String, Object> params = Map.of(
             "sql", """
@@ -435,7 +480,7 @@ class DatabaseQueryToolTest {
         // 合法的复杂查询应该被允许
         assertNotNull(result);
         // 验证所有表都添加了 schema 前缀
-        verify(mockJdbcTemplate).queryForList(argThat(sql -> 
+        verify(mockStatement).executeQuery(argThat(sql -> 
             sql.contains("tenant_123.users") && 
             sql.contains("tenant_123.orders") &&
             sql.contains("tenant_123.products")
@@ -443,12 +488,11 @@ class DatabaseQueryToolTest {
     }
 
     @Test
-    void testExecuteWithNestedSubquery() {
+    void testExecuteWithNestedSubquery() throws Exception {
         // 测试嵌套子查询通过 JSqlParser 验证
         TenantContext.setSchema("tenant_123");
         
-        when(mockJdbcTemplate.queryForList(anyString())).thenReturn(List.of());
-        
+                
         Map<String, Object> params = Map.of(
             "sql", """
                 SELECT * FROM (
@@ -465,7 +509,7 @@ class DatabaseQueryToolTest {
         // 嵌套子查询是合法的
         assertNotNull(result);
         // 验证表名被正确添加 schema 前缀
-        verify(mockJdbcTemplate).queryForList(argThat(sql -> 
+        verify(mockStatement).executeQuery(argThat(sql -> 
             sql.contains("tenant_123.users") && 
             sql.contains("tenant_123.orders")
         ));
@@ -487,15 +531,14 @@ class DatabaseQueryToolTest {
     }
 
     @Test
-    void testExecuteWithLoImportFunction() {
+    void testExecuteWithLoImportFunction() throws Exception {
         // 测试 PostgreSQL 大对象导入函数
         // 注意：JSqlParser 只检查语法结构，不检查函数名
         // 但 LO_IMPORT 需要超级用户权限，普通用户无法执行
         TenantContext.setSchema("tenant_123");
         
         // Mock 查询结果（实际会因权限不足失败）
-        when(mockJdbcTemplate.queryForList(anyString())).thenReturn(List.of());
-        
+                
         Map<String, Object> params = Map.of(
             "sql", "SELECT LO_IMPORT('/tmp/file.txt', 12345)"
         );
@@ -503,7 +546,7 @@ class DatabaseQueryToolTest {
         
         // JSqlParser 会通过语法验证（因为 LO_IMPORT 是合法函数）
         // 这里只验证 SQL 被执行
-        verify(mockJdbcTemplate).queryForList(argThat(sql -> 
+        verify(mockStatement).executeQuery(argThat(sql -> 
             sql.contains("LO_IMPORT")
         ));
     }
@@ -574,5 +617,77 @@ class DatabaseQueryToolTest {
         } catch (Exception e) {
             fail("反射调用失败：" + e.getMessage());
         }
+    }
+
+    // ==================== public 系统表白名单测试 ====================
+
+    @Test
+    void testSystemTableBareRoutedToTenantSchema() throws Exception {
+        // 方案1：sys_user 等平台系统表不再放行，裸表名路由到当前租户 schema（表不存在即失败，DB 层拒绝）
+        TenantContext.setSchema("tenant_123");
+        TenantContext.setTenantId(100L);
+        
+        databaseQueryTool.execute(Map.of("sql", "SELECT * FROM sys_user"));
+
+        verify(mockStatement).executeQuery(argThat(sql ->
+            sql.contains("tenant_123.sys_user") && !sql.contains("public.sys_user")
+        ));
+    }
+
+    @Test
+    void testExplicitPublicSystemTableRejected() {
+        // 方案1：显式 public. 前缀（无论是否系统表）一律拒绝，仅允许当前租户 schema
+        TenantContext.setSchema("tenant_123");
+        TenantContext.setTenantId(100L);
+
+        String result = databaseQueryTool.execute(Map.of("sql", "SELECT * FROM public.sys_tenant"));
+
+        assertTrue(result.contains("错误"));
+        assertTrue(result.contains("schema"));
+    }
+
+    @Test
+    void testPublicSystemTableRejected() {
+        // 显式 public. 前缀（如迁移历史表、系统表）一律拒绝
+        TenantContext.setSchema("tenant_123");
+        TenantContext.setTenantId(100L);
+
+        String result = databaseQueryTool.execute(Map.of("sql", "SELECT * FROM public.flyway_schema_history"));
+
+        assertTrue(result.contains("错误"));
+        assertTrue(result.contains("schema"));
+    }
+
+    @Test
+    void testCrossTenantSchemaRejected() {
+        // 其他租户 schema 前缀（即使查的是系统表名）一律拒绝
+        TenantContext.setSchema("tenant_123");
+        TenantContext.setTenantId(100L);
+
+        String result = databaseQueryTool.execute(Map.of("sql", "SELECT * FROM tenant_other.sys_user"));
+
+        assertTrue(result.contains("错误"));
+        assertTrue(result.contains("schema"));
+    }
+
+    @Test
+    void testSensitiveColumnRedacted() throws SQLException {
+        // 敏感列（password/email/contact_phone）必须在返回结果中脱敏
+        TenantContext.setSchema("tenant_123");
+        TenantContext.setTenantId(100L);
+        stubExecuteResult(List.of(
+            java.util.Map.of(
+                "username", "bob",
+                "password", "secret-hash",
+                "email", "bob@example.com",
+                "contact_phone", "13800138000"
+            )
+        ));
+
+        String result = databaseQueryTool.execute(Map.of("sql", "SELECT * FROM sys_user"));
+
+        assertFalse(result.contains("secret-hash"));
+        assertFalse(result.contains("13800138000"));
+        assertTrue(result.contains("***"));
     }
 }

@@ -9,11 +9,16 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.ConnectionCallback;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
+import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
+import java.sql.SQLException;
+import java.sql.Statement;
+import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -37,6 +42,15 @@ public class DatabaseQueryTool implements AgentTool {
 
     private final JdbcTemplate jdbcTemplate;
     private static final int MAX_ROWS = 100;
+
+    /**
+     * 结果返回时需脱敏的敏感列（防止密码/手机号/邮箱等泄露给 LLM 或前端）。
+     */
+    private static final Set<String> SENSITIVE_COLUMNS = Set.of(
+        "password", "salt", "secret", "email",
+        "phone", "mobile", "contact_phone", "contact_mobile",
+        "api_key", "access_token", "refresh_token"
+    );
 
     @Autowired
     private AuditLogService auditLogService;
@@ -107,15 +121,17 @@ public class DatabaseQueryTool implements AgentTool {
     @Tool(
         name = "database_query",
         description = """
-            查询企业业务数据库，仅支持 SELECT 查询，返回表格格式结果。
+            查询当前租户业务数据库，仅支持 SELECT 查询，返回表格格式结果。
             自动限制最多返回 100 行，禁止 DDL/DML 操作。
+            只能访问当前租户 schema 内的业务表（如 rag_document、doc_chunk 等），无法访问用户/租户等平台系统表。
             
             适用场景：
-            - 查询用户、订单、产品等业务数据
-            - 例如："查询最近 7 天注册的用户"、"本月订单总数是多少？"、"库存低于 10 的产品有哪些？"
+            - 查询当前租户内的业务数据
+            - 例如："本租户已解析多少份文档？"、"某个文档切分成了多少个片段？"、"知识库中有哪些文档？"
             
             不适用场景：
-            - 知识库文档查询 -> 使用 searchKnowledgeBase
+            - 查询用户、租户、审计日志等平台内部信息 -> 不可用
+            - 知识库文档问答 -> 使用 searchKnowledgeBase
             """
     )
     public String queryDatabase(
@@ -172,13 +188,55 @@ public class DatabaseQueryTool implements AgentTool {
         }
 
         try {
-            List<Map<String, Object>> result = jdbcTemplate.queryForList(qualifiedSql);
+            List<Map<String, Object>> result = executeQueryInTenantContext(
+                    qualifiedSql, currentSchema, TenantContext.getTenantId());
             recordDatabaseAudit(qualifiedSql);
             return formatResult(result);
         } catch (Exception e) {
             log.error("数据库查询失败：{}", e.getMessage());
             return "查询失败：" + e.getMessage();
         }
+    }
+
+    /**
+     * 在租户上下文下执行查询：同一连接上先设置 search_path 与 app.tenant_id（RLS），再执行 SQL。
+     * <p>
+     * 必要性：DatabaseQueryTool 使用原生 JdbcTemplate，不经过 MyBatis 拦截器。
+     * 租户业务表（如 rag_document）启用了 FORCE RLS，其策略为 {@code tenant_id = current_tenant_id()}，
+     * current_tenant_id() 读取连接上的 {@code app.tenant_id} 会话变量。
+     * 若不主动设置 app.tenant_id，RLS 会按 current_tenant_id()=0 过滤，导致查不到任何业务数据。
+     * 这里与 TenantSchemaInterceptor 的设置保持一致，保证工具在方案1（仅查租户业务表）下既安全又可用。
+     */
+    private List<Map<String, Object>> executeQueryInTenantContext(String sql, String schema, Long tenantId) {
+        return jdbcTemplate.execute((ConnectionCallback<List<Map<String, Object>>>) connection -> {
+            // 设置租户会话上下文（与 TenantSchemaInterceptor 相同），确保 RLS 放行当前租户数据
+            try (Statement stmt = connection.createStatement()) {
+                stmt.execute("SET search_path TO " + schema + ", public");
+                stmt.execute("SET app.tenant_id = " + tenantId);
+            }
+            // schema 与 tenantId 已在上游校验过（schema 非空，可在此断言），此处拼接仍是安全的
+            try (Statement stmt = connection.createStatement();
+                 ResultSet rs = stmt.executeQuery(sql)) {
+                return mapResultSet(rs);
+            }
+        });
+    }
+
+    /**
+     * 将 ResultSet 首列起的所有行映射为 List<Map>，行为与 JdbcTemplate.queryForList 一致（列名->值）。
+     */
+    private List<Map<String, Object>> mapResultSet(ResultSet rs) throws SQLException {
+        List<Map<String, Object>> rows = new ArrayList<>();
+        ResultSetMetaData meta = rs.getMetaData();
+        int cols = meta.getColumnCount();
+        while (rs.next()) {
+            Map<String, Object> row = new HashMap<>();
+            for (int i = 1; i <= cols; i++) {
+                row.put(meta.getColumnLabel(i), rs.getObject(i));
+            }
+            rows.add(row);
+        }
+        return rows;
     }
 
     /**
@@ -479,7 +537,7 @@ public class DatabaseQueryTool implements AgentTool {
         if (fromItem instanceof net.sf.jsqlparser.schema.Table) {
             net.sf.jsqlparser.schema.Table table = 
                 (net.sf.jsqlparser.schema.Table) fromItem;
-            // 检查是否有 schema（包括带引号的 schema）
+            // 任何显式 schema（包括 public 与跨租户）一律拒绝，仅允许访问当前租户 schema
             return table.getSchemaName() != null;
         } else if (fromItem instanceof 
                 net.sf.jsqlparser.statement.select.ParenthesedSelect) {
@@ -530,14 +588,7 @@ public class DatabaseQueryTool implements AgentTool {
                     continue;
                 }
                 
-                // 如果是 public.前缀，替换为当前租户 schema
-                if ("public".equals(schemaPart)) {
-                    String actualTable = parts[1];
-                    result.append(sql, lastEnd, matcher.start(2));
-                    result.append(schema).append(".").append(actualTable);
-                    lastEnd = matcher.end(2);
-                }
-                // 其他情况保持原样（理论上不会发生，因为 containsExplicitSchema 已经检查过）
+                // 其余显式 schema 理论上有 containsExplicitSchema 拦截，这里防御性保留原样不重写
                 else {
                     continue;
                 }
@@ -567,6 +618,19 @@ public class DatabaseQueryTool implements AgentTool {
         return tableName.matches("^[a-zA-Z_][a-zA-Z0-9_]*$");
     }
 
+/**
+     * 对敏感列脱敏，防止密码/手机号/邮箱等泄露给 LLM 或前端。
+     */
+    private String maskSensitive(String columnName, Object value) {
+        if (value == null) {
+            return "NULL";
+        }
+        if (columnName != null && SENSITIVE_COLUMNS.contains(columnName.toLowerCase())) {
+            return "***";
+        }
+        return value.toString();
+    }
+
     private String formatResult(List<Map<String, Object>> rows) {
         if (rows.isEmpty()) return "查询结果为空";
         
@@ -578,10 +642,10 @@ public class DatabaseQueryTool implements AgentTool {
             sb.append(String.join(" | ", rows.get(0).keySet())).append("\n");
             sb.append("-".repeat(80)).append("\n");
             
-            // 数据行
+            // 数据行（敏感列脱敏）
             for (Map<String, Object> row : rows) {
-                sb.append(row.values().stream()
-                        .map(v -> v != null ? v.toString() : "NULL")
+                sb.append(row.entrySet().stream()
+                        .map(e -> maskSensitive(e.getKey(), e.getValue()))
                         .reduce((a, b) -> a + " | " + b)
                         .orElse(""))
                       .append("\n");
