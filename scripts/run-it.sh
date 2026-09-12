@@ -4,9 +4,9 @@
 #
 # 作用：
 #   检测已在运行的 docker PG(5433)/Redis(6379)，幂等灌入 IT 种子数据，
-#   然后以 -Dit.pg=true 运行真实数据库集成测试（RlsIsolationTest + AuditLogTenantIsolationIT）。
-#   若提供了 DASHSCOPE_API_KEY（或 SILICONFLOW_API_KEY），额外尝试 MultiRetrieve
-#   全链路集成测试（强依赖外网 embedding，不稳定），否则跳过并提示。
+#   然后以 -Dit.pg=true 运行真实数据库集成测试（RlsIsolationTest + AuditLogTenantIsolationIT
+#   + MultiRetrieveIntegrationIT）。后端 MultiRetrieve 强依赖外网 embedding，不稳定，
+#   仅在 --all 且提供 DASHSCOPE_API_KEY / SILICONFLOW_API_KEY 时运行。
 #
 # 用法：
 #   scripts/run-it.sh            # 仅跑租户 IT（推荐，稳定）
@@ -95,10 +95,26 @@ fi
 if [ "$DO_ALL" = true ]; then
   if [ -n "${DASHSCOPE_API_KEY:-}" ] || [ -n "${SILICONFLOW_API_KEY:-}" ]; then
     info "检测到 LLM/Embedding key，尝试运行 MultiRetrieve 全链路集成测试..."
-    info "注：MultiRetrieveIntegrationTest 当前为 @Disabled 且需完整 bootstrap 上下文，见其类注释"
-    warn "MultiRetrieve 依赖真实向量 seed 与外网 embedding，结果可能不稳定，仅供参考"
-    # 该测试需完整 Spring Boot 上下文 + 真实向量数据，通常不纳入核心回归；
-    # 如需运行请按测试类顶部注释在 bootstrap 模块搭建环境后手动执行。
+    # 该测试(multiRetrieveIntegrationIT)加载完整 bootstrap 上下文：
+    #   - 需 Redis 运行：REDIS_PASSWORD 从 .env 读取（否则 Redisson 连接失败）
+    #   - 需 JWT_SECRET：application-dev.yml 默认空串，JwtSecurityValidator 启动即校验
+    #   - 本机 JDK17 旧版 Mockito self-attach 受限，注入 allowAttachSelf 规避
+    REDIS_PSWD="${REDIS_PASSWORD:-difyai123456}"
+    [ -f "$ROOT_DIR/company-rag-bootstrap/.env" ] \
+      && REDIS_PSWD="$(grep -E '^REDIS_PASSWORD=' "$ROOT_DIR/company-rag-bootstrap/.env" | head -1 | cut -d= -f2-)"
+    JWT_SECRET="${JWT_SECRET:-$(openssl rand -base64 32)}"
+    mvn -q -pl company-rag-bootstrap test \
+        -Dit.pg=true \
+        -Dtest='MultiRetrieveIntegrationIT' \
+        -Dsurefire.failIfNoSpecifiedTests=false \
+        -DargLine="-Djdk.attach.allowAttachSelf=true" \
+        -DREDIS_PASSWORD="$REDIS_PSWD" -DJWT_SECRET="$JWT_SECRET"
+    RC=$?
+    if [ $RC -ne 0 ]; then
+      warn "MultiRetrieve 集成测试未通过(exit=$RC)。该测试强依赖真实向量数据与外网 embedding，仅供参考"
+    else
+      info "MultiRetrieveIntegrationIT 全部通过 ✅"
+    fi
   else
     warn "未提供 DASHSCOPE_API_KEY / SILICONFLOW_API_KEY，跳过 MultiRetrieve 可选验证"
   fi
