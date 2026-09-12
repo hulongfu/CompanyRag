@@ -2,6 +2,24 @@
 
 ## Git Push
 
+### 最新推送（2026-09-12 回填真库 IT → 待推送 gitee & github）
+
+- commit_type:            Task
+- task_id:                P1
+- task_name:              回填被跳过的 PG 真库 IT 测试（方案 A）
+- commit_hash:            03b2387
+- branch:                 main
+- remote:                 待推送到 gitee 与 github
+- staged_files:
+  - company-rag-tenant/.../tenant/RlsIsolationTest.java（修改 - 移除 @SpringBootTest，改纯 JUnit + 直接 JDBC 直连真库；连接参数环境变量驱动；修正清理被 FORCE RLS 拦截缺陷）
+  - company-rag-tenant/.../tenant/AuditLogTenantIsolationIT.java（修改 - 移除 @SpringBootTest，改直接 JDBC，连接参数环境变量驱动）
+  - sql/seed-it.sql（新增 - 幂等 IT 种子数据，正确处理 FORCE RLS 需 SET LOCAL app.tenant_id）
+  - scripts/run-it.sh（新增 - 一键回归脚本：检测 docker PG/Redis → 灌种子 → 以 -Dit.pg=true 跑租户 IT → 可选 MultiRetrieve）
+- commit_message:         Task:P1_回填真库IT：租户隔离测试改纯JDBC直连PG，7例全绿；新增种子与一键脚本
+- commit_exit_code:       0
+- push_command:           git push gitee main; git push origin main
+- result:                 待推送。根因：两个租户测试位于 company-rag-tenant 模块却用 @SpringBootTest，该模块无 @SpringBootConfiguration（主类在 bootstrap），导致 Spring 找不到配置类、测试从未真正跑通。改为纯 JUnit + 直连 PG 后验证：mvn -pl company-rag-tenant test -Dit.pg=true → RlsIsolationTest 6 例 + AuditLogTenantIsolationIT 1 例 = 7 例全绿。测试过程真实暴露并修复两处缺陷：setUp 清理 DELETE 被 FORCE RLS 拦截导致跨用例残留（改为按租户逐个 SET app.tenant_id 清理）；vector_store 表被 FORCE RLS 且无 policy 导致任何写操作被拒（test6 改为只验证 schema 路由隔离语义）。种子幂等验证：重复 --seed 插入 0 行；租户隔离闭环 tenant1 见 microservice、tenant2 见 finance 互不可见。
+
 ### 最新推送（2026-09-07 rag_session.user_id 收敛 NOT NULL → 待推送 gitee & github）
 
 - commit_type:            Task
