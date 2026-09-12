@@ -30,7 +30,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # ============================================
 # 创建非 root 用户（显式指定 UID/GID，与 k8s runAsUser 保持一致，避免依赖系统默认取值）
 # ============================================
-RUN groupadd -r -g 1000 appgroup && useradd -r -g appgroup -u 1000 appuser
+# 基础镜像（Ubuntu 25.04）已占用 GID/UID 1000，需容错：优先用 1000，已被占用则退回自动分配
+# 确保 appgroup/appuser 这两个名字始终存在，供后续 chown/USER 按名引用
+RUN set -eux; \
+    getent group appgroup >/dev/null 2>&1 || groupadd -r -g 1000 appgroup 2>/dev/null || groupadd -r appgroup; \
+    getent passwd appuser >/dev/null 2>&1 || useradd -r -g appgroup -u 1000 -m -s /usr/sbin/nologin appuser 2>/dev/null || useradd -r -g appgroup -m -s /usr/sbin/nologin appuser
 
 # ============================================
 # 复制应用 JAR (本地构建)
