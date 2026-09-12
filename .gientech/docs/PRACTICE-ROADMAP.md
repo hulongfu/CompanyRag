@@ -10,10 +10,10 @@
 - [x] 工程保障：Resilience4j 熔断限流 + 两级缓存
 
 ## L1 当前阶段（本次完成）
-- [ ] 设计知识库文档化（DESIGN-PHILOSOPHY / PACKAGE-DESIGN / PRACTICE-ROADMAP / VERIFICATION-PROTOCOL）
-- [ ] Harness 产出物：boundaries / conventions / api-contracts / iron-rules
-- [ ] AGENTS.md 项目智能体指令
-- [ ] SOP 目录与模板
+- [x] 设计知识库文档化（DESIGN-PHILOSOPHY / PACKAGE-DESIGN / PRACTICE-ROADMAP / VERIFICATION-PROTOCOL）
+- [x] Harness 产出物：boundaries / conventions / api-contracts / iron-rules
+- [x] AGENTS.md 项目智能体指令
+- [x] SOP 目录与模板
 
 ## L2 规划（后续）
 - [ ] 单元测试覆盖核心业务逻辑（≥80%）
