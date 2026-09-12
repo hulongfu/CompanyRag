@@ -3,7 +3,6 @@ package com.company.rag.tenant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
-import org.springframework.boot.test.context.SpringBootTest;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -27,15 +26,19 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  * （否则 TenantLine 会为其追加 tenant_id 条件，admin 跨租户查询被截断）。
  * <p>
  * 需要真实 PG：仅当系统属性 {@code it.pg=true} 时启用，否则整类跳过，避免无 PG 环境下抛异常断构建
- * （同 RlsIsolationTest，本 commit 仅提供可编译、含正确断言的验收脚本）。
+ * （同 RlsIsolationTest，通过直接 JDBC 直连真实 PG，只验证数据库层隔离行为，不依赖 Spring 容器）。
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @EnabledIfSystemProperty(named = "it.pg", matches = "true")
 class AuditLogTenantIsolationIT {
 
-    private static final String TEST_URL = "jdbc:postgresql://localhost:5432/company_rag";
-    private static final String TEST_USER = "company_rag_app";
-    private static final String TEST_PASSWORD = "company_rag_app_password_change_me";
+    // 连接参数从环境变量读取（与 application.yml 同源），缺省匹配本地 docker PG，
+    // 避免硬编码端口/密码与部署环境漂移导致集成测试在常规流程中被跳过。
+    private static final String TEST_URL = "jdbc:postgresql://"
+            + System.getenv().getOrDefault("POSTGRES_HOST", "localhost") + ":"
+            + System.getenv().getOrDefault("POSTGRES_PORT", "5433") + "/"
+            + System.getenv().getOrDefault("POSTGRES_DB", "company_rag");
+    private static final String TEST_USER = System.getenv().getOrDefault("POSTGRES_USER", "company_rag_app");
+    private static final String TEST_PASSWORD = System.getenv().getOrDefault("POSTGRES_PASSWORD", "company_rag_app123456");
 
     @BeforeEach
     void setUp() throws SQLException {
