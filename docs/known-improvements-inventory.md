@@ -2,7 +2,9 @@
 
 > 说明：本文档为审计/盘点产物，作为后续优化工作的依据，不代表已批准实施。
 > 盘点日期：2026-09-09。基于当前 main（30857e5）代码、文档与 git 状态逐项核实。
-> 更新记录：2026-09-12 回填真库 IT（A1 已通过本地一键脚本 run-it.sh 落地，仍需 CI 触发方案）；C1-C4 仓库卫生项已处理归档。
+> 更新记录：
+> - 2026-09-12 回填真库 IT（A1 已通过本地一键脚本 run-it.sh 落地，仍需 CI 触发方案）；C1-C4 仓库卫生项已处理归档。
+> - 2026-09-12 A2/B2/A3 已实施：新增 quality profile（JaCoCo `prepare-agent` 生效；Checkstyle 0 violations）；`MultiRetrieveIntegrationTest`（@Disabled 模板）迁移至 bootstrap 模块为 `MultiRetrieveIntegrationIT` 并激活，`run-it.sh --all` 实际执行该 IT（测试 4/4 通过）。见下方"A2/B2/A3 实施结果"。
 
 ---
 
@@ -59,6 +61,19 @@
 2. **P1（工程质量）**：落地 B2 代码质量工具 + JaCoCo（可顺带满足 A2 覆盖率）；补齐 B1 路线图勾选态使其反映真实进度。
 3. **P2（仓库卫生）**：处理 C1、C2、C3、C4 的归档与 `.gitignore` 规整。
 4. **P3（后续规划）**：B3 CI/CD、B4 文档生成、B5 远期项按业务需要排期。
+
+---
+
+## 三.五、A2/B2/A3 实施结果（2026-09-12）
+
+| 项 | 实施内容 | 验证结果 |
+|----|---------|---------|
+| A2/B2 | 根 pom.xml 新增 `quality` profile，绑定 `jacoco-maven-plugin`（prepare-agent / report / check，行覆盖率最低 0.30）与 `maven-checkstyle-plugin`（google_checks，`failOnViolation=false`，默认关闭仅 `-Pquality` 启用） | JaCoCo `prepare-agent` 已生效并生成 `jacoco.exec`(74948B)；Checkstyle 线上拉取依赖后审计 **0 violations**（`checkstyle-result.xml` 122KB 生成）。common 既有失败（AuditLogAspectTest 8 错误 / PasswordVerificationTest 1 失败）为基线问题，与本次改动无关 |
+| A3 | 原 `company-rag-rag/.../MultiRetrieveIntegrationTest.java`（@Disabled 模板，因 rag 模块无 DB/Redis 依赖无法运行）迁移至 `company-rag-bootstrap/.../MultiRetrieveIntegrationIT.java` 并激活，保留 fullChain / withRerank / emptyResults 三用例 + contextLoads；`scripts/run-it.sh --all` 分支实际执行该 IT | bootstrap 完整上下文加载，**Tests run: 4, Failures: 0, Errors: 0, Skipped: 0** |
+
+> 前置环境要求（已固化进 `run-it.sh --all`）：Redis 运行且 `REDIS_PASSWORD` 正确（否则 Redisson 连接失败）；`JWT_SECRET` 需注入强密钥（`application-dev.yml` 默认空串，`JwtSecurityValidator` 启动即校验）；本机 JDK17 旧版 Mockito self-attach 受限需加 `-DargLine="-Djdk.attach.allowAttachSelf=true"`。
+>
+> 提交：`3828d06`（已推送 gitee，github 443 待网络恢复后补推）。
 
 ---
 
