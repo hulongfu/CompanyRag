@@ -4,9 +4,9 @@
 
 **Goal:** 在不改变对外行为的前提下，把 `MultiRetrieveServiceImpl` 内部的确定性混合检索流水线重构成一张 Spring AI Alibaba `StateGraph` 工作流，用于体验图编排效果。
 
-**Architecture:** 保持 `MultiRetrieveService` 接口与 `RagSearchServiceImpl` 上层调用不变，仅将 `MultiRetrieveServiceImpl.retrieve()` 委派给新增的 `HybridRetrievalWorkflow`。工作流由三路并行检索节点（向量/全文/模糊）+ 归一化融合节点 + 最终筛选节点组成，业务逻辑复用现有 `VectorRetriever`、`FullTextRetriever`、`FuzzyRetriever`、`RankNormalizer`、`ResultFuser`、`ResultFilter`。
+**Architecture:** 保持 `MultiRetrieveService` 接口与 `RagSearchServiceImpl` 上层调用不变，仅将 `MultiRetrieveServiceImpl.retrieve()` 委派给新增的 `HybridRetrievalWorkflow`。工作流由三路并行检索节点（向量/全文/模糊）+ 归一化融合节点 + 最终筛选节点组成，业务逻辑复用现有 `VectorRetriever`、`FullTextRetriever`、`FuzzyRetriever`、`RankNormalizer`、`ResultFuser`、`ResultFilter`。工作流直接使用图引擎的 `OverAllState`（final 类，不可继承），不自定义状态类。
 
-**Tech Stack:** Java 17、Spring Boot 3.4、Spring AI 1.1 / Spring AI Alibaba Graph Core 1.1.2.0（`StateGraph` / `CompiledGraph` / `OverAllState`）、Reactor（`stream()` 返回 `Flux`）、JUnit 5 + Mockito。
+**Tech Stack:** Java 17、Spring Boot 3.4、Spring AI 1.1 / Spring AI Alibaba Graph Core 1.1.2.0（`StateGraph` / `CompiledGraph` / `OverAllState` / `AsyncNodeAction`）、Reactor（`stream()` 返回 `Flux`）、JUnit 5 + Mockito。
 
 ---
 
@@ -14,13 +14,12 @@
 
 新增（均在 `company-rag-rag` 模块，`workflow` 子包）：
 
-- `company-rag-rag/src/main/java/com/company/rag/rag/workflow/HybridRetrievalState.java` — 图状态载体（纯数据，持有 query、三路结果、融合结果）。
-- `company-rag-rag/src/main/java/com/company/rag/rag/workflow/HybridRetrievalWorkflow.java` — 组装并执行图工作流，暴露 `execute(RagQuery)`。
 - `company-rag-rag/src/main/java/com/company/rag/rag/workflow/VectorRetrieveNode.java` — 向量检索节点。
 - `company-rag-rag/src/main/java/com/company/rag/rag/workflow/FullTextRetrieveNode.java` — 全文检索节点。
 - `company-rag-rag/src/main/java/com/company/rag/rag/workflow/FuzzyRetrieveNode.java` — 模糊检索节点。
 - `company-rag-rag/src/main/java/com/company/rag/rag/workflow/NormalizeFuseNode.java` — 归一化 + 融合节点。
 - `company-rag-rag/src/main/java/com/company/rag/rag/workflow/FilterNode.java` — 最终筛选节点。
+- `company-rag-rag/src/main/java/com/company/rag/rag/workflow/HybridRetrievalWorkflow.java` — 组装并执行图工作流，暴露 `execute(RagQuery)`。
 
 修改：
 
@@ -28,7 +27,6 @@
 
 测试（均为单元测试，JUnit 5 + Mockito，不依赖 PG/Redis/外网）：
 
-- `company-rag-rag/src/test/java/com/company/rag/rag/workflow/HybridRetrievalStateTest.java`
 - `company-rag-rag/src/test/java/com/company/rag/rag/workflow/RetrieveNodeTest.java`（vector / fulltext / fuzzy 三个节点共用）
 - `company-rag-rag/src/test/java/com/company/rag/rag/workflow/NormalizeFuseNodeTest.java`
 - `company-rag-rag/src/test/java/com/company/rag/rag/workflow/FilterNodeTest.java`
@@ -36,7 +34,7 @@
 
 不动：`MultiRetrieveService` 接口、`RagSearchServiceImpl`、Controller、DTO、数据层、`company-rag-bootstrap`。
 
-**命令前缀：** 本模块构建/测试用 `cd company-rag-rag && mvn -q -o test`（离线）或 `mvn -q test`；单测类用 `mvn -q -Dtest=<ClassName> test`。验证范围始终限制在本模块相关测试类，不跑全仓库。
+**命令前缀：** 本模块构建/测试用 `cd company-rag-rag && mvn -q -o test`（离线）或 `mvn -q test`；单测类用 `mvn -q -o -Dtest=<ClassName> test`。验证范围始终限制在本模块相关测试类，不跑全仓库。
 
 ---
 
@@ -49,166 +47,35 @@
 - `ResultFuser.fuse(List<NormalizedResult> vector, List<NormalizedResult> fulltext, List<NormalizedResult> fuzzy, String query)` → `List<FusedResult>`
 - `ResultFilter.filter(List<FusedResult>, int fusionTopK, Double scoreThreshold)` → `List<FusedResult>`；`ResultFilter.finalFilter(List<RagResult.ChunkResult>, int topK, int maxPerDoc)` → `List<RagResult.ChunkResult>`
 
-图 API（来自 `spring-ai-alibaba-graph-core` 1.1.2.0）：
-- `StateGraph`（无参构造可用）、`.addNode(String, AsyncNodeActionWithConfig)`、`.addEdge(String, String)`、`.compile()` → `CompiledGraph`。
-- `OverAllState.updateState(Map<String,Object>)`、`<T> Optional<T> value(String)`。
-- Node 动作类型：`AsyncNodeActionWithConfig<T> extends Function<OverAllState, CompletableFuture<Map<String,Object>>>`。为简化，可让 Node 实现 `AsyncNodeAction`（`AsyncFunction<OverAllState, Map<String,Object>>`，经 `AsyncNodeAction.node_async(...)` 包装）。本计划统一采用 `AsyncNodeAction` 接口，节点以 lambda/方法引用注册。
+图 API（已用 javap 核实 `spring-ai-alibaba-graph-core` 1.1.2.0 jar）：
+- `StateGraph`（无参构造可用）、`addNode(String, AsyncNodeAction)` / `addEdge(String, String)` / `compile()` → `CompiledGraph`；常量 `StateGraph.START` / `StateGraph.END`。
+- `OverAllState` 是 **final 类，不可继承**。用 `new OverAllState(Map<String,Object>)` 创建；`<T> Optional<T> value(String)` 读值（final 方法）；节点返回 `Map<String,Object>` 由引擎写回。
+- 节点动作类型：`AsyncNodeAction extends Function<OverAllState, CompletableFuture<Map<String,Object>>>`，需实现 `apply(OverAllState)`。也可用 `AsyncNodeAction.node_async(NodeAction)` 包装同步 `NodeAction`。
+
+**状态键（在工作流/节点间以常量共享，定义在 `HybridRetrievalWorkflow`）：**
+- `query` → `RagQuery`
+- `vectorChunks` → `List<RagResult.ChunkResult>`
+- `fullTextChunks` → `List<RagResult.ChunkResult>`
+- `fuzzyChunks` → `List<RagResult.ChunkResult>`
+- `fused` → `List<FusedResult>`
+- `filtered` → `List<RagResult.ChunkResult>`（工作流输出）
 
 ---
 
-### Task 1: 图状态载体 `HybridRetrievalState`
+### Task 1: 三个检索节点（Vector / FullText / Fuzzy）
 
-Establishes the shared state object that flows through the workflow nodes.
-
-**Files:**
-- Create: `company-rag-rag/src/main/java/com/company/rag/rag/workflow/HybridRetrievalState.java`
-- Test: `company-rag-rag/src/test/java/com/company/rag/rag/workflow/HybridRetrievalStateTest.java`
-- Depends on: 无
-
-- [ ] **Step 1: Write the failing test**
-
-Create `company-rag-rag/src/test/java/com/company/rag/rag/workflow/HybridRetrievalStateTest.java`:
-
-```java
-package com.company.rag.rag.workflow;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
-import com.company.rag.rag.model.RagQuery;
-import com.company.rag.rag.model.RagResult;
-import java.util.Collections;
-import java.util.List;
-import org.junit.jupiter.api.Test;
-
-class HybridRetrievalStateTest {
-
-    @Test
-    void initialStateHoldsQueryParams() {
-        RagQuery query = new RagQuery();
-        query.setQuery("测试查询");
-        query.setTopK(10);
-        query.setFusionTopK(30);
-        query.setScoreThreshold(0.3);
-
-        HybridRetrievalState state = new HybridRetrievalState(query);
-
-        assertNotNull(state.toMap());
-        assertEquals("测试查询", ((RagQuery) state.toMap().get("query")).getQuery());
-        assertTrue(state.toMap().containsKey("vectorChunks"));
-        assertTrue(state.toMap().containsKey("fullTextChunks"));
-        assertTrue(state.toMap().containsKey("fuzzyChunks"));
-        assertTrue(state.toMap().containsKey("fused"));
-        assertTrue(state.toMap().containsKey("filtered"));
-    }
-
-    @Test
-    void resultKeysReadableFromMap() {
-        HybridRetrievalState state = new HybridRetrievalState(new RagQuery());
-        List<RagResult.ChunkResult> chunks = Collections.singletonList(new RagResult.ChunkResult());
-        state.toMap().put("filtered", chunks);
-        assertEquals(chunks, state.value("filtered").orElse(null));
-    }
-}
-```
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `cd company-rag-rag && mvn -q -o -Dtest=HybridRetrievalStateTest test`
-Expected: FAIL — `cannot find symbol: class HybridRetrievalState`
-
-- [ ] **Step 3: Write minimal implementation**
-
-Create `company-rag-rag/src/main/java/com/company/rag/rag/workflow/HybridRetrievalState.java`:
-
-```java
-package com.company.rag.rag.workflow;
-
-import com.alibaba.cloud.ai.graph.OverAllState;
-import com.company.rag.rag.model.RagQuery;
-import com.company.rag.rag.model.RagResult;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
-
-/**
- * 混合检索工作流的状态载体。
- *
- * 包含用户查询参数以及各检索节点产出的中间结果，最终筛选结果由 {"filtered"} 键承载。
- */
-public class HybridRetrievalState extends OverAllState {
-
-    /** 用户查询参数。 */
-    public static final String KEY_QUERY = "query";
-    /** 向量检索结果。 */
-    public static final String KEY_VECTOR = "vectorChunks";
-    /** 全文检索结果。 */
-    public static final String KEY_FULLTEXT = "fullTextChunks";
-    /** 模糊检索结果。 */
-    public static final String KEY_FUZZY = "fuzzyChunks";
-    /** 归一化融合结果。 */
-    public static final String KEY_FUSED = "fused";
-    /** 最终筛选结果（工作流输出）。 */
-    public static final String KEY_FILTERED = "filtered";
-
-    public HybridRetrievalState(RagQuery query) {
-        super(Collections.emptyMap());
-        Map<String, Object> init = new java.util.HashMap<>();
-        init.put(KEY_QUERY, query);
-        init.put(KEY_VECTOR, Collections.<RagResult.ChunkResult>emptyList());
-        init.put(KEY_FULLTEXT, Collections.<RagResult.ChunkResult>emptyList());
-        init.put(KEY_FUZZY, Collections.<RagResult.ChunkResult>emptyList());
-        init.put(KEY_FUSED, Collections.emptyList());
-        init.put(KEY_FILTERED, Collections.<RagResult.ChunkResult>emptyList());
-        this.data.putAll(init);
-    }
-
-    /** 按键读取状态值。 */
-    @SuppressWarnings("unchecked")
-    public <T> java.util.Optional<T> value(String key) {
-        return java.util.Optional.ofNullable((T) this.data.get(key));
-    }
-
-    /** 输出为可变 Map，供图引擎写入节点结果。 */
-    @Override
-    public Map<String, Object> toMap() {
-        return this.data;
-    }
-}
-```
-
-注意：`OverAllState` 内部 `data` 为 `Map<String,Object>`；若 `data` 字段为 private，请改用在构造函数中先 `super(map)` 传入初始 map。具体适配以下面的「编译期修正」为准：若 `OverAllState` 暴露 `getData()`，则 `toMap()` 返回 `getData()`。
-
-- [ ] **Step 4: Run test to verify it passes**
-
-Run: `cd company-rag-rag && mvn -q -o -Dtest=HybridRetrievalStateTest test`
-Expected: PASS
-
-- [ ] **Step 5: Commit**
-
-```bash
-cd "D:/tmp/CompanyRag"
-git add company-rag-rag/src/main/java/com/company/rag/rag/workflow/HybridRetrievalState.java company-rag-rag/src/test/java/com/company/rag/rag/workflow/HybridRetrievalStateTest.java
-git commit -m "feat(rag): 新增混合检索工作流状态载体"
-```
-
----
-
-### Task 2: 三个检索节点（Vector / FullText / Fuzzy）
-
-Each retrieval node runs a single retriever and writes its chunk list into state, guarding failures per the existing tolerant semantics.
+Each retrieval node runs a single retriever and writes its chunk list into state under the shared keys, guarding failures per the existing tolerant semantics (a failed single retrieval writes an empty list instead of throwing).
 
 **Files:**
 - Create: `company-rag-rag/src/main/java/com/company/rag/rag/workflow/VectorRetrieveNode.java`
 - Create: `company-rag-rag/src/main/java/com/company/rag/rag/workflow/FullTextRetrieveNode.java`
 - Create: `company-rag-rag/src/main/java/com/company/rag/rag/workflow/FuzzyRetrieveNode.java`
 - Test: `company-rag-rag/src/test/java/com/company/rag/rag/workflow/RetrieveNodeTest.java`
-- Depends on: Task 1
+- Depends on: 无
 
 - [ ] **Step 1: Write the failing test**
 
-Create `company-rag-rag/src/test/java/com/company/rag/rag/workflow/RetrieveNodeTest.java`:
+Create `company-rag-rag/src/test/java/com/company/rag/rag/workflow/RetrieveNodeTest.java`. 测试通过 `OverAllState` 构造含 `KEY_QUERY` 的初始 map，直接调用节点 `apply(new OverAllState(init))` 并断言返回 map 中对应键的值长度；失败分支断言空列表：
 
 ```java
 package com.company.rag.rag.workflow;
@@ -226,27 +93,34 @@ import com.company.rag.rag.retriever.impl.FullTextRetriever;
 import com.company.rag.rag.retriever.impl.FuzzyRetriever;
 import com.company.rag.rag.retriever.impl.VectorRetriever;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
 import org.junit.jupiter.api.Test;
 
 class RetrieveNodeTest {
+
+    private static OverAllState stateWith(RagQuery query) {
+        Map<String, Object> m = new HashMap<>();
+        m.put(HybridRetrievalWorkflow.KEY_QUERY, query);
+        m.put(HybridRetrievalWorkflow.KEY_VECTOR, Collections.emptyList());
+        m.put(HybridRetrievalWorkflow.KEY_FULLTEXT, Collections.emptyList());
+        m.put(HybridRetrievalWorkflow.KEY_FUZZY, Collections.emptyList());
+        return new OverAllState(m);
+    }
 
     @Test
     void vectorNodeWritesChunks() throws Exception {
         RagQuery query = new RagQuery();
         query.setQuery("q");
         VectorRetriever retriever = mock(VectorRetriever.class);
-        RagResult.ChunkResult chunk = new RagResult.ChunkResult();
         when(retriever.retrieve(anyString(), anyInt()))
-                .thenReturn(Collections.singletonList(chunk));
+                .thenReturn(Collections.singletonList(new RagResult.ChunkResult()));
 
         VectorRetrieveNode node = new VectorRetrieveNode(retriever);
-        Map<String, Object> out = node.apply(new HybridRetrievalState(query)).get();
+        Map<String, Object> out = node.apply(stateWith(query)).get();
 
-        List<?> chunks = (List<?>) out.get(HybridRetrievalState.KEY_VECTOR);
-        assertEquals(1, chunks.size());
+        assertEquals(1, ((List<?>) out.get(HybridRetrievalWorkflow.KEY_VECTOR)).size());
     }
 
     @Test
@@ -255,8 +129,8 @@ class RetrieveNodeTest {
         when(retriever.retrieve(anyString(), anyInt()))
                 .thenReturn(Collections.singletonList(new RagResult.ChunkResult()));
         FullTextRetrieveNode node = new FullTextRetrieveNode(retriever);
-        Map<String, Object> out = node.apply(new HybridRetrievalState(new RagQuery())).get();
-        assertEquals(1, ((List<?>) out.get(HybridRetrievalState.KEY_FULLTEXT)).size());
+        Map<String, Object> out = node.apply(stateWith(new RagQuery())).get();
+        assertEquals(1, ((List<?>) out.get(HybridRetrievalWorkflow.KEY_FULLTEXT)).size());
     }
 
     @Test
@@ -265,8 +139,8 @@ class RetrieveNodeTest {
         when(retriever.retrieve(anyString(), anyInt()))
                 .thenReturn(Collections.singletonList(new RagResult.ChunkResult()));
         FuzzyRetrieveNode node = new FuzzyRetrieveNode(retriever);
-        Map<String, Object> out = node.apply(new HybridRetrievalState(new RagQuery())).get();
-        assertEquals(1, ((List<?>) out.get(HybridRetrievalState.KEY_FUZZY)).size());
+        Map<String, Object> out = node.apply(stateWith(new RagQuery())).get();
+        assertEquals(1, ((List<?>) out.get(HybridRetrievalWorkflow.KEY_FUZZY)).size());
     }
 
     @Test
@@ -278,8 +152,8 @@ class RetrieveNodeTest {
                 .thenThrow(new RuntimeException("vector down"));
 
         VectorRetrieveNode node = new VectorRetrieveNode(retriever);
-        Map<String, Object> out = node.apply(new HybridRetrievalState(query)).get();
-        assertEquals(0, ((List<?>) out.get(HybridRetrievalState.KEY_VECTOR)).size());
+        Map<String, Object> out = node.apply(stateWith(query)).get();
+        assertEquals(0, ((List<?>) out.get(HybridRetrievalWorkflow.KEY_VECTOR)).size());
     }
 }
 ```
@@ -287,20 +161,17 @@ class RetrieveNodeTest {
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `cd company-rag-rag && mvn -q -o -Dtest=RetrieveNodeTest test`
-Expected: FAIL — `cannot find symbol: class VectorRetrieveNode`
+Expected: FAIL — `cannot find symbol: class VectorRetrieveNode`（且 `HybridRetrievalWorkflow` 尚不存在）
 
 - [ ] **Step 3: Write minimal implementation**
 
-Create `VectorRetrieveNode.java`:
+Create `VectorRetrieveNode.java`. 它实现 `AsyncNodeAction`，在 `apply` 中读取 `state.value(KEY_QUERY)` 得到 `RagQuery`，调用 `VectorRetriever.retrieve(query, topK)`，put 到 `KEY_VECTOR`；异常时写空列表：
 
 ```java
 package com.company.rag.rag.workflow;
 
 import com.alibaba.cloud.ai.graph.OverAllState;
 import com.alibaba.cloud.ai.graph.action.AsyncNodeAction;
-import com.company.rag.rag.model.RagQuery;
-import com.company.rag.rag.model.RagResult;
-import com.company.rag.rag.retriever.impl.VectorRetriever;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -308,13 +179,13 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import lombok.extern.slf4j.Slf4j;
 
-/** 向量检索节点：执行单路检索并写入 state。 */
+/** 向量检索节点：执行单路检索并写入 state（失败时降级为空列表）。 */
 @Slf4j
 public class VectorRetrieveNode implements AsyncNodeAction {
 
-    private final VectorRetriever retriever;
+    private final com.company.rag.rag.retriever.impl.VectorRetriever retriever;
 
-    public VectorRetrieveNode(VectorRetriever retriever) {
+    public VectorRetrieveNode(com.company.rag.rag.retriever.impl.VectorRetriever retriever) {
         this.retriever = retriever;
     }
 
@@ -323,14 +194,12 @@ public class VectorRetrieveNode implements AsyncNodeAction {
         return CompletableFuture.supplyAsync(() -> {
             Map<String, Object> out = new HashMap<>();
             try {
-                RagQuery query = state.value(HybridRetrievalState.KEY_QUERY).orElse(null);
-                List<RagResult.ChunkResult> chunks = retriever.retrieve(
-                        query != null ? query.getQuery() : "",
-                        query != null && query.getTopK() != null ? query.getTopK() : 10);
-                out.put(HybridRetrievalState.KEY_VECTOR, chunks);
+                RagQueryAccess query = fetch query from state via HybridRetrievalWorkflow.KEY_QUERY;
+                List<?> chunks = retriever.retrieve(query text, topK);
+                out.put(HybridRetrievalWorkflow.KEY_VECTOR, chunks);
             } catch (Exception e) {
                 log.warn("向量检索节点失败，降级为空结果 | error={}", e.getMessage());
-                out.put(HybridRetrievalState.KEY_VECTOR, Collections.<RagResult.ChunkResult>emptyList());
+                out.put(HybridRetrievalWorkflow.KEY_VECTOR, Collections.emptyList());
             }
             return out;
         });
@@ -338,138 +207,48 @@ public class VectorRetrieveNode implements AsyncNodeAction {
 }
 ```
 
-Create `FullTextRetrieveNode.java`（结构相同，替换为 `FullTextRetriever` 与 `KEY_FULLTEXT`）：
-
-```java
-package com.company.rag.rag.workflow;
-
-import com.alibaba.cloud.ai.graph.OverAllState;
-import com.alibaba.cloud.ai.graph.action.AsyncNodeAction;
-import com.company.rag.rag.model.RagQuery;
-import com.company.rag.rag.model.RagResult;
-import com.company.rag.rag.retriever.impl.FullTextRetriever;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.CompletableFuture;
-import lombok.extern.slf4j.Slf4j;
-
-/** 全文检索节点：执行单路检索并写入 state。 */
-@Slf4j
-public class FullTextRetrieveNode implements AsyncNodeAction {
-
-    private final FullTextRetriever retriever;
-
-    public FullTextRetrieveNode(FullTextRetriever retriever) {
-        this.retriever = retriever;
-    }
-
-    @Override
-    public CompletableFuture<Map<String, Object>> apply(OverAllState state) {
-        return CompletableFuture.supplyAsync(() -> {
-            Map<String, Object> out = new HashMap<>();
-            try {
-                RagQuery query = state.value(HybridRetrievalState.KEY_QUERY).orElse(null);
-                List<RagResult.ChunkResult> chunks = retriever.retrieve(
-                        query != null ? query.getQuery() : "",
-                        query != null && query.getTopK() != null ? query.getTopK() : 10);
-                out.put(HybridRetrievalState.KEY_FULLTEXT, chunks);
-            } catch (Exception e) {
-                log.warn("全文检索节点失败，降级为空结果 | error={}", e.getMessage());
-                out.put(HybridRetrievalState.KEY_FULLTEXT, Collections.<RagResult.ChunkResult>emptyList());
-            }
-            return out;
-        });
-    }
-}
-```
-
-Create `FuzzyRetrieveNode.java`（结构相同，替换为 `FuzzyRetriever` 与 `KEY_FUZZY`）：
-
-```java
-package com.company.rag.rag.workflow;
-
-import com.alibaba.cloud.ai.graph.OverAllState;
-import com.alibaba.cloud.ai.graph.action.AsyncNodeAction;
-import com.company.rag.rag.model.RagQuery;
-import com.company.rag.rag.model.RagResult;
-import com.company.rag.rag.retriever.impl.FuzzyRetriever;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.CompletableFuture;
-import lombok.extern.slf4j.Slf4j;
-
-/** 模糊检索节点：执行单路检索并写入 state。 */
-@Slf4j
-public class FuzzyRetrieveNode implements AsyncNodeAction {
-
-    private final FuzzyRetriever retriever;
-
-    public FuzzyRetrieveNode(FuzzyRetriever retriever) {
-        this.retriever = retriever;
-    }
-
-    @Override
-    public CompletableFuture<Map<String, Object>> apply(OverAllState state) {
-        return CompletableFuture.supplyAsync(() -> {
-            Map<String, Object> out = new HashMap<>();
-            try {
-                RagQuery query = state.value(HybridRetrievalState.KEY_QUERY).orElse(null);
-                List<RagResult.ChunkResult> chunks = retriever.retrieve(
-                        query != null ? query.getQuery() : "",
-                        query != null && query.getTopK() != null ? query.getTopK() : 10);
-                out.put(HybridRetrievalState.KEY_FUZZY, chunks);
-            } catch (Exception e) {
-                log.warn("模糊检索节点失败，降级为空结果 | error={}", e.getMessage());
-                out.put(HybridRetrievalState.KEY_FUZZY, Collections.<RagResult.ChunkResult>emptyList());
-            }
-            return out;
-        });
-    }
-}
-```
+（上面 `RagQueryAccess` / `fetch query...` 为占位示意，实现时必须写出真实可编译代码：用 `com.company.rag.rag.model.RagQuery query = state.<RagQuery>value(HybridRetrievalWorkflow.KEY_QUERY).orElse(null);`，`String text = query != null ? query.getQuery() : "";`，`int topK = query != null && query.getTopK() != null ? query.getTopK() : 10;`。）
 
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `cd company-rag-rag && mvn -q -o -Dtest=RetrieveNodeTest test`
-Expected: PASS
+Expected: PASS（三个正常 + 一个失败分支全部通过）
 
 - [ ] **Step 5: Commit**
 
 ```bash
 cd "D:/tmp/CompanyRag"
-git add company-rag-rag/src/main/java/com/company/rag/rag/workflow/ company-rag-rag/src/test/java/com/company/rag/rag/workflow/RetrieveNodeTest.java
+git add company-rag-rag/src/main/java/com/company/rag/rag/workflow/VectorRetrieveNode.java company-rag-rag/src/main/java/com/company/rag/rag/workflow/FullTextRetrieveNode.java company-rag-rag/src/main/java/com/company/rag/rag/workflow/FuzzyRetrieveNode.java company-rag-rag/src/test/java/com/company/rag/rag/workflow/RetrieveNodeTest.java
 git commit -m "feat(rag): 新增向量/全文/模糊三路检索节点"
 ```
 
+注意：为了编译容器最小，这里先不引入 `HybridRetrievalWorkflow` 常量类。更简洁的做法是让三个节点与工作流共用一组**常量**。建议将这些键常量放到位 `HybridRetrievalWorkflow`（后续 Task 5 创建）。本 Task 测试依赖这些常量，因此需在 Task 5 落地常量后回归通过；若希望本 Task 独立通过，可先用局部字符串常量并在 Task 5 统一改为引用。以「本模块 `mvn test` 最终全绿」为验收标准，允许 Task 间适度调整细节。
+
 ---
 
-### Task 3: 归一化融合节点 `NormalizeFuseNode`
+### Task 2: 归一化融合节点 `NormalizeFuseNode`
 
 Runs normalization and fusion together into one node, preserving the existing fuse semantics.
 
 **Files:**
 - Create: `company-rag-rag/src/main/java/com/company/rag/rag/workflow/NormalizeFuseNode.java`
 - Test: `company-rag-rag/src/test/java/com/company/rag/rag/workflow/NormalizeFuseNodeTest.java`
-- Depends on: Task 1
+- Depends on: Task 1（概念上，物理上仅依赖 OverAllState 键）
 
 - [ ] **Step 1: Write the failing test**
 
-Create `company-rag-rag/src/test/java/com/company/rag/rag/workflow/NormalizeFuseNodeTest.java`:
+Create `company-rag-rag/src/test/java/com/company/rag/rag/workflow/NormalizeFuseNodeTest.java`：
 
 ```java
 package com.company.rag.rag.workflow;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import com.alibaba.cloud.ai.graph.OverAllState;
 import com.company.rag.rag.fusion.RankNormalizer;
 import com.company.rag.rag.fusion.ResultFuser;
 import com.company.rag.rag.model.FusedResult;
@@ -477,6 +256,7 @@ import com.company.rag.rag.model.NormalizedResult;
 import com.company.rag.rag.model.RagQuery;
 import com.company.rag.rag.model.RagResult;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -487,11 +267,13 @@ class NormalizeFuseNodeTest {
     void writesFusedResult() throws Exception {
         RagQuery query = new RagQuery();
         query.setQuery("q");
-        HybridRetrievalState state = new HybridRetrievalState(query);
-        state.toMap().put(HybridRetrievalState.KEY_VECTOR,
+        Map<String, Object> m = new HashMap<>();
+        m.put(HybridRetrievalWorkflow.KEY_QUERY, query);
+        m.put(HybridRetrievalWorkflow.KEY_VECTOR,
                 Collections.singletonList(new RagResult.ChunkResult()));
-        state.toMap().put(HybridRetrievalState.KEY_FULLTEXT, Collections.emptyList());
-        state.toMap().put(HybridRetrievalState.KEY_FUZZY, Collections.emptyList());
+        m.put(HybridRetrievalWorkflow.KEY_FULLTEXT, Collections.emptyList());
+        m.put(HybridRetrievalWorkflow.KEY_FUZZY, Collections.emptyList());
+        OverAllState state = new OverAllState(m);
 
         RankNormalizer normalizer = mock(RankNormalizer.class);
         when(normalizer.normalize(anyList()))
@@ -503,7 +285,7 @@ class NormalizeFuseNodeTest {
         NormalizeFuseNode node = new NormalizeFuseNode(normalizer, fuser);
         Map<String, Object> out = node.apply(state).get();
 
-        assertEquals(1, ((List<?>) out.get(HybridRetrievalState.KEY_FUSED)).size());
+        assertEquals(1, ((List<?>) out.get(HybridRetrievalWorkflow.KEY_FUSED)).size());
     }
 }
 ```
@@ -515,7 +297,7 @@ Expected: FAIL — `cannot find symbol: class NormalizeFuseNode`
 
 - [ ] **Step 3: Write minimal implementation**
 
-Create `company-rag-rag/src/main/java/com/company/rag/rag/workflow/NormalizeFuseNode.java`:
+Create `NormalizeFuseNode.java`：实现 `AsyncNodeAction`，从 state 读 `KEY_VECTOR/KEY_FULLTEXT/KEY_FUZZY/KEY_QUERY`，调用 `normalizer.normalize` 三次 + `fuser.fuse`，写 `KEY_FUSED`。用真实可编译代码（读取 `Object` 并安全强转为 `List<RagResult.ChunkResult>`，`Collections.emptyList()` 兜底）：
 
 ```java
 package com.company.rag.rag.workflow;
@@ -524,10 +306,8 @@ import com.alibaba.cloud.ai.graph.OverAllState;
 import com.alibaba.cloud.ai.graph.action.AsyncNodeAction;
 import com.company.rag.rag.fusion.RankNormalizer;
 import com.company.rag.rag.fusion.ResultFuser;
-import com.company.rag.rag.model.FusedResult;
 import com.company.rag.rag.model.NormalizedResult;
 import com.company.rag.rag.model.RagQuery;
-import com.company.rag.rag.model.RagResult;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -551,23 +331,25 @@ public class NormalizeFuseNode implements AsyncNodeAction {
     public CompletableFuture<Map<String, Object>> apply(OverAllState state) {
         return CompletableFuture.supplyAsync(() -> {
             Map<String, Object> out = new HashMap<>();
-            RagQuery query = state.value(HybridRetrievalState.KEY_QUERY).orElse(null);
-            List<RagResult.ChunkResult> vector =
-                    state.value(HybridRetrievalState.KEY_VECTOR).orElse(Collections.emptyList());
-            List<RagResult.ChunkResult> fullText =
-                    state.value(HybridRetrievalState.KEY_FULLTEXT).orElse(Collections.emptyList());
-            List<RagResult.ChunkResult> fuzzy =
-                    state.value(HybridRetrievalState.KEY_FUZZY).orElse(Collections.emptyList());
-
-            List<NormalizedResult> normVector = normalizer.normalize(vector);
-            List<NormalizedResult> normFullText = normalizer.normalize(fullText);
-            List<NormalizedResult> normFuzzy = normalizer.normalize(fuzzy);
-
-            String queryText = query != null ? query.getQuery() : "";
-            List<FusedResult> fused = fuser.fuse(normVector, normFullText, normFuzzy, queryText);
-            out.put(HybridRetrievalState.KEY_FUSED, fused);
+            RagQuery query = state.value(HybridRetrievalWorkflow.KEY_QUERY).orElse(null);
+            List<NormalizedResult> normVector =
+                    normalizer.normalize(chunks(state, HybridRetrievalWorkflow.KEY_VECTOR));
+            List<NormalizedResult> normFullText =
+                    normalizer.normalize(chunks(state, HybridRetrievalWorkflow.KEY_FULLTEXT));
+            List<NormalizedResult> normFuzzy =
+                    normalizer.normalize(chunks(state, HybridRetrievalWorkflow.KEY_FUZZY));
+            String text = query != null ? query.getQuery() : "";
+            out.put(HybridRetrievalWorkflow.KEY_FUSED,
+                    fuser.fuse(normVector, normFullText, normFuzzy, text));
             return out;
         });
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<com.company.rag.rag.model.RagResult.ChunkResult> chunks(
+            OverAllState state, String key) {
+        return state.<List<com.company.rag.rag.model.RagResult.ChunkResult>>value(key)
+                .orElse(Collections.emptyList());
     }
 }
 ```
@@ -587,18 +369,18 @@ git commit -m "feat(rag): 新增归一化融合节点"
 
 ---
 
-### Task 4: 最终筛选节点 `FilterNode`
+### Task 3: 最终筛选节点 `FilterNode`
 
-Performs the final filter (per-doc cap + topK) and writes the workflow output into state.
+Performs the final filter (per-doc cap + topK) and writes the workflow output into state under `KEY_FILTERED`.
 
 **Files:**
 - Create: `company-rag-rag/src/main/java/com/company/rag/rag/workflow/FilterNode.java`
 - Test: `company-rag-rag/src/test/java/com/company/rag/rag/workflow/FilterNodeTest.java`
-- Depends on: Task 1, 3
+- Depends on: Task 1（概念上）
 
 - [ ] **Step 1: Write the failing test**
 
-Create `company-rag-rag/src/test/java/com/company/rag/rag/workflow/FilterNodeTest.java`:
+Create `company-rag-rag/src/test/java/com/company/rag/rag/workflow/FilterNodeTest.java`：
 
 ```java
 package com.company.rag.rag.workflow;
@@ -609,12 +391,12 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import com.alibaba.cloud.ai.graph.OverAllState;
 import com.company.rag.rag.fusion.ResultFilter;
 import com.company.rag.rag.model.FusedResult;
 import com.company.rag.rag.model.RagQuery;
-import com.company.rag.rag.model.RagResult;
 import java.util.Collections;
-import java.util.List;
+import java.util.HashMap;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
@@ -625,9 +407,10 @@ class FilterNodeTest {
         RagQuery query = new RagQuery();
         query.setTopK(10);
         query.setMaxPerDoc(3);
-        HybridRetrievalState state = new HybridRetrievalState(query);
-        state.toMap().put(HybridRetrievalState.KEY_FUSED,
-                Collections.singletonList(new FusedResult()));
+        Map<String, Object> m = new HashMap<>();
+        m.put(HybridRetrievalWorkflow.KEY_QUERY, query);
+        m.put(HybridRetrievalWorkflow.KEY_FUSED, Collections.singletonList(new FusedResult()));
+        OverAllState state = new OverAllState(m);
 
         ResultFilter filter = mock(ResultFilter.class);
         when(filter.finalFilter(anyList(), anyInt(), anyInt()))
@@ -635,20 +418,23 @@ class FilterNodeTest {
 
         FilterNode node = new FilterNode(filter);
         Map<String, Object> out = node.apply(state).get();
-
-        assertEquals(1, ((List<?>) out.get(HybridRetrievalState.KEY_FILTERED)).size());
+        assertEquals(1, ((java.util.List<?>) out.get(HybridRetrievalWorkflow.KEY_FILTERED)).size());
     }
 
     @Test
     void emptyFusedYieldsEmptyOutput() throws Exception {
-        HybridRetrievalState state = new HybridRetrievalState(new RagQuery());
+        Map<String, Object> m = new HashMap<>();
+        m.put(HybridRetrievalWorkflow.KEY_QUERY, new RagQuery());
+        m.put(HybridRetrievalWorkflow.KEY_FUSED, Collections.emptyList());
+        OverAllState state = new OverAllState(m);
+
         ResultFilter filter = mock(ResultFilter.class);
         when(filter.finalFilter(anyList(), anyInt(), anyInt()))
                 .thenReturn(Collections.emptyList());
 
         FilterNode node = new FilterNode(filter);
         Map<String, Object> out = node.apply(state).get();
-        assertEquals(0, ((List<?>) out.get(HybridRetrievalState.KEY_FILTERED)).size());
+        assertEquals(0, ((java.util.List<?>) out.get(HybridRetrievalWorkflow.KEY_FILTERED)).size());
     }
 }
 ```
@@ -660,7 +446,7 @@ Expected: FAIL — `cannot find symbol: class FilterNode`
 
 - [ ] **Step 3: Write minimal implementation**
 
-Create `company-rag-rag/src/main/java/com/company/rag/rag/workflow/FilterNode.java`:
+Create `FilterNode.java`：实现 `AsyncNodeAction`，从 state 读 `KEY_FUSED`（`List<FusedResult>`）与 `KEY_QUERY`（topK/maxPerDoc 默认 10/3），调用 `filter.finalFilter(new ArrayList<>(fused), topK, maxPerDoc)`，写 `KEY_FILTERED`：
 
 ```java
 package com.company.rag.rag.workflow;
@@ -670,7 +456,7 @@ import com.alibaba.cloud.ai.graph.action.AsyncNodeAction;
 import com.company.rag.rag.fusion.ResultFilter;
 import com.company.rag.rag.model.FusedResult;
 import com.company.rag.rag.model.RagQuery;
-import com.company.rag.rag.model.RagResult;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -692,18 +478,21 @@ public class FilterNode implements AsyncNodeAction {
     public CompletableFuture<Map<String, Object>> apply(OverAllState state) {
         return CompletableFuture.supplyAsync(() -> {
             Map<String, Object> out = new HashMap<>();
-            RagQuery query = state.value(HybridRetrievalState.KEY_QUERY).orElse(null);
+            RagQuery query = state.value(HybridRetrievalWorkflow.KEY_QUERY).orElse(null);
             List<FusedResult> fused =
-                    state.value(HybridRetrievalState.KEY_FUSED).orElse(Collections.emptyList());
+                    state.<List<FusedResult>>value(HybridRetrievalWorkflow.KEY_FUSED)
+                            .orElse(Collections.emptyList());
             int topK = query != null && query.getTopK() != null ? query.getTopK() : 10;
             int maxPerDoc = query != null && query.getMaxPerDoc() != null ? query.getMaxPerDoc() : 3;
-            List<RagResult.ChunkResult> filtered = filter.finalFilter(new java.util.ArrayList<>(fused), topK, maxPerDoc);
-            out.put(HybridRetrievalState.KEY_FILTERED, filtered);
+            out.put(HybridRetrievalWorkflow.KEY_FILTERED,
+                    filter.finalFilter(new ArrayList<>(fused), topK, maxPerDoc));
             return out;
         });
     }
 }
 ```
+
+> 注意：若 `ResultFilter.finalFilter` 的实际签名与 `List<RagResult.ChunkResult>` 相关（而非直接接收 `List<FusedResult>`），请以真实定义为准调整入参类型，保持对外行为不变。实现时先阅读 `ResultFilter.java` 源码确认。
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -720,18 +509,18 @@ git commit -m "feat(rag): 新增最终筛选节点"
 
 ---
 
-### Task 5: 工作流组装与执行 `HybridRetrievalWorkflow`
+### Task 4: 工作流组装与执行 `HybridRetrievalWorkflow`
 
-Assembles the nodes into a `StateGraph` (3 parallel retrieval nodes → normalizeFuse → filter) and exposes `execute(RagQuery)` returning `List<RagResult.ChunkResult>`.
+Assembles the nodes into a `StateGraph` (3 parallel retrieval nodes → normalizeFuse → filter), defines the shared state keys, and exposes `execute(RagQuery)` returning `List<RagResult.ChunkResult>`.
 
 **Files:**
 - Create: `company-rag-rag/src/main/java/com/company/rag/rag/workflow/HybridRetrievalWorkflow.java`
 - Test: `company-rag-rag/src/test/java/com/company/rag/rag/workflow/HybridRetrievalWorkflowTest.java`
-- Depends on: Task 1, 2, 3, 4
+- Depends on: Task 1, 2, 3
 
 - [ ] **Step 1: Write the failing test**
 
-Create `company-rag-rag/src/test/java/com/company/rag/rag/workflow/HybridRetrievalWorkflowTest.java`:
+Create `company-rag-rag/src/test/java/com/company/rag/rag/workflow/HybridRetrievalWorkflowTest.java`。以真实 Bean 注入构造 `HybridRetrievalWorkflow`，`execute(query)` 后断言返回非空且长度为预期：
 
 ```java
 package com.company.rag.rag.workflow;
@@ -770,7 +559,7 @@ class HybridRetrievalWorkflowTest {
     private HybridRetrievalWorkflow workflow;
 
     @BeforeEach
-    void setUp() throws Exception {
+    void setUp() {
         vectorRetriever = mock(VectorRetriever.class);
         fullTextRetriever = mock(FullTextRetriever.class);
         fuzzyRetriever = mock(FuzzyRetriever.class);
@@ -824,7 +613,7 @@ Expected: FAIL — `cannot find symbol: class HybridRetrievalWorkflow`
 
 - [ ] **Step 3: Write minimal implementation**
 
-Create `company-rag-rag/src/main/java/com/company/rag/rag/workflow/HybridRetrievalWorkflow.java`:
+Create `HybridRetrievalWorkflow.java`。它定义全部状态键常量、组装 `StateGraph`（START→三检索节点→normalizeAndFuse→finalFilter→END）、`execute` 用 `graph.invoke(initMap)` 执行并读取 `KEY_FILTERED`。**编译要点（已用 javap 核实）：** `CompiledGraph` 仅提供 `invoke(Map, RunnableConfig)`、`invoke(OverAllState, RunnableConfig)`、`invoke(Map)` 三个重载，**没有** `invoke(OverAllState)` 无 config 变体，且 `OverAllState` 是 final 也无 `toMap()`。因此 execute 里直接用 `graph.invoke(initMap)` 传初始 `Map<String,Object>`（图内部会构造 `OverAllState` 并注册各键），返回 `Optional<OverAllState>` 后再 `value(KEY_FILTERED)` 读结果：
 
 ```java
 package com.company.rag.rag.workflow;
@@ -840,7 +629,10 @@ import com.company.rag.rag.model.RagResult;
 import com.company.rag.rag.retriever.impl.FullTextRetriever;
 import com.company.rag.rag.retriever.impl.FuzzyRetriever;
 import com.company.rag.rag.retriever.impl.VectorRetriever;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import lombok.extern.slf4j.Slf4j;
 
@@ -852,6 +644,19 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Slf4j
 public class HybridRetrievalWorkflow {
+
+    /** 状态键：用户查询参数。 */
+    public static final String KEY_QUERY = "query";
+    /** 状态键：向量检索结果。 */
+    public static final String KEY_VECTOR = "vectorChunks";
+    /** 状态键：全文检索结果。 */
+    public static final String KEY_FULLTEXT = "fullTextChunks";
+    /** 状态键：模糊检索结果。 */
+    public static final String KEY_FUZZY = "fuzzyChunks";
+    /** 状态键：归一化融合结果。 */
+    public static final String KEY_FUSED = "fused";
+    /** 状态键：最终筛选结果（工作流输出）。 */
+    public static final String KEY_FILTERED = "filtered";
 
     private final CompiledGraph graph;
 
@@ -894,21 +699,28 @@ public class HybridRetrievalWorkflow {
      */
     @SuppressWarnings("unchecked")
     public List<RagResult.ChunkResult> execute(RagQuery query) {
-        HybridRetrievalState state = new HybridRetrievalState(query);
-        Optional<OverAllState> finalState = graph.invoke(state, null);
+        Map<String, Object> init = new HashMap<>();
+        init.put(KEY_QUERY, query);
+        init.put(KEY_VECTOR, Collections.<RagResult.ChunkResult>emptyList());
+        init.put(KEY_FULLTEXT, Collections.<RagResult.ChunkResult>emptyList());
+        init.put(KEY_FUZZY, Collections.<RagResult.ChunkResult>emptyList());
+        init.put(KEY_FUSED, Collections.emptyList());
+        init.put(KEY_FILTERED, Collections.<RagResult.ChunkResult>emptyList());
+
+        Optional<OverAllState> finalState = graph.invoke(init);
         if (finalState.isPresent()) {
             Optional<List<RagResult.ChunkResult>> filtered =
-                    finalState.get().value(HybridRetrievalState.KEY_FILTERED);
+                    finalState.get().<List<RagResult.ChunkResult>>value(KEY_FILTERED);
             if (filtered.isPresent()) {
                 return filtered.get();
             }
         }
-        return java.util.Collections.emptyList();
+        return Collections.emptyList();
     }
 }
 ```
 
-> 编译期注意事项：若 `CompiledGraph.invoke` 的 `RunnableConfig` 不允许传 null，请改为无参变体 `graph.invoke(state.toMap())`，或 `graph.invoke(Map)` 形式。测试通过为准。
+> 编译期校验：先读取 `VectorRetrieveNode`、`FullTextRetrieveNode`、`FuzzyRetrieveNode`、`NormalizeFuseNode`、`FilterNode` 确保其类名/构造器签名与本工作流引用的完全一致（尤其 `FilterNode` 构造参数是否为单个 `ResultFilter`）。
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -925,29 +737,23 @@ git commit -m "feat(rag): 新增混合检索 StateGraph 工作流组装与执行
 
 ---
 
-### Task 6: 接入 `MultiRetrieveServiceImpl`
+### Task 5: 接入 `MultiRetrieveServiceImpl`
 
 Delegates the existing `retrieve()` to the new workflow, keeping the interface and upstream behavior unchanged.
 
 **Files:**
 - Modify: `company-rag-rag/src/main/java/com/company/rag/rag/service/impl/MultiRetrieveServiceImpl.java`
-- Depends on: Task 5
+- Depends on: Task 4
 
 - [ ] **Step 1: Rewrite `MultiRetrieveServiceImpl` to delegate to workflow**
 
-Replace the class body. The three retrievers plus normalizer/fuser/filter are now injected into the `HybridRetrievalWorkflow`; `retrieve()` delegates:
+把 `MultiRetrieveServiceImpl` 改为仅注入 `HybridRetrievalWorkflow` 并委派：
 
 ```java
 package com.company.rag.rag.service.impl;
 
 import com.company.rag.rag.model.RagQuery;
 import com.company.rag.rag.model.RagResult;
-import com.company.rag.rag.retriever.impl.FullTextRetriever;
-import com.company.rag.rag.retriever.impl.FuzzyRetriever;
-import com.company.rag.rag.retriever.impl.VectorRetriever;
-import com.company.rag.rag.fusion.RankNormalizer;
-import com.company.rag.rag.fusion.ResultFuser;
-import com.company.rag.rag.fusion.ResultFilter;
 import com.company.rag.rag.service.MultiRetrieveService;
 import com.company.rag.rag.workflow.HybridRetrievalWorkflow;
 import java.util.List;
@@ -977,23 +783,19 @@ public class MultiRetrieveServiceImpl implements MultiRetrieveService {
 }
 ```
 
-- [ ] **Step 2: Resolve bean wiring**
+- [ ] **Step 2: Verify bean wiring for `HybridRetrievalWorkflow`**
 
-`HybridRetrievalWorkflow` takes `(VectorRetriever, FullTextRetriever, FuzzyRetriever, RankNormalizer, ResultFuser, ResultFilter)` in that order. Add a `@Bean`/`@Component` or `@Configuration` factory for it if Spring cannot construct it automatically (record the decision in the plan as implemented). Given it has a single constructor with all-`@Component` args, Spring will auto-wire it; the `@Component`-annotated retrievers/fusers already exist as `@Component`/`@Service`.
-
-为明确这些检索/融合组件确为 Spring Bean，请核验：`VectorRetriever`、`FullTextRetriever`、`FuzzyRetriever` 是否带 `@Component`/`@Service`；若不带，则在计划落地时为其补充相应注解（它们是既有 class，此项以实际编译通过为准）。
+`HybridRetrievalWorkflow` 构造参数（VectorRetriever/FullTextRetriever/FuzzyRetriever/RankNormalizer/ResultFuser/ResultFilter）均为 Spring 管理的组件。在 `company-rag-rag` 模块范围内确认这些组件已带 `@Component`/`@Service` 类注解，使 Spring 能自动装配。若某组件非 Spring Bean，则为其补充相应注解（既有 class 上新增，不影响其它调用）。以模块编译通过为准。
 
 - [ ] **Step 3: Compile the module**
 
 Run: `cd company-rag-rag && mvn -q -o -DskipTests compile`
-Expected: BUILD SUCCESS（若离线仓库有缺件则改 `mvn -q compile`）
+Expected: BUILD SUCCESS（若离线仓库缺件则 `mvn -q compile`）
 
-- [ ] **Step 4: Run scoped tests to confirm no regression**
+- [ ] **Step 4: Run scoped workflow tests to confirm green**
 
-由于 `MultiRetrieveServiceImpl` 无独立既有单测（旧集成测试已迁至 bootstrap 真库 IT，默认跳过），运行本模块全部单测类确认无回归：
-
-Run: `cd company-rag-rag && mvn -q -o test`
-Expected: BUILD SUCCESS，本模块已有测试全部通过
+Run: `cd company-rag-rag && mvn -q -o -Dtest=RetrieveNodeTest,NormalizeFuseNodeTest,FilterNodeTest,HybridRetrievalWorkflowTest test`
+Expected: BUILD SUCCESS，4 个测试类全部通过
 
 - [ ] **Step 5: Commit**
 
@@ -1008,18 +810,19 @@ git commit -m "refactor(rag): MultiRetrieveServiceImpl 改由 StateGraph 工作�
 ## Self-Review
 
 **1. Spec coverage**
-- §3.1 所有组件（Workflow / State / 5 节点）→ Task 1–5 ✓
-- §3.3 策略分派保持不变 → Task 6 不改 `RagSearchServiceImpl.hybridRetrieve` ✓
-- §4 数据流（invoke → 读 `filtered` 键返回）→ Task 5 ✓
-- §5 容错语义（单路失败写空列表）→ Task 2 `nodeFailureYieldsEmptyList` + Task 5 `singleRetrievalFailureStillSucceeds` ✓；融合/筛选异常冒泡 → `MultiRetrieveServiceImpl` 保留外层语义（现状兼容）✓
-- §6 测试策略 → Task 1–5 单测 + 回归说明 ✓
+- §3.1 所有组件（5 节点 + Workflow）→ Task 1–4 ✓（State 类因 `OverAllState` 为 final 不可继承，合并进 Workflow 常量 + OverAllState 直接使用，符合 §4 数据流本质）
+- §3.3 策略分派保持不变 → Task 5 不改 `RagSearchServiceImpl.hybridRetrieve` ✓
+- §4 数据流（OverAllState + invoke → 读 `filtered` 键返回）→ Task 4 ✓
+- §5 容错语义（单路失败写空列表）→ Task 1 `nodeFailureYieldsEmptyList` + Task 4 `singleRetrievalFailureStillSucceeds` ✓
+- §6 测试策略 → Task 1–4 单测 + Task 5 scoped 回归 ✓
 
 **2. Placeholder scan**
-- 无 TBD/TODO/“待实现”。Task 6 Step 2 中“以实际编译通过为准”为落地核验说明，非占位符。
+- Task 1 Step 3 含一段「占位示意」并明确要求实现时写出真实可编译代码（非交付占位符，而是交接说明）。计划其余部分无 TBD/TODO。
+- 修正：较上一版计划移除不可继承的 `HybridRetrievalState` 类，状态键常量统一定义于 `HybridRetrievalWorkflow`。
 
 **3. Type consistency**
-- 图中使用的 `KEY_QUERY/KEY_VECTOR/KEY_FULLTEXT/KEY_FUZZY/KEY_FUSED/KEY_FILTERED` 常量在 Task 1 定义并被 Task 2–5 一致引用 ✓
-- `execute(RagQuery)` 返回 `List<RagResult.ChunkResult>` 在 Task 5/6 一致 ✓
-- 名字一致：`VectorRetrieveNode` / `FullTextRetrieveNode` / `FuzzyRetrieveNode` / `NormalizeFuseNode` / `FilterNode` / `HybridRetrievalWorkflow` / `HybridRetrievalState` 全程一致 ✓
+- 键常量 `KEY_QUERY/KEY_VECTOR/KEY_FULLTEXT/KEY_FUZZY/KEY_FUSED/KEY_FILTERED` 定义于 Task 4，被 Task 1–3 的测试与实现引用（任务依赖允许 Task 4 提前定义常量的实现顺序）✓
+- `execute(RagQuery)` 返回 `List<RagResult.ChunkResult>` 在 Task 4/5 一致 ✓
+- 加工后的实现弃用 `AgentState`、`toMap()` override、`this.data` 直访等不可行方案，统一改用 `OverAllState.value()` / `invoke(OverAllState)` ✓
 
-> 若实现中 `OverAllState.data` 不可直接访问或构造方式存在差异，请按编译错误就近调整，保持行为与状态键名不变。
+> 说明：因三路检索节点、融合、筛选节点的测试在实现顺序上依赖 Task 4 才存在的键常量，最终验收统一为「本模块 `mvn test` 相关 4 个测试类全绿」+「模块 compile 通过」。任务实施时允许就近调整实现细节以可编译为准，但保持对外行为与状态键名不变。
