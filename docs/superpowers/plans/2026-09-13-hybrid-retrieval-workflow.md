@@ -207,7 +207,9 @@ public class VectorRetrieveNode implements AsyncNodeAction {
 }
 ```
 
-（上面 `RagQueryAccess` / `fetch query...` 为占位示意，实现时必须写出真实可编译代码：用 `com.company.rag.rag.model.RagQuery query = state.<RagQuery>value(HybridRetrievalWorkflow.KEY_QUERY).orElse(null);`，`String text = query != null ? query.getQuery() : "";`，`int topK = query != null && query.getTopK() != null ? query.getTopK() : 10;`。）
+（上面 `RagQueryAccess` / `fetch query...` 为占位示意，实现时必须写出真实可编译代码：用 `com.company.rag.rag.model.RagQuery query = state.<RagQuery>value(HybridRetrievalWorkflow.KEY_QUERY).orElse(null);`，`String text = query != null ? query.getQuery() : "";`。
+
+**检索 topK 需与原流水线保持一致（固定值，不随 query 变化）：** `VectorRetrieveNode` 用 50、`FullTextRetrieveNode` 用 50、`FuzzyRetrieveNode` 用 30（对应原 `MultiRetrieveServiceImpl` 第 44/51/58 行的固定值）。）
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -371,7 +373,9 @@ git commit -m "feat(rag): 新增归一化融合节点"
 
 ### Task 3: 最终筛选节点 `FilterNode`
 
-Performs the final filter (per-doc cap + topK) and writes the workflow output into state under `KEY_FILTERED`.
+Performs the threshold+topK filter and converts the fused results back to `List<RagResult.ChunkResult>`, writing the workflow output into state under `KEY_FILTERED`.
+
+**实现要点（基于真实 `ResultFilter` 源码）：** 原 `MultiRetrieveServiceImpl` 的筛选步骤实际调用的是 `filter.filter(fused, fusionTopK, scoreThreshold)`（返回 `List<FusedResult>`，做阈值+按分排序+limit），随后 `new ArrayList<>(filtered)` 依赖 `FusedResult extends NormalizedResult extends RagResult.ChunkResult` 的继承链把 `List<FusedResult>` 宽化为 `List<RagResult.ChunkResult>` 返回。`finalFilter`（文档分组+per-doc 上限）在**当前流水线中并未被调用**，只服务于 Rerank 之后的上层流程。因此 `FilterNode` 复现的是 `filter(...)` 这步，产出 `List<RagResult.ChunkResult>`。
 
 **Files:**
 - Create: `company-rag-rag/src/main/java/com/company/rag/rag/workflow/FilterNode.java`
@@ -388,6 +392,7 @@ package com.company.rag.rag.workflow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -397,6 +402,7 @@ import com.company.rag.rag.model.FusedResult;
 import com.company.rag.rag.model.RagQuery;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
@@ -405,20 +411,23 @@ class FilterNodeTest {
     @Test
     void writesFilteredOutput() throws Exception {
         RagQuery query = new RagQuery();
-        query.setTopK(10);
-        query.setMaxPerDoc(3);
+        query.setFusionTopK(30);
+        query.setScoreThreshold(null);
         Map<String, Object> m = new HashMap<>();
         m.put(HybridRetrievalWorkflow.KEY_QUERY, query);
-        m.put(HybridRetrievalWorkflow.KEY_FUSED, Collections.singletonList(new FusedResult()));
+        FusedResult fr = new FusedResult();
+        fr.setChunkId("c1");
+        fr.setFinalScore(0.8);
+        m.put(HybridRetrievalWorkflow.KEY_FUSED, Collections.singletonList(fr));
         OverAllState state = new OverAllState(m);
 
         ResultFilter filter = mock(ResultFilter.class);
-        when(filter.finalFilter(anyList(), anyInt(), anyInt()))
+        when(filter.filter(anyList(), anyInt(), any()))
                 .thenAnswer(inv -> inv.getArgument(0));
 
         FilterNode node = new FilterNode(filter);
         Map<String, Object> out = node.apply(state).get();
-        assertEquals(1, ((java.util.List<?>) out.get(HybridRetrievalWorkflow.KEY_FILTERED)).size());
+        assertEquals(1, ((List<?>) out.get(HybridRetrievalWorkflow.KEY_FILTERED)).size());
     }
 
     @Test
@@ -429,12 +438,12 @@ class FilterNodeTest {
         OverAllState state = new OverAllState(m);
 
         ResultFilter filter = mock(ResultFilter.class);
-        when(filter.finalFilter(anyList(), anyInt(), anyInt()))
+        when(filter.filter(anyList(), anyInt(), any()))
                 .thenReturn(Collections.emptyList());
 
         FilterNode node = new FilterNode(filter);
         Map<String, Object> out = node.apply(state).get();
-        assertEquals(0, ((java.util.List<?>) out.get(HybridRetrievalWorkflow.KEY_FILTERED)).size());
+        assertEquals(0, ((List<?>) out.get(HybridRetrievalWorkflow.KEY_FILTERED)).size());
     }
 }
 ```
@@ -446,7 +455,7 @@ Expected: FAIL — `cannot find symbol: class FilterNode`
 
 - [ ] **Step 3: Write minimal implementation**
 
-Create `FilterNode.java`：实现 `AsyncNodeAction`，从 state 读 `KEY_FUSED`（`List<FusedResult>`）与 `KEY_QUERY`（topK/maxPerDoc 默认 10/3），调用 `filter.finalFilter(new ArrayList<>(fused), topK, maxPerDoc)`，写 `KEY_FILTERED`：
+Create `FilterNode.java`：实现 `AsyncNodeAction`，从 state 读 `KEY_FUSED`（`List<FusedResult>`）与 `KEY_QUERY`，调用 `filter.filter(fused, fusionTopK, scoreThreshold)`（fusionTopK 默认 30，与 `RagQuery.fusionTopK` 默认一致；scoreThreshold 允许 null），再把 `List<FusedResult>` 作为 `List<RagResult.ChunkResult>` 写入 `KEY_FILTERED`：
 
 ```java
 package com.company.rag.rag.workflow;
@@ -456,6 +465,7 @@ import com.alibaba.cloud.ai.graph.action.AsyncNodeAction;
 import com.company.rag.rag.fusion.ResultFilter;
 import com.company.rag.rag.model.FusedResult;
 import com.company.rag.rag.model.RagQuery;
+import com.company.rag.rag.model.RagResult;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -464,7 +474,7 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import lombok.extern.slf4j.Slf4j;
 
-/** 最终筛选节点：按文档分组上限与 topK 产出一致的结果列表。 */
+/** 最终筛选节点：阈值过滤 + 按分排序取 Top-K，产出 ChunkResult 列表。 */
 @Slf4j
 public class FilterNode implements AsyncNodeAction {
 
@@ -482,17 +492,20 @@ public class FilterNode implements AsyncNodeAction {
             List<FusedResult> fused =
                     state.<List<FusedResult>>value(HybridRetrievalWorkflow.KEY_FUSED)
                             .orElse(Collections.emptyList());
-            int topK = query != null && query.getTopK() != null ? query.getTopK() : 10;
-            int maxPerDoc = query != null && query.getMaxPerDoc() != null ? query.getMaxPerDoc() : 3;
-            out.put(HybridRetrievalWorkflow.KEY_FILTERED,
-                    filter.finalFilter(new ArrayList<>(fused), topK, maxPerDoc));
+            int fusionTopK = query != null && query.getFusionTopK() != null
+                    ? query.getFusionTopK() : 30;
+            Double scoreThreshold = query != null ? query.getScoreThreshold() : null;
+            // 与原流水线一致：先 filter（阈值+topK），再依赖继承链宽化返回类型
+            List<FusedResult> filtered = filter.filter(fused, fusionTopK, scoreThreshold);
+            List<RagResult.ChunkResult> output = new ArrayList<>(filtered);
+            out.put(HybridRetrievalWorkflow.KEY_FILTERED, output);
             return out;
         });
     }
 }
 ```
 
-> 注意：若 `ResultFilter.finalFilter` 的实际签名与 `List<RagResult.ChunkResult>` 相关（而非直接接收 `List<FusedResult>`），请以真实定义为准调整入参类型，保持对外行为不变。实现时先阅读 `ResultFilter.java` 源码确认。
+> **类型说明：** `new ArrayList<>(filtered)` 之所以能构造 `List<RagResult.ChunkResult>`，是因为 `FusedResult extends NormalizedResult extends RagResult.ChunkResult`，`ArrayList<FusedResult>` 构造器按元素逐一宽化。若此处强转报错，改为 `List<RagResult.ChunkResult> output = new ArrayList<>(filtered);` 的逐元素复制写法（`for (FusedResult fr : filtered) output.add(fr);`），以可编译为准。
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -818,7 +831,10 @@ git commit -m "refactor(rag): MultiRetrieveServiceImpl 改由 StateGraph 工作�
 
 **2. Placeholder scan**
 - Task 1 Step 3 含一段「占位示意」并明确要求实现时写出真实可编译代码（非交付占位符，而是交接说明）。计划其余部分无 TBD/TODO。
-- 修正：较上一版计划移除不可继承的 `HybridRetrievalState` 类，状态键常量统一定义于 `HybridRetrievalWorkflow`。
+- 修正（较上一版计划）：
+  - 移除不可继承的 `HybridRetrievalState` 类，状态键常量统一定义于 `HybridRetrievalWorkflow`，直接使用 `OverAllState`。
+  - **Task 3 校准为真实语义**：原流水线筛选实际调用 `ResultFilter.filter(List<FusedResult>, fusionTopK, scoreThreshold)` 而非 `finalFilter`（`finalFilter` 仅用于上层 Rerank 后的流程，当前 `MultiRetrieveServiceImpl` 未调用）。`FilterNode` 复现 `filter(...)` 并将其结果宽化为 `List<RagResult.ChunkResult>`。
+  - **Task 1 topK 校准为固定值**：Vector/FullText 用 50、Fuzzy 用 30，与原流水线一致，不随 query 动态取值。
 
 **3. Type consistency**
 - 键常量 `KEY_QUERY/KEY_VECTOR/KEY_FULLTEXT/KEY_FUZZY/KEY_FUSED/KEY_FILTERED` 定义于 Task 4，被 Task 1–3 的测试与实现引用（任务依赖允许 Task 4 提前定义常量的实现顺序）✓
