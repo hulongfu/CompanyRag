@@ -2,6 +2,33 @@
 
 ## Git Push
 
+### 最新推送（2026-09-13 混合检索 StateGraph 工作流 + 跨线程租户修复 → gitee 成功 / github 网络失败）
+
+- commit_type:            Feat
+- task_id:                0000
+- task_name:              混合检索StateGraph工作流 + 跨线程租户上下文修复
+- commit_hash:            c7e0939
+- branch:                 feat/hybrid-retrieval-workflow（新建分支推送 gitee）
+- remote:                 gitee（成功，新建分支）& origin 即 github（失败 - 网络原因，Connection was reset）
+- staged_files:
+  - company-rag-rag/.../workflow/HybridRetrievalWorkflow.java（新增 - StateGraph 工作流编排：三路并行检索 → 归一化融合 → 最终筛选）
+  - company-rag-rag/.../workflow/VectorRetrieveNode.java（新增 - 向量检索节点，apply() 内恢复租户上下文）
+  - company-rag-rag/.../workflow/FullTextRetrieveNode.java（新增 - 全文检索节点）
+  - company-rag-rag/.../workflow/FuzzyRetrieveNode.java（新增 - 模糊检索节点）
+  - company-rag-rag/.../workflow/NormalizeFuseNode.java（新增 - 归一化融合节点）
+  - company-rag-rag/.../workflow/FilterNode.java（新增 - 最终筛选节点）
+  - company-rag-rag/.../workflow/WorkflowKeys.java（新增 - 工作流状态键常量，含 TENANT_CONTEXT）
+  - company-rag-rag/.../workflow/TenantContextSnapshot.java（新增 - 请求线程捕获/恢复租户上下文到 worker 线程）
+  - company-rag-rag/.../service/impl/MultiRetrieveServiceImpl.java（修改 - 确定性混合检索流水线重构为 StateGraph 工作流）
+  - company-rag-rag/.../workflow/*Test.java（新增 - NormalizeFuseNodeTest/FilterNodeTest/HybridRetrievalWorkflowTest/RetrieveNodeTest，工作流单测 10/10 全绿）
+- commit_message:         fix(rag): StateGraph 工作流跨线程传播租户上下文快照（c7e0939）
+- commit_exit_code:       0（早前已提交）
+- push_command:           git push -u gitee feat/hybrid-retrieval-workflow; git push -u origin feat/hybrid-retrieval-workflow
+- push_exit_code:         gitee=0（新建分支 c7e0939）；origin=128（fatal: unable to access github: Recv failure: Connection was reset）
+- remote_head_check_command: git rev-parse HEAD && git ls-remote gitee feat/hybrid-retrieval-workflow
+- remote_head:            gitee/feat/hybrid-retrieval-workflow=c7e0939c32f6183cd47ee3263325410ec37f702a（与本地一致，有 ls-remote 佐证）；github 因连接被重置无法推送，该分支未同步至 github，待网络恢复补推
+- result:                 本地提交 c7e0939 已推送 gitee 新建分支成功，gitee/feat/hybrid-retrieval-workflow = c7e0939 与本地一致；github(origin) 因网络原因推送失败（Connection was reset，push exit=128），该分支未同步，待网络恢复后补推。变更内容：把 MultiRetrieveServiceImpl 的确定性混合检索流水线重构为 Spring AI Alibaba StateGraph 工作流（5 节点：三路并行检索 → 归一化融合 → 最终筛选），对外行为不变；修复 StateGraph 节点在 ForkJoinPool worker 线程执行导致 TenantContext（ThreadLocal）不跨线程抛「未设置租户上下文」以及向量 SQL 未替换为租户 schema 报 bad SQL grammar 两个运行时缺陷——通过 TenantContextSnapshot 捕获/恢复、WorkflowKeys.TENANT_CONTEXT 放入初始图状态、检索节点 apply() 内写回并在 finally clear() 防线程池串扰。验证（窄范围）：RetrieveNodeTest 新增跨线程传播用例，工作流单测 10/10 全绿，模块 compile BUILD SUCCESS。遗留：worker 线程日志 traceId/spanId 为空（仅可观测性，不影响功能）。
+
 ### 最新推送（2026-09-12 回填真库 IT → 待推送 gitee & github）
 
 - commit_type:            Task
