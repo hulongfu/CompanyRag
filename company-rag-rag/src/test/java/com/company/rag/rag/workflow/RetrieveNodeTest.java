@@ -1,6 +1,7 @@
 package com.company.rag.rag.workflow;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
@@ -21,6 +22,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.MDC;
 
 class RetrieveNodeTest {
 
@@ -87,6 +89,8 @@ class RetrieveNodeTest {
     @AfterEach
     void clearTenantContext() {
         TenantContext.clear();
+        MDC.remove("traceId");
+        MDC.remove("spanId");
     }
 
     /**
@@ -126,5 +130,57 @@ class RetrieveNodeTest {
 
         // 工作线程内应读到请求线程的 schema
         assertEquals("t_tenant_001", schemaSeen.get());
+    }
+
+    /**
+     * 验证状态中的快照会把请求线程日志 MDC 的 traceId/spanId 恢复到工作线程。
+     *
+     * <p>图并行节点运行在内部线程池，日志 MDC 基于 ThreadLocal 不跨线程，
+     * 本用例验证节点通过 apply() 写回 MDC 后，工作线程内的日志链路标识与请求线程一致，
+     * 从而修复日志中 traceId=/spanId= 为空的问题。</p>
+     */
+    @Test
+    void mdcTraceContextPropagatedToWorkerThread() throws Exception {
+        // 请求线程设置日志链路标识（模拟 Micrometer TracingObservationHandler 写入 MDC）
+        MDC.put("traceId", "trace-abc-123");
+        MDC.put("spanId", "span-xyz-456");
+        TenantContextSnapshot snapshot = TenantContextSnapshot.captureNow();
+
+        RagQuery query = new RagQuery();
+        query.setQuery("q");
+
+        // 检索器在工作线程内执行，读取该线程的 MDC 链路标识
+        AtomicReference<String> traceSeen = new AtomicReference<>();
+        AtomicReference<String> spanSeen = new AtomicReference<>();
+        VectorRetriever retriever = mock(VectorRetriever.class);
+        doAnswer(inv -> {
+            traceSeen.set(MDC.get("traceId"));
+            spanSeen.set(MDC.get("spanId"));
+            return Collections.singletonList(new RagResult.ChunkResult());
+        }).when(retriever).retrieve(anyString(), anyInt());
+
+        Map<String, Object> stateMap = new HashMap<>();
+        stateMap.put(WorkflowKeys.QUERY, query);
+        stateMap.put(WorkflowKeys.TENANT_CONTEXT, snapshot);
+        stateMap.put(WorkflowKeys.VECTOR_CHUNKS, Collections.emptyList());
+
+        VectorRetrieveNode node = new VectorRetrieveNode(retriever);
+        node.apply(new OverAllState(stateMap)).get();
+
+        // worker 线程内应读到请求线程的 traceId/spanId
+        assertEquals("trace-abc-123", traceSeen.get());
+        assertEquals("span-xyz-456", spanSeen.get());
+    }
+
+    /**
+     * 验证请求线程未启用追踪（MDC 无链路标识）时，快照写回不会产生脏数据。
+     */
+    @Test
+    void mdcTraceContextAbsentIsNoop() throws Exception {
+        // 不设置任何 MDC 链路标识
+        TenantContextSnapshot snapshot = TenantContextSnapshot.captureNow();
+        snapshot.apply();
+        assertNull(MDC.get("traceId"));
+        assertNull(MDC.get("spanId"));
     }
 }
