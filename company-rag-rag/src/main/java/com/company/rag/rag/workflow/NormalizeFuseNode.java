@@ -34,19 +34,32 @@ public class NormalizeFuseNode implements AsyncNodeAction {
     public CompletableFuture<Map<String, Object>> apply(OverAllState state) {
         return CompletableFuture.supplyAsync(() -> {
             Map<String, Object> out = new HashMap<>();
-            // 从状态中读取查询参数，用于融合权重判断
-            RagQuery query = state.<RagQuery>value(WorkflowKeys.QUERY).orElse(null);
-            // 分别对三路结果做排名归一化
-            List<NormalizedResult> normVector =
-                    normalizer.normalize(chunks(state, WorkflowKeys.VECTOR_CHUNKS));
-            List<NormalizedResult> normFullText =
-                    normalizer.normalize(chunks(state, WorkflowKeys.FULLTEXT_CHUNKS));
-            List<NormalizedResult> normFuzzy =
-                    normalizer.normalize(chunks(state, WorkflowKeys.FUZZY_CHUNKS));
-            String text = query != null ? query.getQuery() : "";
-            // 融合三路结果并按最终分数排序，写入状态
-            out.put(WorkflowKeys.FUSED,
-                    fuser.fuse(normVector, normFullText, normFuzzy, text));
+            // 节点运行在图引擎工作线程，须恢复请求线程的租户/日志链路快照
+            TenantContextSnapshot snapshot =
+                    state.<TenantContextSnapshot>value(WorkflowKeys.TENANT_CONTEXT).orElse(null);
+            if (snapshot != null) {
+                snapshot.apply();
+            }
+            try {
+                // 从状态中读取查询参数，用于融合权重判断
+                RagQuery query = state.<RagQuery>value(WorkflowKeys.QUERY).orElse(null);
+                // 分别对三路结果做排名归一化
+                List<NormalizedResult> normVector =
+                        normalizer.normalize(chunks(state, WorkflowKeys.VECTOR_CHUNKS));
+                List<NormalizedResult> normFullText =
+                        normalizer.normalize(chunks(state, WorkflowKeys.FULLTEXT_CHUNKS));
+                List<NormalizedResult> normFuzzy =
+                        normalizer.normalize(chunks(state, WorkflowKeys.FUZZY_CHUNKS));
+                String text = query != null ? query.getQuery() : "";
+                // 融合三路结果并按最终分数排序，写入状态
+                out.put(WorkflowKeys.FUSED,
+                        fuser.fuse(normVector, normFullText, normFuzzy, text));
+            } finally {
+                // 清理本线程快照上下文，避免线程池复用串扰
+                if (snapshot != null) {
+                    snapshot.clear();
+                }
+            }
             return out;
         });
     }

@@ -33,18 +33,31 @@ public class FilterNode implements AsyncNodeAction {
     public CompletableFuture<Map<String, Object>> apply(OverAllState state) {
         return CompletableFuture.supplyAsync(() -> {
             Map<String, Object> out = new HashMap<>();
-            // 从状态中读取查询参数与融合结果
-            RagQuery query = state.<RagQuery>value(WorkflowKeys.QUERY).orElse(null);
-            List<FusedResult> fused =
-                    state.<List<FusedResult>>value(WorkflowKeys.FUSED)
-                            .orElse(Collections.emptyList());
-            int fusionTopK = query != null && query.getFusionTopK() != null
-                    ? query.getFusionTopK() : 30;
-            Double scoreThreshold = query != null ? query.getScoreThreshold() : null;
-            // 与原流水线一致：先 filter（阈值+topK），再依继承链宽化返回类型
-            List<FusedResult> filtered = filter.filter(fused, fusionTopK, scoreThreshold);
-            List<RagResult.ChunkResult> output = new ArrayList<>(filtered);
-            out.put(WorkflowKeys.FILTERED, output);
+            // 节点运行在图引擎工作线程，须恢复请求线程的租户/日志链路快照
+            TenantContextSnapshot snapshot =
+                    state.<TenantContextSnapshot>value(WorkflowKeys.TENANT_CONTEXT).orElse(null);
+            if (snapshot != null) {
+                snapshot.apply();
+            }
+            try {
+                // 从状态中读取查询参数与融合结果
+                RagQuery query = state.<RagQuery>value(WorkflowKeys.QUERY).orElse(null);
+                List<FusedResult> fused =
+                        state.<List<FusedResult>>value(WorkflowKeys.FUSED)
+                                .orElse(Collections.emptyList());
+                int fusionTopK = query != null && query.getFusionTopK() != null
+                        ? query.getFusionTopK() : 30;
+                Double scoreThreshold = query != null ? query.getScoreThreshold() : null;
+                // 与原流水线一致：先 filter（阈值+topK），再依继承链宽化返回类型
+                List<FusedResult> filtered = filter.filter(fused, fusionTopK, scoreThreshold);
+                List<RagResult.ChunkResult> output = new ArrayList<>(filtered);
+                out.put(WorkflowKeys.FILTERED, output);
+            } finally {
+                // 清理本线程快照上下文，避免线程池复用串扰
+                if (snapshot != null) {
+                    snapshot.clear();
+                }
+            }
             return out;
         });
     }
