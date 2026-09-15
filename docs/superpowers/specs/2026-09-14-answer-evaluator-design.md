@@ -2,8 +2,10 @@
 
 > 日期：2026-09-14
 > 类型：设计规格（Spec）
-> 状态：待用户审阅
+> 状态：待用户审阅（已确认两项 plan 决策：阶段 0 前置方案 A、本版不落库，见 §7）
 > 前置决策：**方案A**——新增独立 `AnswerEvaluator`，封装 Spring AI `Evaluator` SPI，返回 `AnswerEvalResult(query, context, answer, pass, score)`，覆盖 answer-relevancy / correctness / faithfulness 三个维度。不与既有检索端评估耦合。
+> 已确认决策①：阶段 0 前置走 **方案 A（捕获真实检索上下文）**，扩展 `ToolCallRecorder` 捕获检索/工具 payload，打通 `AgentResult.toolContext` 真实透传通道（reflection / answer-eval / human 复用）。
+> 已确认决策②：本版评估结果**不落库**，`AnswerEvaluationService` 纯返回，改动最小、贴合"纯离线不碰主链路"边界；落库作为阶段 3 feedback 信号源的后续迭代。
 
 ## 1. 目标
 
@@ -81,9 +83,15 @@ reflection（在线）与 answer-evaluator（离线）的 faithfulness 维度**�
 
 ## 7. 改动清单
 
-- **新增**：`company-rag-rag/.../eval/answer/` 下 `AnswerEvaluator`(接口) / `AnswerEvalResult` / `AnswerRelevancyEvaluator` / `AnswerCorrectnessEvaluator` / `AnswerFaithfulnessEvaluator` / `AnswerEvaluationService`。
-- **新增（共享）**：`FaithfulnessChecker`（faithfulness 判定实现，reflection 与本 spec 复用）。
-- **可选**：评估结果表 `answer_eval_result`（列：tenant_id / session_row_id / query / context / answer / pass / score / 维度明细 / create_time）。
+- **阶段 0（前置，agent 模块；已确认走方案 A 捕获真实检索上下文）**：
+  - `ToolCallRecorder`（`common/tool`）：新增 payload/chunk 捕获字段（工具输出摘要 / 检索 citations），并扩展 `recordEnd` 支持写入输出；约束长度与内存预算（如单条摘要上限、总量上限），失败不抛、不影响主链路。
+  - `KnowledgeBaseTool`：检索成功后把 `citations`（文件+内容预览）写入 recorder 的 payload，作为判定上下文来源。
+  - `StreamingAgentExecutor.execute()`：不再硬编码 `null`，从 recorder 同步取出检索/工具上下文摘要，装入返回的 `AgentResult.toolContext`。
+  - `RagAgentService.callAgentWithTimeout`：用内部载体带出 `toolContext`（不再仅构造 `AssistantMessage` 丢弃它）。
+  - `RagAgentService.processWithHistory`：用真实的 `toolContext` 构造 `AgentResult`，**不再用 `MDC.get("traceId")` 冒充**。
+- **新增（回答端评估）**：`company-rag-rag/.../eval/answer/` 下 `AnswerEvaluator`(接口) / `AnswerEvalResult` / `AnswerRelevancyEvaluator` / `AnswerCorrectnessEvaluator` / `AnswerFaithfulnessEvaluator` / `AnswerEvaluationService`。
+- **新增（共享）**：`FaithfulnessChecker`（faithfulness 判定实现，reflection 与本 spec 复用；提供轻量二元分支供 reflection 在线，可重粒度评分供本 spec 离线）。若阶段 0 未落地真实上下文，`AnswerFaithfulnessEvaluator` 降级为仅输出"无法判定"，综合 pass 依缺失上下文处理（不判 false 也不判 true，避免误报幻觉）。
+- **本版不落库**：`AnswerEvaluationService.evaluate(query, context, answer)` 纯返回 `AnswerEvalResult`；批量入口 `evaluateAll(List<AnswerCase>)`。`answer_eval_result` 表暂不新增，作为阶段 3 feedback 信号源后续迭代。
 - **不动**：`rag/eval` 既有检索端评估、`ChatController` 主链路、数据库既有表。
 
 ## 8. 风险与观察项
