@@ -122,7 +122,7 @@ processWithHistory(history, userMsg)
 ## 8. 改动清单
 
 - **阶段 0（前置，agent 模块，二选一）**：
-  - **方案 A（捕获）**：修改 `StreamingAgentExecutor`（接入 ReactAgent 观测钩子 / 扩展 recorder 捕获检索 chunk/工具结果，填入 `execute()` 返回的 `AgentResult.toolContext`，当前硬编码 null）、`callAgentWithTimeout`（带出 toolContext）、`processWithHistory`（用真实 toolContext 构造 AgentResult）；可能引入 `AgentExecutionResult` 载体。
+  - **方案 A（捕获）**：修改 `StreamingAgentExecutor`（接入 ReactAgent 观测钩子 / 扩展 recorder 捕获检索 chunk/工具结果，填入 `execute()` 返回的 `AgentResult.toolContext`，当前硬编码 null）、`callAgentWithTimeout`（带出 toolContext）、`processWithHistory`（用真实 toolContext 构造 AgentResult）；可能引入 `AgentExecutionResult` 载体。**⚠️ 前置成本**：实读当前 `ToolCallRecorder`（`common/tool`）仅记 name/duration/status/error、无 payload——方案 A 需先扩展 recorder 增加 payload 捕获字段并预算内存，作为阶段 0 前置任务；扩展不可行则回退方案 B（见编排总览 §5）。
   - **方案 B（降级）**：不捕获真实上下文，reflection 在线仅相关性/遗漏自校，faithfulness 金标准交 answer-evaluator 离线；铁律相应改述。
   - 封口于 agent 模块，不动 Controller 与存储。
 - **reflection**：新增 `reflection/ReflectionService.java`、`ReflectionResult.java`；如做 faithfulness 复用，新增 `FaithfulnessChecker`（与 answer-evaluator 共享）；修改 `RagAgentService` 末尾委派。

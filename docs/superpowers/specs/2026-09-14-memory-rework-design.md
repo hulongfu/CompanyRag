@@ -1,4 +1,4 @@
-# 会话记忆规范化（MessageChatMemoryAdvisor）设计（修订版）
+# 会话记忆规范化（ChatMemoryRepository + 手动注入；MessageChatMemoryAdvisor 可选）设计（修订版）
 
 > 日期：2026-09-14
 > 类型：设计规格（Spec）
@@ -13,7 +13,7 @@
 **约束：**
 - **保隔离（验收铁律）**：多租户 + 用户 + 会话三级隔离必须**由受信任的 `TenantContext` 提供租户/用户身份**，绝不从可伪造的 `CONVERSATION_ID` 解析鉴权身份。
 - **保语义**：全量历史注入，不得因窗口截断丢历史（行为不得漂移）。
-- **唯一落库 Owner**：历史落库在 ChatController 与 Advisor 间**二选一**，防双写。
+- **唯一落库 Owner（防御性约束）**：`RagChatMemory` 只读不写，落库收敛到 `ChatController`，并消除 `RagSearchServiceImpl.search` 隐式落库（见 §3.3 根因：主链路本无双写，此处是防未来新增路径的隐藏双写）。
 - 不引入 mem0；落库仍走既有 `rag_session` 表与 `RagSessionService`。
 
 ## 2. 现状回顾
@@ -114,7 +114,7 @@ RagChatMemory.get(CONVERSATION_ID):
 | 废弃 `ChatRouter` 越权边界（🟡5） | `ChatRouter`（`buildRagQuery` L308 用不可信 `request.getTenantId()` + `processAgent` L191-193 落库）**已 `@Deprecated`、不在 `/api/chat` 主链路**，仅测试与向后兼容引用。若未来重新启用，落库身份必须与 `ChatController` 同源改走可信 `X-Tenant-Id`，spec 明确此边界 |
 | 全量历史语义 | `get` 不截断；`window-size` 默认 -1=全量，开放需显式配置 |
 | 落库兼容 | 不动 `saveConversation` 逻辑与元数据批量更新 |
-| 契约不变 | `processWithHistory` 签名对外保留；`AgentResult`/`ChatResponse` 结构不动 |
+| 契约不变 | `processWithHistory` 签名对外保留；`AgentResult`/`ChatResponse` 其结构仅做**可控扩展**（human 方案或需新增可选 `warnings` 字段，不破坏既有 `answer`/`toolContext`） |
 | mem0 边界 | 不引入 mem0 |
 
 ## 6. 测试策略

@@ -12,7 +12,7 @@
 
 **约束：**
 - **不动**同步 `CompletableFuture.get(5min)` + AbortPolicy 主模型（human-node 方案①的强制挂起与此根本冲突，故不在本 spec 范围）。
-- 不改变 `ChatController` 同步返回契约、`AgentResult` 结构。
+- 不改变 `ChatController` 同步返回契约；`AgentResult` 结构仅做**可控扩展**（仅新增可选 `warnings` 字段，不破坏既有 `answer`/`toolContext`）。
 - 不启用 graphs 的 human-INterrupt 能力（依赖图断点恢复，当前 `ReactAgent`/单链超时模型不支持）。
 - 提示式影响面最小：只改高风险工具的返回内容与 LLM 提示。
 
@@ -84,4 +84,3 @@
 - **前端展示**：当前仅文本注内嵌提示；结构化 `warning` 字段可经独立载体（`AgentResult.warnings` / 阶段 0 `AgentExecutionResult`）导出供前端高亮，属可选配合点，**不复用 `toolContext` 字符串**。
 - **同文件冲突（编排）**：与 nl2sql 同改 `DatabaseQueryTool` 与共用 `ToolResult`（内部载体），必须**阶段 2 合并实现**，避免两处独立改动冲突与返回格式碎片化（见编排总览）。
 - **阶段 0 前置**：`warning[]` 若需非文本透传到前端，依赖阶段 0 引入的富载体（`AgentExecutionResult`/`AgentResult.warnings`）；在此之前 `warning` 仅靠 LLM 文本转述，能力降级但不破坏主链路。
-- **不误伤正常操作**：高风险判定需精确（如 SELECT 不判写操作），避免对普通查询反复加警示干扰体验。

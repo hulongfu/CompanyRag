@@ -21,10 +21,13 @@
 ## 2. 实施排序（分阶段、避免互相阻塞）
 
 ```
-阶段 0（前置，不属任一方案，agent 模块内部封口；捕获或降级二选一）
+阶段 0（前置，不属任一方案，agent 模块内部封口；捕获或降级二选一，**plan 须显式决策 A/B**）
   ├─ A 捕获（推荐）：接入 ReactAgent 观测钩子/扩展 recorder 捕获检索 chunk/工具结果
   │     → execute() 返回真实 toolContext（当前 L51 硬编码 null）
   │     → callAgentWithTimeout 携带带出 → processWithHistory 用真实 toolContext（而非 MDC.get("traceId")）
+  │     · ⚠️ 可行性预算：已实读 `ToolCallRecorder`（common/tool）仅记 name/duration/status/error、**无 payload 字段**（recordEnd 不落输出）。
+  │       方案 A 需先扩展 ToolCallRecorder 捕获工具输出 payload/检索 chunk（新字段 + recordEnd 传参），并预算线程与内存成本；此项为阶段 0 前置任务。
+  │       若扩展不可行/成本过高 → 直接走 B。
   │     · 被依赖方：reflection、answer-evaluator、human-in-the-loop(warning 独立载体) —— 依赖打通后复用
   └─ B 降级：不捕获；reflection 在线仅相关性/遗漏自校，faithfulness 金标准交离线 answer-evaluator，铁律改述
         · A 未落地时，human warning 转文本内嵌转发（🟡2 不复用 toolContext）/ answer-eval 的"复用透传通道"同步降级
@@ -58,7 +61,7 @@
 
 ## 4. 前置依赖（不修则下游方案成立不了）
 
-- **P0：确立阶段 0 的"捕获(A)/降级(B)"**。当前 `execute()` 的 `toolContext` 恒为 `null`（核实），照"透传"改完仍为空。A 打通真实检索上下文供 reflection/answer-eval/human 复用；若走 B，reflection 在线只做相关性自校、faithfulness 金标准交离线 answer-evaluator（铁律改述），human warning 透传降级。
+- **P0：确立阶段 0 的"捕获(A)/降级(B)"**。当前 `execute()` 的 `toolContext` 恒为 `null`（核实），照"透传"改完仍为空。A 需先扩展 `ToolCallRecorder`（实读当前无 payload 捕获，见 §2）打通真实检索上下文供 reflection/answer-eval/human 复用；若走 B，reflection 在线只做相关性自校、faithfulness 金标准交离线 answer-evaluator（铁律改述），human warning 透传降级。**plan 须显式记录 A/B 决策与 recorder 扩展预算。**
 - **P0：明确历史落库唯一 Owner**（ChatController）。memory 防双写。
 - **P0：异步每步恢复 `TenantContext`**（rag-etl）。先用 `TenantContextSnapshot.apply()` 恢复再碰 DB，finally `clear()` 清理（🟡4 无 `restore()`），由 `TenantSchemaInterceptor` 自动续 search_path（不手动调已废弃的 `TenantContextHelper`/`resetSqlContext`）。防跨租户写向量库。
 - **P0：隔离身份源自 TenantContext，不从可伪造 ID 解析**（memory）。
@@ -68,6 +71,7 @@
 | 能力 | 验收铁律 |
 |---|---|
 | `toolContext`（阶段 0，A/B 二选一） | A：`AgentResult.toolContext` 含真实检索内容（不再是 traceId），**专供检索上下文**；human `warning` 走独立载体（`AgentResult.warnings` / `AgentExecutionResult`），不得写进 toolContext（🟡2）；B：reflection 在线仅相关性自校、faithfulness 金标准交离线 answer-evaluator（铁律相应改述） |
+| `ToolCallRecorder` 扩展（阶段 0-A 前置） | 实读当前仅记 name/duration/status/error、无 payload；方案 A 须新增 payload/chunk 捕获字段并预算内存，扩展不可行则回退 B |
 | 多租户隔离 | 任何场景伪造 ID / 残留 search_path 均不得跨租户读写 |
 | 唯一落库 Owner | 同 session 一轮对话 `rag_session` 只新增 1 行 |
 | 异步步骤隔离（ETL） | 并发多租户任务下，每步落库命中本租户 schema |
@@ -77,4 +81,4 @@
 ## 6. 与其他文档关系
 
 - 每份方案内已内嵌"统一编排 / 阶段"小节，本总览为唯一权威排序。
-- references 采用评审 `2026-09-14-design-review.md` 作为修订依据源。
+- references 采用各 spec 内的**内联修订记录**作为修订依据源；评审源文档 `design-review.md` 已删除（🔴1 撤诉），不再引用。

@@ -76,6 +76,10 @@ DocumentStepProcessor.execute(task):
   TenantContextSnapshot snapshot = task.getTenantSnapshot();   // 提交时已捕获
   snapshot.apply();                                             // worker 线程恢复 TenantContext 五字段（非空字段写回）
   try {
+      // ⚠️ fail-closed 断言（防拦截器 fallback 到 public 掩盖漏恢复）：
+      //   若 apply 后 TenantContext 仍未恢复出本租户 schema/tenantId，直接抛错终止本步，
+      //   绝不依赖拦截器静默路由到 public（那会把数据写错 schema，掩盖异步隔离回归）。
+      assertTenantContextRestored(task.expectedTenantId);       // 未恢复 → 抛 IllegalStateException
       // 不再手动 resetSqlContext / SET search_path：
       // TenantSchemaInterceptor 会在每条 SQL 前自动读到刚恢复的 TenantContext 并 SET search_path/app.tenant_id
       ...本步骤事务+落库...   // 拦截器据此路由本租户 schema
@@ -84,7 +88,7 @@ DocumentStepProcessor.execute(task):
   }
 ```
 
-- **拦截器行为要顺**：拦截器对「TenantContext 已设置」设租户 schema、对「未设置」fallback 到 `search_path TO public`（fail-open 于应用视角 = 未设置时只碰 public，是安全的默认）。**必须"先恢复 `TenantContext` 再碰 DB"**（worker 中调用 `snapshot.apply()` 后立即执行 SQL），否则 SQL 会落在 public 或错误租户 schema。
+- **拦截器行为要顺**：拦截器对「TenantContext 已设置」设租户 schema、对「未设置」fallback 到 `search_path TO public`（fail-open 于应用视角 = 未设置时只碰 public，是安全的默认）。**必须"先恢复 `TenantContext` 再碰 DB"**（worker 中调用 `snapshot.apply()` 后立即执行 SQL），否则 SQL 会落在 public 或错误租户 schema。**但勿把"public 兜底"当免死金牌**：对漏恢复的 worker，public 兜底会静默把数据写错 schema、掩盖异步隔离回归，故每步落库前必须加 **fail-closed 断言**（`TenantContext` 未恢复则抛错，不依赖 public 兜底，见上方伪代码 `assertTenantContextRestored`）。
 - **提交时捕获**（请求线程，受信任身份）→ **worker 每步 `apply()` 恢复 + `clear()` 清理**，与 `RagAgentService.callAgentWithTimeout` 的上下文传播思路同源（其载体为 Micrometer `ContextSnapshot` + 手动 `TenantContext.setXxx`，此处用项目自有的 `TenantContextSnapshot`，两者复用同一「捕获→恢复→清理」模式）。
 - 解析文本/敏感内容一律不落日志（既有铁律）。
 
