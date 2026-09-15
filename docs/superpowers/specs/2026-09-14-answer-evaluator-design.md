@@ -48,6 +48,14 @@ RetrievalEvalRunner      ──►     AnswerEvaluator
 
 两者**正交互补**：检索端保证"召回对了"，回答端保证"答对了"。不合并、不互相依赖。
 
+### 3.4 与既有用户反馈机制的边界
+
+项目已有 `/api/chat/feedback` 接口，将用户显式主观反馈（👍/👎，`-1/0/1`）写入 `rag_session.feedback` 列（按 `tenantId + userId + sessionId + sessionRowId` 定位单条问答行）。
+
+- **性质不同**：`rag_session.feedback` 是**用户主观信号**；本 spec 的 `AnswerEvaluator` 输出是**系统自动客观评估**（三维 pass+score）。二者正交，不互相覆盖。
+- **阶段 1 明确不动既有机制**：不改 `rag_session` 表结构、不改 `/api/chat/feedback` 接口、不向 `feedback` 列写入机器评估分。
+- **key 对齐以便阶段 3 打通**：本 spec 的 Redis 评估 key 使用与既有机制一致的 `sessionId/sessionRowId` 定位语义，阶段 3 做 feedback 信号源时可将「自动评估分」与「存量用户 feedback」按同一把 key 关联对比，无需改动既有结构。
+
 ### 3.3 与 reflection 的 faithfulness 分工（评审 🟡）
 
 reflection（在线）与 answer-evaluator（离线）的 faithfulness 维度**功能重叠**，须明确分工并**复用同一份判定实现**，不各写一套：
