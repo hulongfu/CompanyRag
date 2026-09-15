@@ -7,6 +7,7 @@ import org.springframework.stereotype.Component;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * 工具调用记录器（通用组件）
@@ -17,6 +18,9 @@ import java.util.Map;
 public class ToolCallRecorder {
 
     private static final int MAX_INPUT_LENGTH = 50;
+
+    /** 单条摘要最大长度，避免 payload 过大 */
+    private static final int MAX_OUTPUT_LENGTH = 500;
 
     private final ThreadLocal<List<ToolCallRecord>> recordsHolder = new ThreadLocal<>();
 
@@ -60,7 +64,7 @@ public class ToolCallRecorder {
                 .durationMs(durationMs)
                 .status(status)
                 .errorMessage(errorMessage)
-                .outputSummary(outputSummary)
+                .outputSummary(truncate(outputSummary))
                 .build();
 
         List<ToolCallRecord> records = recordsHolder.get();
@@ -92,10 +96,30 @@ public class ToolCallRecorder {
     }
 
     /**
+     * 汇总本次请求的检索/工具上下文摘要，供 AgentResult.toolContext 透传。
+     * 无记录时不返回 null，返回空串，避免上层拼 null。
+     */
+    public String captureToolContext() {
+        List<ToolCallRecord> records = recordsHolder.get();
+        if (records == null || records.isEmpty()) {
+            return "";
+        }
+        return records.stream()
+                .map(r -> r.getToolName() + ":" + (r.getOutputSummary() != null ? r.getOutputSummary() : ""))
+                .filter(s -> !s.endsWith(":"))
+                .collect(Collectors.joining(" | "));
+    }
+
+    /**
      * 从 MDC 读取当前 traceId，获取不到时返回空串（避免拼 null）
      */
     private String traceIdFromMdc() {
         String traceId = MDC.get("traceId");
         return traceId != null ? traceId : "";
+    }
+
+    private String truncate(String s) {
+        if (s == null) return null;
+        return s.length() > MAX_OUTPUT_LENGTH ? s.substring(0, MAX_OUTPUT_LENGTH) : s;
     }
 }

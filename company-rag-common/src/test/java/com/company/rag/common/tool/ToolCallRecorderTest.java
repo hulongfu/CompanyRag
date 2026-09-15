@@ -90,4 +90,17 @@ class ToolCallRecorderTest {
         assertEquals(1, records.size());
         assertEquals("citations=c1", records.get(0).getOutputSummary());
     }
+
+    @Test
+    void captureToolContext_aggregatesOutputSummaries() {
+        MDC.put("traceId", "trace-1");
+        long start = recorder.recordStart("searchKnowledgeBase", Map.of("question", "q"));
+        recorder.recordEnd("searchKnowledgeBase", start, "success", null, "citations=chunk1,chunk2");
+
+        String ctx = recorder.captureToolContext();
+        assertEquals("searchKnowledgeBase:citations=chunk1,chunk2", ctx);
+
+        recorder.getAndClearRecords();
+        assertEquals("", recorder.captureToolContext());
+    }
 }
