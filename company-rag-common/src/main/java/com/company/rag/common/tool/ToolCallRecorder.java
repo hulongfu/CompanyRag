@@ -37,13 +37,20 @@ public class ToolCallRecorder {
      * 记录工具调用结束
      */
     public void recordEnd(String toolName, long startTimeMs, String status) {
-        recordEnd(toolName, startTimeMs, status, null);
+        recordEnd(toolName, startTimeMs, status, null, null);
     }
 
     /**
      * 记录工具调用结束（带错误信息）
      */
     public void recordEnd(String toolName, long startTimeMs, String status, String errorMessage) {
+        recordEnd(toolName, startTimeMs, status, errorMessage, null);
+    }
+
+    /**
+     * 记录工具调用结束（带错误信息与输出摘要）
+     */
+    public void recordEnd(String toolName, long startTimeMs, String status, String errorMessage, String outputSummary) {
         String traceId = traceIdFromMdc();
         long durationMs = System.currentTimeMillis() - startTimeMs;
 
@@ -53,6 +60,7 @@ public class ToolCallRecorder {
                 .durationMs(durationMs)
                 .status(status)
                 .errorMessage(errorMessage)
+                .outputSummary(outputSummary)
                 .build();
 
         List<ToolCallRecord> records = recordsHolder.get();

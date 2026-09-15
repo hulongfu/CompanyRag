@@ -18,4 +18,5 @@ public class ToolCallRecord {
     private long durationMs;
     private String status;       // success / failed
     private String errorMessage;
+    private String outputSummary; // 工具输出摘要（payload 捕获，供上下文透传）
 }

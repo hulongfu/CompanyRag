@@ -79,4 +79,15 @@ class ToolCallRecorderTest {
     void getAndClearRecords_noMdcReturnsEmpty() {
         assertTrue(recorder.getAndClearRecords().isEmpty());
     }
+
+    @Test
+    void recordEnd_setsOutputSummary() {
+        ToolCallRecorder recorder = new ToolCallRecorder();
+        long start = recorder.recordStart("searchKnowledgeBase", Map.of("question", "q"));
+        recorder.recordEnd("searchKnowledgeBase", start, "success", null, "citations=c1");
+
+        List<ToolCallRecord> records = recorder.getAndClearRecords();
+        assertEquals(1, records.size());
+        assertEquals("citations=c1", records.get(0).getOutputSummary());
+    }
 }
