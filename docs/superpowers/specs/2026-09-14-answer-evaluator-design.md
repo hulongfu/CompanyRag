@@ -5,7 +5,7 @@
 > 状态：待用户审阅（已确认两项 plan 决策：阶段 0 前置方案 A、本版不落库，见 §7）
 > 前置决策：**方案A**——新增独立 `AnswerEvaluator`，封装 Spring AI `Evaluator` SPI，返回 `AnswerEvalResult(query, context, answer, pass, score)`，覆盖 answer-relevancy / correctness / faithfulness 三个维度。不与既有检索端评估耦合。
 > 已确认决策①：阶段 0 前置走 **方案 A（捕获真实检索上下文）**，扩展 `ToolCallRecorder` 捕获检索/工具 payload，打通 `AgentResult.toolContext` 真实透传通道（reflection / answer-eval / human 复用）。
-> 已确认决策②：本版评估结果**不落库**，`AnswerEvaluationService` 纯返回，改动最小、贴合"纯离线不碰主链路"边界；落库作为阶段 3 feedback 信号源的后续迭代。
+> 已确认决策②：本版评估结果**写 Redis（Redisson，带租户键前缀 + TTL，临时缓冲层）**，不建正式表、改动最小；`AnswerEvaluationService` 返回 `AnswerEvalResult` 并缓存到 Redis，供后续 feedback 信号源/离线质检读取。正式落库（PG 评估表）留在阶段 3 做 feedback 信号源时再补。
 
 ## 1. 目标
 
@@ -16,7 +16,7 @@
 - 复用 Spring AI 官方 `Evaluator` SPI（继承而非自造），保证与官方生态一致。
 - 返回统一结构 `AnswerEvalResult`，与既有 `R<T>` 体系统一对外。
 - 第一版内置 answer-relevancy / correctness / faithfulness 三项，作为独立可调用的评估服务 + 可选离线评估脚本。
-- 不引入额外存储；评估结果选择落库（评估表）或纯返回由 plan 阶段定。
+- 不引入额外**正式**存储；本版评估结果写 Redis 临时缓冲层（Redisson、租户键前缀 + TTL），正式落库留待阶段 3。
 
 ## 2. 现状回顾
 
@@ -91,7 +91,7 @@ reflection（在线）与 answer-evaluator（离线）的 faithfulness 维度**�
   - `RagAgentService.processWithHistory`：用真实的 `toolContext` 构造 `AgentResult`，**不再用 `MDC.get("traceId")` 冒充**。
 - **新增（回答端评估）**：`company-rag-rag/.../eval/answer/` 下 `AnswerEvaluator`(接口) / `AnswerEvalResult` / `AnswerRelevancyEvaluator` / `AnswerCorrectnessEvaluator` / `AnswerFaithfulnessEvaluator` / `AnswerEvaluationService`。
 - **新增（共享）**：`FaithfulnessChecker`（faithfulness 判定实现，reflection 与本 spec 复用；提供轻量二元分支供 reflection 在线，可重粒度评分供本 spec 离线）。若阶段 0 未落地真实上下文，`AnswerFaithfulnessEvaluator` 降级为仅输出"无法判定"，综合 pass 依缺失上下文处理（不判 false 也不判 true，避免误报幻觉）。
-- **本版不落库**：`AnswerEvaluationService.evaluate(query, context, answer)` 纯返回 `AnswerEvalResult`；批量入口 `evaluateAll(List<AnswerCase>)`。`answer_eval_result` 表暂不新增，作为阶段 3 feedback 信号源后续迭代。
+- **本版存储**：`AnswerEvaluationService.evaluate(query, context, answer)` 返回 `AnswerEvalResult`，并写入 Redis（Redisson `RMapCache`，键 `{CACHE_EVAL_PREFIX}{tenantId}:{sessionId|queryHash}`，TTL 如 24h），风格对齐现有 `RagCacheManager`；提供批量入口 `evaluateAll(List<AnswerCase>)`。**不建正式表** `answer_eval_result`，正式落库作为阶段 3 feedback 信号源后续迭代。
 - **不动**：`rag/eval` 既有检索端评估、`ChatController` 主链路、数据库既有表。
 
 ## 8. 风险与观察项
