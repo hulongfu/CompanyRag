@@ -87,7 +87,12 @@ public class KnowledgeBaseTool implements AgentTool {
             KnowledgeBaseResult response = convertToKnowledgeBaseResult(result);
             
             if (response.isSuccess()) {
-                recorder.recordEnd("searchKnowledgeBase", startTime, "success");
+                String outputSummary = response.getCitations() != null
+                        ? "citations=" + response.getCitations().stream()
+                            .map(c -> c.getFilename() + "#" + c.getChunkIndex())
+                            .collect(Collectors.joining(","))
+                        : "";
+                recorder.recordEnd("searchKnowledgeBase", startTime, "success", null, outputSummary);
                 recordAudit(question, topK, true, null);
             } else {
                 recorder.recordEnd("searchKnowledgeBase", startTime, "failed");

@@ -65,7 +65,9 @@ class KnowledgeBaseToolEndToEndTest {
         // 验证调用了 RAG 服务
         verify(ragSearchService, times(1)).search(any(RagQuery.class));
         verify(recorder, times(1)).recordStart(eq("searchKnowledgeBase"), any());
-        verify(recorder, times(1)).recordEnd(eq("searchKnowledgeBase"), anyLong(), eq("success"));
+        verify(recorder, times(1)).recordEnd(eq("searchKnowledgeBase"), anyLong(), eq("success"),
+                argThat((String e) -> e == null),
+                argThat((String s) -> s != null && s.contains("测试环境管理规范.md#0")));
     }
     
     @Test
