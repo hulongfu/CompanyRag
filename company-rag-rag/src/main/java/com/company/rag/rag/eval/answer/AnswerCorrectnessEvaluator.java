@@ -1,9 +1,12 @@
 package com.company.rag.rag.eval.answer;
 
+import org.springframework.stereotype.Component;
+
 /**
  * 回答相对参考答案的正确性评估。第一版以可观察的规则式判定为主：
  * 回答非空、非兜底且长度达到合理下限视为"给出实质内容"。
  */
+@Component
 public class AnswerCorrectnessEvaluator implements AnswerEvaluator {
 
     private static final int MIN_ANSWER_LENGTH = 10;

@@ -1,9 +1,12 @@
 package com.company.rag.rag.eval.answer;
 
+import org.springframework.stereotype.Component;
+
 /**
  * 回答相对检索上下文的忠实度判定，供 reflection（在线轻量分支）与本 spec 的
  * AnswerFaithfulnessEvaluator（离线可重评分）复用，避免各写一套。
  */
+@Component
 public class FaithfulnessChecker {
 
     /**

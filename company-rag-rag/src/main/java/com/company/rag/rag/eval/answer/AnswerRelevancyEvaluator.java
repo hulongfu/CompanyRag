@@ -1,9 +1,12 @@
 package com.company.rag.rag.eval.answer;
 
+import org.springframework.stereotype.Component;
+
 /**
  * 回答相对问题的相关性评估。第一版以可观察的规则式判定为主：
  * 回答非空且包含问题核心词/非"抱歉"兜底，即视为相关。
  */
+@Component
 public class AnswerRelevancyEvaluator implements AnswerEvaluator {
 
     @Override

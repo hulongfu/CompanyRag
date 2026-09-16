@@ -80,18 +80,18 @@ mcp:
   enabled: true
   clients:
     # 本地测试 MCP Server（端口 9001）
-    - id: custom
-      name: 本地测试 MCP Server
-      url: http://localhost:9001/mcp
-      enabled: true
-      timeout: 30000
-    
-    # 文件系统 MCP Server（可选）
-    - id: filesystem
-      name: 文件系统 MCP Server
-      url: http://localhost:3000/mcp
-      enabled: false
-      timeout: 30000
+#    - id: custom
+#      name: 本地测试 MCP Server
+#      url: http://localhost:9001/mcp
+#      enabled: true
+#      timeout: 30000
+#
+#    # 文件系统 MCP Server（可选）
+#    - id: filesystem
+#      name: 文件系统 MCP Server
+#      url: http://localhost:3000/mcp
+#      enabled: false
+#      timeout: 30000
     
     # Parallel MCP Server（官方免费服务，无需 API Key）
     # 提供 parallel_search 和 parallel_fetch 两个工具
