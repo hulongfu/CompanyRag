@@ -2,6 +2,31 @@
 
 ## Git Push
 
+### 最新推送（2026-09-15 answer-evaluator 修复批次 → gitee 成功 / github 网络失败）
+
+- commit_type:            BugFix
+- task_id:                0000
+- task_name:              修复评估链路Bean启动报错
+- commit_hash:            35679f4a16089f40940fd3aba724b9f5fc07d200
+- branch:                 feat/answer-evaluator（新建分支推送 gitee）
+- remote:                 gitee（成功，新建分支）& origin 即 github（失败 - 网络原因，curl 28 / Recv failure Connection was reset）
+- staged_files:
+  - company-rag-rag/.../eval/answer/AnswerCorrectnessEvaluator.java（修改 - 补 @Component，修复启动 Bean 缺失）
+  - company-rag-rag/.../eval/answer/AnswerFaithfulnessEvaluator.java（修改 - 补 @Component）
+  - company-rag-rag/.../eval/answer/AnswerRelevancyEvaluator.java（修改 - 补 @Component）
+  - company-rag-rag/.../eval/answer/FaithfulnessChecker.java（修改 - 补 @Component）
+  - company-rag-bootstrap/.../application-dev.yml（修改 - 注释掉本地 custom/文件系统 MCP client，避免缺本地 MCP Server 干扰）
+  - docs/superpowers/plans/2026-09-15-answer-evaluator.md（修改 - 勾选 Task 完成状态）
+  - verification-result.md（修改 - 补本次修复批次 Reactor 联合编译通过记录）
+- commit_message:         BugFix:0000_修复评估链路Bean启动报错：add @Component to evaluator beans and comment local custom MCP clients
+- commit_command:         git commit -F .commit-msg-eval.txt
+- commit_exit_code:       0
+- push_command:           timeout 120 git push gitee feat/answer-evaluator; timeout 100 git push -u origin feat/answer-evaluator
+- push_exit_code:         gitee=0（新建分支 feat/answer-evaluator → 35679f4）；origin=1（RPC failed; curl 28 Recv failure: Connection was reset，网络原因）
+- remote_head_check_command: git rev-parse HEAD && git ls-remote gitee feat/answer-evaluator && git ls-remote origin feat/answer-evaluator
+- remote_head:            gitee/feat/answer-evaluator=35679f4a16089f40940fd3aba724b9f5fc07d200（与本地一致，有 ls-remote 佐证）；github 因连接被重置无法访问（ls-remote exit=128），feat/answer-evaluator 分支未同步至 github，待网络恢复补推
+- result:                 本地提交 35679f4 已推送 gitee 新建分支成功，gitee/feat/answer-evaluator=35679f4 与本地一致（证据完整）；github(origin) 因网络原因推送失败（RPC failed; curl 28 Recv failure: Connection was reset，push exit=1，随后 ls-remote exit=128 无法访问），feat/answer-evaluator 分支未同步至 github，待网络恢复后补推。变更内容：为 answer-evaluator 评估链路的 4 个评估器类（AnswerCorrectnessEvaluator/AnswerFaithfulnessEvaluator/AnswerRelevancyEvaluator/FaithfulnessChecker）补 @Component 注解，修复 Spring 启动时「缺少 Bean 无法装配评估链路」导致的 APPLICATION FAILED TO START 问题；application-dev.yml 注释掉本地 custom 与文件系统 MCP client，避免本机未起 MCP Server 时的连接干扰；plan 文档勾选推进。验证（窄范围）：mvn -o -DskipTests compile 根 reactor 联合编译 BUILD SUCCESS（exit=0），避免单模块编译误读本地仓库旧 common 快照。
+
 ### 最新推送（2026-09-13 混合检索 StateGraph 工作流 + 跨线程租户修复 → gitee 成功 / github 网络失败）
 
 - commit_type:            Feat
