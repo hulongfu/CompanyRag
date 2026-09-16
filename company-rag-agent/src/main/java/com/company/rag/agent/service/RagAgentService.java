@@ -8,7 +8,6 @@ import lombok.extern.slf4j.Slf4j;
 import com.alibaba.cloud.ai.graph.exception.GraphRunnerException;
 import io.micrometer.context.ContextSnapshot;
 import org.slf4j.MDC;
-import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.stereotype.Service;
@@ -140,9 +139,9 @@ public class RagAgentService {
             // 2. 自主决定调用 Tool 或 Skill
             // 3. 执行工具/技能并获取结果
             // 4. 基于结果生成最终回答
-            AssistantMessage agentResult = callAgentWithTimeout(messages);
+            AgentResult agentResult = callAgentWithTimeout(messages);
 
-            String response = agentResult.getText();
+            String response = agentResult.getAnswer();
 
             // 聚合工具调用记录，输出结构化日志
             long totalMs = System.currentTimeMillis() - requestStart;
@@ -152,7 +151,8 @@ public class RagAgentService {
                     .collect(Collectors.joining(", "));
             log.info("[AGENT] tools=[{}], total={}ms", toolsSummary, totalMs);
 
-            return new AgentResult(response != null ? response : "", MDC.get("traceId"));
+            return new AgentResult(response != null ? response : "",
+                    agentResult.getToolContext() != null ? agentResult.getToolContext() : MDC.get("traceId"));
 
         } catch (Exception e) {
             long totalMs = System.currentTimeMillis() - requestStart;
@@ -171,7 +171,7 @@ public class RagAgentService {
      * @throws GraphRunnerException Agent 执行异常
      * @throws Exception 其他异常
      */
-    private AssistantMessage callAgentWithTimeout(List<Message> messages) throws GraphRunnerException, Exception {
+    private AgentResult callAgentWithTimeout(List<Message> messages) throws GraphRunnerException, Exception {
         try {
             // 捕获当前线程全部上下文（含 Observation span 与 MDC，Micrometer 自动注入 traceId/spanId），
             // 用 ContextSnapshot 整体传播可确保父 span 的 ObservationScope 在子线程激活，
@@ -186,7 +186,7 @@ public class RagAgentService {
 
             // 使用 CompletableFuture 包装异步调用，设置超时时间
             // 在 supplyAsync 内部捕获 GraphRunnerException 并包装为 RuntimeException
-            CompletableFuture<AssistantMessage> future = CompletableFuture
+            CompletableFuture<AgentResult> future = CompletableFuture
                     .supplyAsync(() -> {
                         // 在子线程中恢复 Observation span + MDC 上下文（返回的 Scope 在 try-with-resources 结束时自动还原/清理）
                         try (ContextSnapshot.Scope ignored = snapshot.setThreadLocals()) {
@@ -208,8 +208,7 @@ public class RagAgentService {
                             }
 
                             // 使用 StreamingAgentExecutor 执行 Agent 调用
-                            AgentResult result = streamingAgentExecutor.execute(messages);
-                            return new AssistantMessage(result.getAnswer());
+                            return streamingAgentExecutor.execute(messages);
                         } catch (GraphRunnerException e) {
                             throw new RuntimeException("Agent 执行失败：" + e.getMessage(), e);
                         } finally {
