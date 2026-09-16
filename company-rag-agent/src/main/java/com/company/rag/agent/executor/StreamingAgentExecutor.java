@@ -1,6 +1,7 @@
 package com.company.rag.agent.executor;
 
 import com.company.rag.agent.service.AgentResult;
+import com.company.rag.common.tool.ToolCallRecorder;
 import com.alibaba.cloud.ai.graph.agent.ReactAgent;
 import com.alibaba.cloud.ai.graph.exception.GraphRunnerException;
 import lombok.RequiredArgsConstructor;
@@ -31,6 +32,8 @@ import java.util.List;
 public class StreamingAgentExecutor {
     
     private final ReactAgent reactAgent;
+
+    private final ToolCallRecorder recorder;
     
     /**
      * 执行 Agent 调用（使用 ReactAgent）
@@ -48,7 +51,8 @@ public class StreamingAgentExecutor {
             
             log.info("[AGENT-EXEC] Agent 调用完成，响应长度={}", content.length());
             
-            return new AgentResult(content, null);
+            String toolContext = recorder.captureToolContext();
+            return new AgentResult(content, toolContext);
         } catch (GraphRunnerException e) {
             log.error("[AGENT-EXEC] Agent 执行失败 | error={}", e.getMessage(), e);
             throw e;
