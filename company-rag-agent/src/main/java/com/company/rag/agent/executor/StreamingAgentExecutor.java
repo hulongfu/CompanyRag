@@ -59,6 +59,9 @@ public class StreamingAgentExecutor {
         } catch (Exception e) {
             log.error("[AGENT-EXEC] Agent 调用异常 | error={}", e.getMessage(), e);
             throw new GraphRunnerException("Agent 调用失败：" + e.getMessage(), e);
+        } finally {
+            // 清理当前工作线程的工具调用记录，避免线程池复用时记录跨请求残留（串号/泄漏）
+            recorder.clearRecords();
         }
     }
 }

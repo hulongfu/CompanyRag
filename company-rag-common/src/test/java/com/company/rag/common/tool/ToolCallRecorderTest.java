@@ -103,4 +103,15 @@ class ToolCallRecorderTest {
         recorder.getAndClearRecords();
         assertEquals("", recorder.captureToolContext());
     }
+
+    @Test
+    void clearRecords_clearsThreadLocalRecords() {
+        MDC.put("traceId", "trace-1");
+        long start = recorder.recordStart("searchKnowledgeBase", Map.of("question", "q"));
+        recorder.recordEnd("searchKnowledgeBase", start, "success", null, "citations=c1");
+
+        recorder.clearRecords();
+
+        assertEquals("", recorder.captureToolContext());
+    }
 }

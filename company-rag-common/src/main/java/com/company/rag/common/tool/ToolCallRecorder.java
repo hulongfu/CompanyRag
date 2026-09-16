@@ -111,6 +111,14 @@ public class ToolCallRecorder {
     }
 
     /**
+     * 清理当前线程的工具调用记录，供请求处理线程在捕获上下文后调用，
+     * 避免线程池复用时旧请求记录残留导致 toolContext 串号与内存泄漏。
+     */
+    public void clearRecords() {
+        recordsHolder.remove();
+    }
+
+    /**
      * 从 MDC 读取当前 traceId，获取不到时返回空串（避免拼 null）
      */
     private String traceIdFromMdc() {

@@ -50,4 +50,18 @@ class StreamingAgentExecutorTest {
 
         assertEquals("", result.getToolContext());
     }
+
+    @Test
+    void execute_clearsRecords_afterCapture() throws Exception {
+        when(reactAgent.call(List.of(new UserMessage("hi"))))
+                .thenReturn(new AssistantMessage("hello"));
+
+        long start = recorder.recordStart("searchKnowledgeBase", java.util.Map.of("question", "q"));
+        recorder.recordEnd("searchKnowledgeBase", start, "success", null, "citations=c1");
+
+        executor.execute(List.of(new UserMessage("hi")));
+
+        // execute 内部在捕获上下文后用 finally 清理工作线程的记录，避免串号/泄漏
+        assertEquals("", recorder.captureToolContext());
+    }
 }
