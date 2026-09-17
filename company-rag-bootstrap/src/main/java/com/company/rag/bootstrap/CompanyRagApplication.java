@@ -28,7 +28,7 @@ import java.util.List;
         org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration.class
 })
 @ComponentScan(basePackages = "com.company.rag")
-@MapperScan({"com.company.rag.tenant.mapper", "com.company.rag.document.mapper", "com.company.rag.rag.mapper"})
+@MapperScan({"com.company.rag.tenant.mapper", "com.company.rag.document.mapper", "com.company.rag.rag.mapper", "com.company.rag.rag.eval.answer"})
 @EnableAsync  // 启用异步方法支持（用于下载工具的异步清理）
 public class CompanyRagApplication {
 

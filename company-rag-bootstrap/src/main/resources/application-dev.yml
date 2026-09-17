@@ -75,6 +75,12 @@ rag:
     score-threshold: 0.3
     fusion-top-k: 50
 
+  # 回答评估配置
+  eval:
+    enabled: true              # 评估组件总开关：@ConditionalOnProperty 决定评估器/Service/EvalController 是否装配
+    online-enabled: false      # 是否接入 chat 在线自动评估（默认关，先手动验证）
+    async-enabled: true        # 在线评估是否异步（true=有界线程池；false=当前线程同步，仅调试用）
+
 # MCP Client 配置：连接外部 MCP Server
 mcp:
   enabled: true

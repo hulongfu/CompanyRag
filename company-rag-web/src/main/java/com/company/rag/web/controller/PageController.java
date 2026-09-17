@@ -29,6 +29,12 @@ public class PageController {
         return "admin";
     }
 
+    /** 回答评估中心页面 */
+    @GetMapping("/eval")
+    public String eval() {
+        return "eval";
+    }
+
     @GetMapping("/audit-log.html")
     public String auditLog() {
         return "audit-log";

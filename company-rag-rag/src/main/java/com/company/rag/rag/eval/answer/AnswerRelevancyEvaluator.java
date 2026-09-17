@@ -1,5 +1,6 @@
 package com.company.rag.rag.eval.answer;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 /**
@@ -7,6 +8,7 @@ import org.springframework.stereotype.Component;
  * 回答非空且包含问题核心词/非"抱歉"兜底，即视为相关。
  */
 @Component
+@ConditionalOnProperty(name = "rag.eval.enabled", havingValue = "true")
 public class AnswerRelevancyEvaluator implements AnswerEvaluator {
 
     @Override

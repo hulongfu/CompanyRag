@@ -4,10 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>管理后台 - CompanyRag</title>
-    <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css">
+    <link rel="stylesheet" href="https://cdn.staticfile.net/element-plus/2.6.1/index.css">
     <style>
         body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f7fa; }
         .app-header { height: 56px; background: #303133; color: white; display: flex; align-items: center; padding: 0 24px; justify-content: space-between; }
+        .hdr-btn{display:inline-flex;align-items:center;justify-content:center;padding:5px 15px;height:32px;border-radius:16px;border:1px solid rgba(255,255,255,.5);background:rgba(255,255,255,.15);color:#fff !important;font-size:13px;cursor:pointer;transition:all .2s;white-space:nowrap;line-height:1;margin-left:8px}
+        .hdr-btn:hover{background:rgba(255,255,255,.3);border-color:rgba(255,255,255,.8);color:#fff !important}
         .container { max-width: 1200px; margin: 24px auto; padding: 0 16px; }
         .card { background: white; border-radius: 12px; padding: 20px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
         .card h3 { font-size: 16px; margin-bottom: 16px; }
@@ -21,7 +23,10 @@
 <div id="app">
     <header class="app-header">
         <h1>⚙️ CompanyRag 管理后台</h1>
-        <el-button size="small" plain @click="goHome" style="color:white;border-color:rgba(255,255,255,0.3);">← 返回首页</el-button>
+        <div>
+            <button class="hdr-btn" @click="goEval">📊 回答评估</button>
+            <button class="hdr-btn" @click="goHome">← 返回首页</button>
+        </div>
     </header>
     <div class="container">
         <div class="stats-grid">
@@ -42,8 +47,9 @@
         </div>
     </div>
 </div>
-<script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
-<script src="https://unpkg.com/element-plus/dist/index.full.min.js"></script>
+<script src="https://cdn.staticfile.net/vue/3.4.21/vue.global.prod.min.js"></script>
+<script src="https://cdn.staticfile.net/element-plus/2.6.1/index.full.min.js"></script>
+<script src="https://cdn.staticfile.net/element-plus-icons-vue/2.3.1/global.min.js"></script>
 <script>
 const { createApp, ref } = Vue;
 createApp({
@@ -52,7 +58,8 @@ createApp({
         const config = ref({ vectorDim: 1024, splitStrategy: 'SEMANTIC_CHUNK', topK: 10, rerankTopK: 5 });
         function saveConfig() { ElementPlus.ElMessage.success('配置已保存'); }
         function goHome() { window.location.href = '/'; }
-        return { stats, config, saveConfig, goHome };
+        function goEval() { window.location.href = '/eval'; }
+        return { stats, config, saveConfig, goHome, goEval };
     }
 }).use(ElementPlus).mount('#app');
 </script>

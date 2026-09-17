@@ -166,4 +166,64 @@ public class SchemaMigrationConfig {
             }
         };
     }
+
+    /**
+     * 为所有租户 schema 幂等创建 answer_eval_result 表、索引并启用 RLS
+     * （与 rag_session 一致：tenant_id = current_tenant_id()）。
+     */
+    @Bean
+    public ApplicationRunner migrateAnswerEvalResultTable() {
+        return args -> {
+            log.info("开始执行 answer_eval_result 表迁移...");
+            try {
+                List<String> tenantSchemas = jdbcTemplate.queryForList(
+                        "SELECT schema_name FROM information_schema.schemata " +
+                        "WHERE schema_name LIKE 'tenant_%'",
+                        String.class
+                );
+                int migratedCount = 0;
+                for (String schemaName : tenantSchemas) {
+                    // schemaName 白名单校验，防 SQL 注入
+                    if (!schemaName.matches("^[a-zA-Z_][a-zA-Z0-9_]*$")) {
+                        log.warn("跳过非法 schema 名：{}", schemaName);
+                        continue;
+                    }
+                    String ddl = """
+                        CREATE TABLE IF NOT EXISTS %1$s.answer_eval_result (
+                            id BIGSERIAL PRIMARY KEY,
+                            tenant_id BIGINT NOT NULL,
+                            session_row_id BIGINT,
+                            query TEXT,
+                            context TEXT,
+                            answer TEXT,
+                            pass BOOLEAN NOT NULL,
+                            score DOUBLE PRECISION NOT NULL,
+                            relevancy_score DOUBLE PRECISION NOT NULL DEFAULT 0,
+                            correctness_score DOUBLE PRECISION NOT NULL DEFAULT 0,
+                            faithfulness_score DOUBLE PRECISION NOT NULL DEFAULT 0,
+                            source VARCHAR(16) NOT NULL,
+                            create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        );
+                        CREATE INDEX IF NOT EXISTS idx_%1$s_answer_eval_tenant_time
+                            ON %1$s.answer_eval_result (tenant_id, create_time DESC);
+                        ALTER TABLE %1$s.answer_eval_result ENABLE ROW LEVEL SECURITY;
+                        ALTER TABLE %1$s.answer_eval_result FORCE ROW LEVEL SECURITY;
+                        DROP POLICY IF EXISTS tenant_isolation_answer_eval ON %1$s.answer_eval_result;
+                        CREATE POLICY tenant_isolation_answer_eval ON %1$s.answer_eval_result
+                            FOR ALL TO company_rag_app
+                            USING (tenant_id = current_tenant_id())
+                            WITH CHECK (tenant_id = current_tenant_id());
+                        GRANT SELECT, INSERT, UPDATE, DELETE ON %1$s.answer_eval_result TO company_rag_app;
+                        GRANT USAGE, SELECT ON SEQUENCE %1$s.answer_eval_result_id_seq TO company_rag_app;
+                        """.formatted(schemaName);
+                    jdbcTemplate.execute(ddl);
+                    migratedCount++;
+                }
+                log.info("answer_eval_result 表迁移完成：处理 {} 个 schema", migratedCount);
+            } catch (Exception e) {
+                // 不抛出异常，避免启动失败
+                log.error("answer_eval_result 表迁移失败：{}", e.getMessage(), e);
+            }
+        };
+    }
 }

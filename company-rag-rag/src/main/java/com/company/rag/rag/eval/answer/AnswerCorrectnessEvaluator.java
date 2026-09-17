@@ -1,5 +1,6 @@
 package com.company.rag.rag.eval.answer;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 /**
@@ -7,6 +8,7 @@ import org.springframework.stereotype.Component;
  * 回答非空、非兜底且长度达到合理下限视为"给出实质内容"。
  */
 @Component
+@ConditionalOnProperty(name = "rag.eval.enabled", havingValue = "true")
 public class AnswerCorrectnessEvaluator implements AnswerEvaluator {
 
     private static final int MIN_ANSWER_LENGTH = 10;

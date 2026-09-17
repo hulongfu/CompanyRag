@@ -5,24 +5,36 @@ import com.company.rag.agent.service.RagAgentService;
 import com.company.rag.common.model.R;
 import com.company.rag.common.security.SecurityUser;
 import com.company.rag.rag.entity.RagSession;
+import com.company.rag.rag.eval.answer.AnswerCase;
+import com.company.rag.rag.eval.answer.AnswerEvaluationService;
 import com.company.rag.rag.model.RagQuery;
 import com.company.rag.rag.model.RagResult;
 import com.company.rag.rag.response.ChatRequest;
 import com.company.rag.rag.response.ChatResponse;
 import com.company.rag.rag.service.RagSearchService;
 import com.company.rag.rag.service.RagSessionService;
+import com.company.rag.rag.workflow.TenantContextSnapshot;
 import com.company.rag.tenant.context.TenantContext;
+import java.util.List;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.ArrayList;
-import java.util.List;
 
 /**
  * 统一对话 Controller
@@ -37,6 +49,29 @@ public class ChatController {
     private final RagAgentService ragAgentService;
     private final RagSearchService ragSearchService;
     private final RagSessionService ragSessionService;
+
+    // 在线评估服务：可选注入（enabled=false 时为 null），主链路不得因评估 bean 缺失而启动失败
+    @Autowired(required = false)
+    private AnswerEvaluationService answerEvaluationService;
+
+    @Value("${rag.eval.online-enabled:false}")
+    private boolean evalOnlineEnabled;
+
+    @Value("${rag.eval.async-enabled:true}")
+    private boolean asyncEnabled;
+
+    // Java 17 兼容：使用普通命名线程工厂（Thread.ofVirtual 为 Java 21 API，本项目 java=17，编译会失败）
+    private final ThreadFactory evalThreadFactory = new ThreadFactory() {
+        private final AtomicInteger n = new AtomicInteger(0);
+        @Override public Thread newThread(Runnable r) {
+            return new Thread(r, "eval-online-" + n.incrementAndGet());
+        }
+    };
+    private final ExecutorService evalExecutor = new ThreadPoolExecutor(
+            2, 4, 60L, TimeUnit.SECONDS,
+            new ArrayBlockingQueue<>(50),
+            evalThreadFactory,
+            new ThreadPoolExecutor.AbortPolicy());
     
     /**
      * 统一对话入口（Agent 编排，LLM 自动决定调用工具）
@@ -139,7 +174,52 @@ public class ChatController {
             log.info("聊天响应完成：answerLength={}, toolContext={}", 
                     response.getAnswer() != null ? response.getAnswer().length() : 0,
                     result.getToolContext());
-            
+
+            // 在线自动评估（默认关闭）：异步触发，失败不影响主回复。
+            // answerEvaluationService 为可选注入，enabled=false 时为 null，此处判空跳过（主链路不受影响）
+            if (evalOnlineEnabled && savedRowId != null && answerEvaluationService != null) {
+                String queryForEval = request.getQuery();
+                String answerForEval = result.getAnswer();
+                // 【铁律】context 可能为 null（无工具调用时），空值归一化为 ""，
+                // faithfulness 对空上下文按「无法印证」处理而非报错
+                String contextForEval = result.getToolContext() == null ? "" : result.getToolContext();
+                Long rowIdForEval = savedRowId;
+                // 显式快照并恢复租户/日志链路上下文，评估任务内不依赖自身 ThreadLocal
+                TenantContextSnapshot ctxSnapshot = TenantContextSnapshot.captureNow();
+                if (asyncEnabled) {
+                    try {
+                        // Java 17 兼容：有界线程池异步，不引入 Java 21 的 Thread.ofVirtual
+                        evalExecutor.submit(() -> {
+                            try {
+                                ctxSnapshot.apply();  // 写回租户/用户/会话/日志链路（值来自主线程显式捕获）
+                                // 在线需落库（带 session_row_id 定位语义）：evaluateAllPersisted
+                                // 强制校验 tenantId=verifiedTenantId，写 Redis + PG，失败剔除不回抛
+                                answerEvaluationService.evaluateAllPersisted(List.of(
+                                        new AnswerCase(queryForEval, contextForEval, answerForEval,
+                                                verifiedTenantId, rowIdForEval, "online")));
+                            } finally {
+                                ctxSnapshot.clear();  // 清理，防线程池复用串扰（在池内线程执行，不碰主线程）
+                            }
+                        });
+                    } catch (RejectedExecutionException e) {
+                        // 队列满被拒，丢弃本次评估并告警，不阻塞主回复。
+                        // 铁律：此处不调用 ctxSnapshot.clear()，它是主线程捕获的快照，
+                        // 主线程上下文在 chat() finally 自有清理，这里 clear 会截断主请求日志链路
+                        log.warn("[EVAL] 在线评估线程池已满，丢弃一次评估：query={}", queryForEval);
+                    }
+                } else {
+                    // async-enabled=false（同步调试）：
+                    try {
+                        ctxSnapshot.apply();
+                        answerEvaluationService.evaluateAllPersisted(List.of(
+                                new AnswerCase(queryForEval, contextForEval, answerForEval,
+                                        verifiedTenantId, rowIdForEval, "online")));
+                    } finally {
+                        ctxSnapshot.clear();
+                    }
+                }
+            }
+
             return R.ok(response);
             
         } finally {

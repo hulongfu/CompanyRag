@@ -80,6 +80,11 @@ public class SecurityConfig {
                 auth.requestMatchers(new AntPathRequestMatcher("/login")).permitAll();
                 auth.requestMatchers(new AntPathRequestMatcher("/index")).permitAll();
 
+                // 放行页面路由（页面框架本身不含敏感数据，鉴权在 /api/** 数据接口层完成）
+                auth.requestMatchers(new AntPathRequestMatcher("/eval")).permitAll();
+                auth.requestMatchers(new AntPathRequestMatcher("/admin")).permitAll();
+                auth.requestMatchers(new AntPathRequestMatcher("/documents")).permitAll();
+
                 // 放行静态资源
                 auth.requestMatchers(new AntPathRequestMatcher("/static/**")).permitAll();
                 auth.requestMatchers(new AntPathRequestMatcher("/public/**")).permitAll();
