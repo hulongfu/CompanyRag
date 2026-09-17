@@ -48,7 +48,8 @@
         <div class="card">
             <h3>✏️ 手动评估</h3>
             <el-alert v-if="!canEval" type="info" :closable="false" show-icon
-                title="当前为只读角色（viewer），可查看评估结果，但不能发起手动评估。" style="margin-bottom:16px;" />
+                title="当前为只读角色（viewer），可查看评估结果，但不能发起手动评估。"
+                style="margin-bottom:16px;"></el-alert>
             <el-form label-width="90px">
                 <el-form-item label="从会话带入">
                     <el-select v-model="selectedSessionId" placeholder="选择历史会话，自动带入 query/answer" clearable filterable
