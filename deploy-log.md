@@ -2,6 +2,43 @@
 
 ## Git Push
 
+### 最新推送（2026-09-17 answer-evaluator 生产接入 + 评估页面 UI → gitee 成功 / github 网络失败）
+
+- commit_type:            Feat
+- task_id:                0000
+- task_name:              回答评估接入生产调用方与评估页面UI
+- commit_hash:            12c7dc71c23b80dfc214235f86e8f22e2db75a07
+- branch:                 feat/answer-evaluator（已有分支）
+- remote:                 gitee（成功）& origin 即 github（失败 - 网络原因，Connection was reset / connect 443 失败）
+- staged_files:
+  - company-rag-rag/.../eval/answer/AnswerCase.java（修改 - 扩展 sessionRowId/source 来源元数据）
+  - company-rag-rag/.../eval/answer/AnswerEvalResultEntity.java（新增 - 评估结果落库实体）
+  - company-rag-rag/.../eval/answer/AnswerEvalResultMapper.java（新增 - 评估结果 Mapper）
+  - company-rag-rag/.../eval/answer/AnswerEvaluationService.java（修改 - 双写 Redis + PG、findByQuery/listResults/stats 读取方法）
+  - company-rag-rag/.../eval/answer/AnswerCorrectnessEvaluator.java / AnswerFaithfulnessEvaluator.java / AnswerRelevancyEvaluator.java（修改 - @Component 修复启动 Bean）
+  - company-rag-rag/.../test/.../AnswerEvaluationServiceTest.java（修改 - 5 参构造 + 落库用例）
+  - company-rag-bootstrap/.../SchemaMigrationConfig.java（修改 - 存量租户建 answer_eval_result 表）
+  - company-rag-bootstrap/.../SecurityConfig.java（修改 - 放行 /eval、/admin、/documents 页面路由）
+  - company-rag-bootstrap/.../application-dev.yml（修改 - 本地 MCP client 注释 + rag.eval 配置段）
+  - company-rag-bootstrap/.../CompanyRagApplication.java（修改）
+  - company-rag-web/.../controller/EvalController.java（新增 - run/result/results/stats 手动评估接口）
+  - company-rag-web/.../controller/ChatController.java（修改 - 在线异步自动评估触发）
+  - company-rag-web/.../controller/PageController.java（修改 - 新增 /eval 页面路由）
+  - company-rag-web/.../templates/eval.html（新增 - 回答评估中心页面；修复日期选择器弹窗重叠 bug：toolbar 改用 el-form+el-form-item 包裹 date-picker）
+  - company-rag-web/.../templates/index.html / admin.html / documents.html（修改 - header 评估/文档/管理入口图标 + 固定 CDN）
+  - company-rag-web/.../test/.../EvalControllerTest.java（新增 - EvalController 单测）
+  - company-rag-web/.../test/resources/mockito-extensions/org.mockito.plugins.MockMaker（新增）
+  - docs/superpowers/plans/2026-09-16-answer-evaluator-production.md（新增）
+  - docs/superpowers/specs/2026-09-16-answer-evaluator-production-design.md（新增）
+- commit_message:         Feat:0000_回答评估接入生产调用方与评估页面UI：add eval persistence double-write, online async trigger, EvalController run/list/stats APIs and eval page UI
+- commit_command:         git commit -m "Feat:0000_回答评估接入生产调用方与评估页面UI：add eval persistence double-write, online async trigger, EvalController run/list/stats APIs and eval page UI"
+- commit_exit_code:       0
+- push_command:           timeout 120 git push gitee feat/answer-evaluator; timeout 60 git push origin feat/answer-evaluator; ls-remote 校验
+- push_exit_code:         gitee=0；origin=128（Recv failure: Connection was reset / connect to github.com:443 失败，网络原因）
+- remote_head_check_command: git rev-parse HEAD && git ls-remote gitee feat/answer-evaluator && git ls-remote origin feat/answer-evaluator
+- remote_head:            gitee/feat/answer-evaluator=12c7dc71c23b80dfc214235f86e8f22e2db75a07（与本地一致，有 ls-remote 佐证）；github 因网络原因无法访问（ls-remote exit=128），feat/answer-evaluator 分支未同步至 github，待网络恢复补推
+- result:                 本地提交 12c7dc7 已推送 gitee 成功，gitee/feat/answer-evaluator=12c7dc7 与本地一致（证据完整）；github(origin) 因网络原因推送失败（Connection was reset / connect 443 失败，push exit=128，ls-remote exit=128 无法访问），feat/answer-evaluator 分支未同步至 github，待网络恢复后补推。变更内容：将回答评估链路（AnswerEvaluationService 三维评估 + Redis 缓冲）接入生产调用方——新增 answer_eval_result 实体/Mapper 与 SchemaMigrationConfig 存量租户建表，Service 改为 Redis+PG 双写并新增 findByQuery/listResults/stats 读取方法；ChatController 在线异步自动评估（配置开关默认关、有界线程池、不回抛）；新增 EvalController（run/result/results/stats 手动评估与查看/统计接口，鉴权 + 租户头校验 + 越权过滤）；新增 /eval 回答评估中心页面，并修复日期选择器点击弹窗重叠 bug（toolbar 用 el-form+el-form-item 包裹 date-picker，浏览器实机验证 43 个重叠 popper 收敛为 2 个）。验证（窄范围）：company-rag-web 模块联合编译 BUILD SUCCESS（exit=0）。
+
 ### 最新推送（2026-09-15 answer-evaluator 修复批次 → gitee 成功 / github 网络失败）
 
 - commit_type:            BugFix
