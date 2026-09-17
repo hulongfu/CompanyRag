@@ -1055,6 +1055,8 @@ createApp({
         
         function selectTenant(row) {
             currentTenantId.value = row.id.toString();
+            // 将当前租户写入 localStorage，确保整页跳转（如进入评估页）后仍使用所选择的租户
+            localStorage.setItem('currentTenantId', row.id.toString());
             uploadHeaders['X-Tenant-Id'] = row.id.toString();
             ElementPlus.ElMessage.success('已选择租户：' + row.tenantName);
             currentTab.value = 'chat';
