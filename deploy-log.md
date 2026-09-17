@@ -2,6 +2,25 @@
 
 ## Git Push
 
+### 最新推送（2026-09-17 修复评估页面手动评估表单不渲染 → gitee 成功 / github 网络失败）
+
+- commit_type:            BugFix
+- task_id:                0000
+- task_name:              修复评估页面手动评估表单不渲染
+- commit_hash:            833bd91b7957b43b0da229183a016f26b92f31f2
+- branch:                 feat/answer-evaluator（已有分支）
+- remote:                 gitee（成功）& origin 即 github（失败 - 网络原因，Recv failure: Connection was reset）
+- staged_files:
+  - company-rag-web/.../templates/eval.html（修改 - el-alert 显式闭合，修复 XML 自闭合吞并后续 el-form 子树的渲染缺陷）
+- commit_message:         BugFix:0000_修复评估页面手动评估表单不渲染：fix el-alert self-closing swallowing el-form subtree in eval.html
+- commit_command:         git commit -m "BugFix:0000_修复评估页面手动评估表单不渲染：fix el-alert self-closing swallowing el-form subtree in eval.html"
+- commit_exit_code:       0
+- push_command:           timeout 120 git push gitee feat/answer-evaluator; timeout 50 git push origin feat/answer-evaluator; ls-remote 校验
+- push_exit_code:         gitee=0；origin=128（Recv failure: Connection was reset，网络原因）
+- remote_head_check_command: git rev-parse HEAD && git ls-remote gitee feat/answer-evaluator
+- remote_head:            gitee/feat/answer-evaluator=833bd91b7957b43b0da229183a016f26b92f31f2（与本地一致，有 ls-remote 佐证）；github 因网络原因无法访问，未同步，待网络恢复补推
+- result:                 本地提交 833bd91 已推送 gitee 成功，gitee/feat/answer-evaluator=833bd91 与本地一致（证据完整）；github(origin) 因网络原因推送失败（Recv failure: Connection was reset，push exit=128），未同步至 github，待网络恢复后补推。变更内容：修复 /eval 页面「手动评估」表单不渲染——根因是 el-alert 使用 XML 自闭合 `/>` 在 HTML DOM 解析中不闭合，把紧随其后的 <el-form> 吞为子节点，v-if=false 时整棵被 Vue 移除；改为显式闭合 </el-alert> 后表单正常渲染。验证（实机 + 窄范围）：隔离最小复现实验 form-missing→显式闭合后 formRendered=true；运行页面表单 5 表单项/3 textarea/按钮全部渲染；Python UTF-8 调 /api/eval/run 返回 code:200 三维评估正常并落库，/results 与 /stats 可查，结果表格正确展示。
+
 ### 最新推送（2026-09-17 answer-evaluator 生产接入 + 评估页面 UI → gitee 成功 / github 网络失败）
 
 - commit_type:            Feat
