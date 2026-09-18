@@ -118,6 +118,14 @@
 - **审计页面**：访问 `http://localhost:8080/audit-log.html`（需 admin 权限），筛选区支持租户/用户下拉选择、动作类型与时间区间过滤
 - **实现路径**：Superpowers 工作流（设计文档 + 6 项实现计划），REST API 见 `/api/admin/audit-logs`
 
+### 🤖 回答评估
+- **三维评估**：relevancy（相关性）/ correctness（正确性）/ faithfulness（忠实度）三个维度独立判定，合成综合 pass（三维全过）与平均 score（0~1）
+- **判定算法**：中文免分词的**字符二元组覆盖**度量（与 LLM 解耦的可观测规则式启发式）——relevancy 看回答命中查询的比例，faithfulness 看回答命中检索正文的比例（阈值 0.15 + `citations=` 来源门槛，防「答非所问仍判忠实」）
+- **双写存储**：Redis 即时缓冲层（租户键前缀 + 24h TTL）+ 每租户 Schema 的 `answer_eval_result` 表落库（RLS 租户隔离，含 `idx_answer_eval_tenant_time` 索引）
+- **两种触发**：手动评估（评估页/接口，source=manual）；在线自动评估（对话后异步，source=online，`rag.eval.enabled=true` 开启，默认关闭）
+- **落库铁律**：跨线程落库强制校验 `AnswerCase.tenantId` 非空，杜绝异步线程 ThreadLocal 丢失租户导致 `tenant_id=0` 永久不可见
+- **实现路径**：Superpowers 工作流，代码见 `company-rag-rag/.../eval/answer/`，评估页见 `eval.html`
+
 ## 技术栈
 
 | 组件 | 技术选型 |
@@ -1246,6 +1254,7 @@ flyway:
 | vector_store | 向量存储(PGVector) | 是(metadata->>'tenant_id'过滤) |
 | rag_session_meta | 会话元信息 | 是(tenant_id隔离) |
 | rag_session | 对话历史明细 | 是(tenant_id隔离) |
+| answer_eval_result | 回答评估结果（relevancy/correctness/faithfulness 三维） | 是(tenant_id隔离, RLS) |
 
 ### PGVector 说明
 
