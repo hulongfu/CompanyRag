@@ -2,6 +2,47 @@
 
 ## Git Push
 
+### 最新推送（2026-09-17 修复评估指标相关性判定与评估上下文来源 → gitee 成功 / github 网络失败）
+
+- commit_type:            BugFix
+- task_id:                0000
+- task_name:              修复评估指标相关性判定与评估上下文来源
+- commit_hash:            6283f5d5e48244cefd2566f6c71302f687f7e5db
+- branch:                 feat/answer-evaluator（已有分支）
+- remote:                 gitee（成功）；origin(github)（失败：Failed to connect to github.com:443，网络不可达）
+- staged_files:
+  - company-rag-rag/.../eval/answer/AnswerRelevancyEvaluator.java（修改 - 中文相关性改为字符二元组覆盖判定，修复 split("\\s+") 对无空格中文 query 退化为单 token 导致相关性误判为 0）
+  - company-rag-rag/.../tools/KnowledgeBaseTool.java（修改 - buildOutputSummary 在 citations= 标记基础上附加各引用段正文预览，供忠实性评估基于真实检索内容判定）
+  - company-rag-web/.../templates/eval.html（修改 - loadSession 带入 context 时经 isGarbageHex 检测，裸 32 位 hex/UUID 垃圾标识置空）
+  - company-rag-rag/.../eval/answer/AnswerRelevancyEvaluatorTest.java（新增 - 相关性评估单测：中文无空格、英文空格、不相关、兜底、空入参 7 例）
+- commit_message:         BugFix:0000_修复评估指标相关性判定与评估上下文来源：fix CJK relevance bigram coverage, embed retrieval content in tool summary, clean garbage hex context on session import
+- commit_command:         git commit -m "BugFix:0000_修复评估指标相关性判定与评估上下文来源：fix CJK relevance bigram coverage, embed retrieval content in tool summary, clean garbage hex context on session import"
+- commit_exit_code:       0
+- push_command:           timeout 60 git push gitee feat/answer-evaluator; timeout 60 git push origin feat/answer-evaluator
+- push_exit_code:         gitee=0；origin=非 0（github.com:443 无法连接）
+- remote_head_check_command: git rev-parse HEAD && git ls-remote gitee feat/answer-evaluator
+- remote_head:            gitee/feat/answer-evaluator=6283f5d 与本地一致
+- result:                 本地提交 6283f5d 已推送到 gitee 成功，gitee 远端 HEAD 与本地一致（证据完整）；github（origin）因网络不可达推送失败，需网络恢复后补推。相关测试：AnswerRelevancyEvaluatorTest 7 例 + AnswerEvaluationServiceTest 7 例 + KnowledgeBaseToolEndToEndTest 5 例，共 19 例全通过。
+
+### 最新推送（2026-09-17 修复选择租户后评估页会话显示非当前租户数据 → gitee 成功 / github 成功补推）
+
+- commit_type:            BugFix
+- task_id:                0000
+- task_name:              修复选择租户后整页跳转丢失当前租户导致评估页会话显示非当前租户数据
+- commit_hash:            a6a093815af82188ace2d90c7c5ba47765a646fc
+- branch:                 feat/answer-evaluator（已有分支）
+- remote:                 gitee（成功）& origin 即 github（成功）
+- staged_files:
+  - company-rag-web/.../templates/index.html（修改 - selectTenant 增加 localStorage.setItem 写回当前租户）
+- commit_message:         BugFix:0000_修复选择租户后整页跳转丢失当前租户导致评估页会话显示非当前租户数据：sync selectTenant to localStorage in index.html
+- commit_command:         git commit -m "BugFix:0000_修复选择租户后整页跳转丢失当前租户导致评估页会话显示非当前租户数据：sync selectTenant to localStorage in index.html"
+- commit_exit_code:       0
+- push_command:           timeout 120 git push gitee feat/answer-evaluator; timeout 40 git push origin feat/answer-evaluator; ls-remote 校验
+- push_exit_code:         gitee=0；origin=0
+- remote_head_check_command: git rev-parse HEAD && git ls-remote gitee feat/answer-evaluator && git ls-remote origin feat/answer-evaluator
+- remote_head:            gitee/feat/answer-evaluator=a6a0938 与本地一致；github/feat/answer-evaluator=a6a0938 与本地一致（两个远端均 ls-remote 佐证）
+- result:                 本地提交 a6a0938 已推送 gitee 与 github 成功，remote_head 三者（local/gitee/github）全部 a6a0938 一致（证据完整）。变更内容：修复 /eval 评估页「从会话带入」下拉显示非当前租户数据——根因是 index.html 的 selectTenant(row) 切换租户时仅更新内存 Vue ref `currentTenantId.value`，从不写回 localStorage.currentTenantId，而 eval.html 页面加载时从 localStorage.getItem('currentTenantId') 读取租户；用户经 goEval() 整页跳转后 eval 读到的是切换前的旧租户，导致会话下拉按旧租户查询、显示非当前租户的会话。修复：selectTenant 增加 `localStorage.setItem('currentTenantId', row.id.toString())` 与内存 ref 同步。验证（实机 + 窄范围）：租户1=8会话、租户6=2个完全不同的会话可区分；浏览器点击选择租户16后 localStorage 从 '1'→'16'（修复生效）；切到租户6后跳转 /eval，下拉正确显示租户6的两个会话（为什么Java动态代理必须实现接口、请解释一下TCP三次握手）；web 模块编译 EXIT=0，target 模板已同步。另：本轮 github 网络恢复，补推成功（此前因 Recv failure 未能同步的其他分支变更均已随本分支基础设施同步，剩余历史未推送提交需留意）。
+
 ### 最新推送（2026-09-17 修复评估页面手动评估表单不渲染 → gitee 成功 / github 网络失败）
 
 - commit_type:            BugFix
