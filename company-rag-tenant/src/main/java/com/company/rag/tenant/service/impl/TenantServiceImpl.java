@@ -56,86 +56,11 @@ public class TenantServiceImpl implements TenantService {
         jdbcTemplate.execute("CREATE SCHEMA IF NOT EXISTS " + schemaName);
 
         // 2. 在Schema中创建业务表
-        String createTableSql = """
-            CREATE TABLE IF NOT EXISTS %s.rag_document (
-                id BIGSERIAL PRIMARY KEY,
-                tenant_id BIGINT NOT NULL,
-                file_name VARCHAR(256) NOT NULL,
-                file_type VARCHAR(32),
-                file_size BIGINT,
-                file_path VARCHAR(512),
-                title VARCHAR(256),
-                chunk_count INTEGER DEFAULT 0,
-                status INTEGER DEFAULT 0,
-                error_msg TEXT,
-                create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-            CREATE TABLE IF NOT EXISTS %s.doc_chunk (
-                id BIGSERIAL PRIMARY KEY,
-                document_id BIGINT NOT NULL REFERENCES %s.rag_document(id) ON DELETE CASCADE,
-                tenant_id BIGINT NOT NULL,
-                chunk_index INTEGER NOT NULL,
-                content TEXT NOT NULL,
-                token_count INTEGER DEFAULT 0,
-                split_strategy VARCHAR(32),
-                create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-            CREATE TABLE IF NOT EXISTS %s.vector_store (
-                id UUID PRIMARY KEY,
-                content TEXT,
-                metadata JSONB,
-                embedding vector(1024)
-            );
-            -- 注意：vector_store 表仅依赖 Schema 隔离，不使用 RLS
-            -- 原因：PgVectorStore 通过 TenantAwareJdbcTemplate 直连 JDBC，
-            -- 不经过 MyBatis 拦截器设置 app.tenant_id，
-            -- 强加 RLS 会导致 current_tenant_id()=0，所有向量 tenant_id=0，
-            -- 造成跨租户数据泄露 + 旧数据不可见
-            CREATE TABLE IF NOT EXISTS %s.rag_session (
-                id BIGSERIAL PRIMARY KEY,
-                session_id VARCHAR(128) NOT NULL,
-                tenant_id BIGINT NOT NULL,
-                user_id BIGINT NOT NULL,
-                query TEXT NOT NULL,
-                answer TEXT,
-                context TEXT,
-                tokens_input INTEGER DEFAULT 0,
-                tokens_output INTEGER DEFAULT 0,
-                latency_ms INTEGER DEFAULT 0,
-                create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-            CREATE TABLE IF NOT EXISTS %s.rag_session_meta (
-                id BIGSERIAL PRIMARY KEY,
-                session_id VARCHAR(128) NOT NULL,
-                tenant_id BIGINT NOT NULL,
-                user_id BIGINT,
-                title VARCHAR(256),
-                last_query TEXT,
-                message_count INTEGER DEFAULT 0,
-                is_deleted BOOLEAN DEFAULT FALSE,
-                tags JSONB,
-                metadata JSONB,
-                create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-            """.formatted(schemaName, schemaName, schemaName, schemaName, schemaName, schemaName);
+        String createTableSql = buildCreateTableSql(schemaName);
         jdbcTemplate.execute(createTableSql);
 
         // 3. 创建索引
-        String createIndexSql = """
-            CREATE INDEX IF NOT EXISTS idx_%s_doc_tenant ON %s.rag_document(tenant_id);
-            CREATE INDEX IF NOT EXISTS idx_%s_chunk_document ON %s.doc_chunk(document_id);
-            CREATE INDEX IF NOT EXISTS idx_%s_chunk_content_trgm ON %s.doc_chunk USING gin (content gin_trgm_ops);
-            CREATE INDEX IF NOT EXISTS idx_%s_document_title_trgm ON %s.rag_document USING gin (title gin_trgm_ops);
-            CREATE INDEX IF NOT EXISTS idx_%s_session_tenant ON %s.rag_session(tenant_id, session_id);
-            CREATE INDEX IF NOT EXISTS idx_%s_vector_store_embedding ON %s.vector_store
-                USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64);
-            """.formatted(
-                schemaName, schemaName, schemaName, schemaName,
-                schemaName, schemaName, schemaName, schemaName,
-                schemaName, schemaName, schemaName, schemaName
-            );
+        String createIndexSql = buildCreateIndexSql(schemaName);
         jdbcTemplate.execute(createIndexSql);
 
         // 4. 初始化全文检索支持（添加 tsvector 列、索引、触发器）
@@ -222,6 +147,133 @@ public class TenantServiceImpl implements TenantService {
         tenantMapper.updateById(tenant);
 
         log.info("为租户[{}]创建独立Schema完成: {} | 已创建业务表和RLS策略", tenant.getTenantCode(), schemaName);
+    }
+
+    /**
+     * 组装新建租户 schema 的业务建表 SQL（含评估结果表）。
+     *
+     * 评价功能依赖 answer_eval_result 表；若漏建，该租户在线/手动评估的
+     * insert 会抛 "relation does not exist"，被落库侧静默吞掉，评估结果零落库。
+     * 因此新租户建表必须与启动迁移（SchemaMigrationConfig）保持一致补齐该表。
+     * 提取为 package-private 方法便于以纯单元测试校验 DDL 完整性。
+     */
+    String buildCreateTableSql(String schemaName) {
+        return """
+            CREATE TABLE IF NOT EXISTS %s.rag_document (
+                id BIGSERIAL PRIMARY KEY,
+                tenant_id BIGINT NOT NULL,
+                file_name VARCHAR(256) NOT NULL,
+                file_type VARCHAR(32),
+                file_size BIGINT,
+                file_path VARCHAR(512),
+                title VARCHAR(256),
+                chunk_count INTEGER DEFAULT 0,
+                status INTEGER DEFAULT 0,
+                error_msg TEXT,
+                create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS %s.doc_chunk (
+                id BIGSERIAL PRIMARY KEY,
+                document_id BIGINT NOT NULL REFERENCES %s.rag_document(id) ON DELETE CASCADE,
+                tenant_id BIGINT NOT NULL,
+                chunk_index INTEGER NOT NULL,
+                content TEXT NOT NULL,
+                token_count INTEGER DEFAULT 0,
+                split_strategy VARCHAR(32),
+                create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS %s.vector_store (
+                id UUID PRIMARY KEY,
+                content TEXT,
+                metadata JSONB,
+                embedding vector(1024)
+            );
+            -- 注意：vector_store 表仅依赖 Schema 隔离，不使用 RLS
+            -- 原因：PgVectorStore 通过 TenantAwareJdbcTemplate 直连 JDBC，
+            -- 不经过 MyBatis 拦截器设置 app.tenant_id，
+            -- 强加 RLS 会导致 current_tenant_id()=0，所有向量 tenant_id=0，
+            -- 造成跨租户数据泄露 + 旧数据不可见
+            CREATE TABLE IF NOT EXISTS %s.rag_session (
+                id BIGSERIAL PRIMARY KEY,
+                session_id VARCHAR(128) NOT NULL,
+                tenant_id BIGINT NOT NULL,
+                user_id BIGINT NOT NULL,
+                query TEXT NOT NULL,
+                answer TEXT,
+                context TEXT,
+                tokens_input INTEGER DEFAULT 0,
+                tokens_output INTEGER DEFAULT 0,
+                latency_ms INTEGER DEFAULT 0,
+                create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS %s.rag_session_meta (
+                id BIGSERIAL PRIMARY KEY,
+                session_id VARCHAR(128) NOT NULL,
+                tenant_id BIGINT NOT NULL,
+                user_id BIGINT,
+                title VARCHAR(256),
+                last_query TEXT,
+                message_count INTEGER DEFAULT 0,
+                is_deleted BOOLEAN DEFAULT FALSE,
+                tags JSONB,
+                metadata JSONB,
+                create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS %s.answer_eval_result (
+                id BIGSERIAL PRIMARY KEY,
+                tenant_id BIGINT NOT NULL,
+                session_row_id BIGINT,
+                query TEXT,
+                context TEXT,
+                answer TEXT,
+                pass BOOLEAN NOT NULL,
+                score DOUBLE PRECISION NOT NULL,
+                relevancy_score DOUBLE PRECISION NOT NULL DEFAULT 0,
+                correctness_score DOUBLE PRECISION NOT NULL DEFAULT 0,
+                faithfulness_score DOUBLE PRECISION NOT NULL DEFAULT 0,
+                source VARCHAR(16) NOT NULL,
+                create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            ALTER TABLE %s.answer_eval_result ENABLE ROW LEVEL SECURITY;
+            ALTER TABLE %s.answer_eval_result FORCE ROW LEVEL SECURITY;
+            DROP POLICY IF EXISTS tenant_isolation_answer_eval ON %s.answer_eval_result;
+            CREATE POLICY tenant_isolation_answer_eval ON %s.answer_eval_result
+                FOR ALL
+                TO company_rag_app
+                USING (tenant_id = current_tenant_id())
+                WITH CHECK (tenant_id = current_tenant_id());
+            GRANT USAGE, SELECT ON SEQUENCE %s.answer_eval_result_id_seq TO company_rag_app;
+            """.formatted(
+                schemaName, schemaName, schemaName, schemaName,
+                schemaName, schemaName, schemaName, schemaName,
+                schemaName, schemaName, schemaName, schemaName
+            );
+    }
+
+    /**
+     * 组装新建租户 schema 的评估结果表索引与全文检索相关 DDL，此处仅建索引。
+     *
+     * 新增表后同步增加索引，并保证占位符数量与 .formatted 实参一致。
+     */
+    String buildCreateIndexSql(String schemaName) {
+        return """
+            CREATE INDEX IF NOT EXISTS idx_%s_doc_tenant ON %s.rag_document(tenant_id);
+            CREATE INDEX IF NOT EXISTS idx_%s_chunk_document ON %s.doc_chunk(document_id);
+            CREATE INDEX IF NOT EXISTS idx_%s_chunk_content_trgm ON %s.doc_chunk USING gin (content gin_trgm_ops);
+            CREATE INDEX IF NOT EXISTS idx_%s_document_title_trgm ON %s.rag_document USING gin (title gin_trgm_ops);
+            CREATE INDEX IF NOT EXISTS idx_%s_session_tenant ON %s.rag_session(tenant_id, session_id);
+            CREATE INDEX IF NOT EXISTS idx_%s_vector_store_embedding ON %s.vector_store
+                USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64);
+            CREATE INDEX IF NOT EXISTS idx_%s_answer_eval_tenant_time
+                ON %s.answer_eval_result (tenant_id, create_time DESC);
+            """.formatted(
+                schemaName, schemaName, schemaName, schemaName,
+                schemaName, schemaName, schemaName, schemaName,
+                schemaName, schemaName, schemaName, schemaName,
+                schemaName, schemaName
+            );
     }
 
     @Override
