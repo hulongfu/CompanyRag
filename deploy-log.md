@@ -982,3 +982,38 @@ $ git rev-parse HEAD
 - remote_head_check_command: git ls-remote gitee refs/heads/main; git ls-remote origin refs/heads/main
 - remote_head:            af6a1b9aa672fcfd4763287d5ecb77bcf5e426dd（gitee）/ af6a1b9aa672fcfd4763287d5ecb77bcf5e426dd（origin/github）
 - result:                推送证据完整。gitee 与 github 两端 main 均已推送到 af6a1b9，且与本地 HEAD 一致（ls-remote 校验通过）。本次 github 网络正常，未出现历史网络失败，两端均 push_exit_code=0。
+
+## Git Push
+
+- commit_type:            BugFix
+- task_id:                0000
+- task_name:              修复新建租户缺 answer_eval_result 表（P0）
+- commit_hash:            9629b7cf921b311805e9bb4bce481e8aa0ca31d1
+- branch:                 feat/answer-evaluator
+- remote:                 gitee + origin(github)
+- staged_files:           company-rag-tenant/.../TenantServiceImpl.java（修改）、company-rag-tenant/src/test/.../TenantServiceImplSchemaTest.java（新增）
+- commit_message:         BugFix:0000_修复新建租户缺answer_eval_result表致评估结果静默零落库：add eval result table+RLS+index in createTenantSchema
+- commit_command:         git add company-rag-tenant/src/main/java/com/company/rag/tenant/service/impl/TenantServiceImpl.java company-rag-tenant/src/test/java/com/company/rag/tenant/service/impl/TenantServiceImplSchemaTest.java && git commit ...
+- commit_exit_code:       0
+- push_command:           git push gitee feat/answer-evaluator && git push origin feat/answer-evaluator
+- push_exit_code:         0（gitee）/ 0（origin/github）
+- remote_head_check_command: git ls-remote gitee feat/answer-evaluator; git ls-remote origin feat/answer-evaluator
+- remote_head:            9629b7cf921b311805e9bb4bce481e8aa0ca31d1（gitee）/ 9629b7cf921b311805e9bb4bce481e8aa0ca31d1（origin/github）
+- result:                P0 修复完成并双端推送。createTenantSchema 补 answer_eval_result 建表 + RLS（ENABLE/FORCE/POLICY）+ 序列授权 + 索引 idx_answer_eval_tenant_time，与 SchemaMigrationConfig 启动迁移 DDL 对齐。新增 TenantServiceImplSchemaTest（5 例）验证占位符配平不抛 MissingFormatArgument，红→绿。gitee 与 github 两端均推送到 9629b7c 且与本地 HEAD 一致。deploy-log 本条与 P1 一起随后一并提交。
+
+## Git Push
+
+- commit_type:            BugFix
+- task_id:                0000
+- task_name:              faithfulness 语义由宽松 citations 标记升级为正文字符二元组覆盖判定（P1）
+- commit_hash:            e48af57fe9d6fe82c37d5201cdf7182532d8dec3
+- branch:                 feat/answer-evaluator
+- remote:                 gitee + origin(github)
+- staged_files:           company-rag-rag/.../eval/answer/FaithfulnessChecker.java（修改）、company-rag-rag/src/test/.../FaithfulnessCheckerTest.java（新增）、deploy-log.md（修改 - 追加本条与 P0 条目）
+- commit_message:         BugFix:0000_faithfulness语义由宽松citations标记升级为正文字符二元组覆盖判定：add citations gate + grounding bigram coverage in FaithfulnessChecker
+- commit_command:         git add company-rag-rag/src/main/java/com/company/rag/rag/eval/answer/FaithfulnessChecker.java company-rag-rag/src/test/java/com/company/rag/rag/eval/answer/FaithfulnessCheckerTest.java deploy-log.md && git commit ...
+- commit_exit_code:       0
+- push_command:           git push gitee feat/answer-evaluator && git push origin feat/answer-evaluator
+- push_exit_code:         （gitee）/ （origin/github，待本轮执行）
+- remote_head_check_command: git ls-remote gitee feat/answer-evaluator; git ls-remote origin feat/answer-evaluator
+- result:                P1 完成（TDD 红→绿）。FaithfulnessChecker.check 弃用「context 含 citations= 即判忠实」的宽松启发式，改为：保留空上下文→UNKNOWN、空回答/「抱歉」→UNFAITHFUL；新增 citations= 门槛（确有检索来源）；在剔除声明行后对检索正文做回答字符二元组覆盖判定（阈值 0.15，低于 relevancy 0.2 因忠实仅要求关键表述有据）。新增 FaithfulnessCheckerTest 7 例（有据/部分有据/无据/空上下文/无citations门槛/空回答/抱歉），红→绿。回归：FaithfulnessCheckerTest+AnswerRelevancyEvaluatorTest+KnowledgeBaseToolEndToEndTest 共 19 例全绿。修复「有检索标记但答非所问仍判忠实」的假 pass。
