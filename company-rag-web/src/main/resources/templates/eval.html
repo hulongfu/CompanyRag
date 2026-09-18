@@ -271,6 +271,12 @@ createApp({
             } catch(e) { console.error('加载会话列表失败', e); }
         }
 
+        // 判断是否历史脏数据：裸 32 位 hex ID 或 UUID 形式的引用标识，非检索正文则视为垃圾标识
+        function isGarbageHex(s) {
+            return /^[0-9a-fA-F]{32}$/.test(s)
+                || /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(s);
+        }
+
         // 从选中会话带入 query/answer/context
         async function loadSession(sessionId) {
             if (!sessionId) return;
@@ -281,7 +287,9 @@ createApp({
                     const last = json.data[json.data.length - 1];
                     evalForm.value.query = last.query || '';
                     evalForm.value.answer = last.answer || '';
-                    evalForm.value.context = last.context || '';
+                    // 历史脏数据：评估功能开发前旧版工具上下文被写成了裸 32 位 hex ID（如 6ac77429be989835bb330c568f2ab669），
+                    // 并非检索正文，带入会污染评估上下文，故检测到此类垃圾标识时置空
+                    evalForm.value.context = (last.context && isGarbageHex(last.context.trim())) ? '' : (last.context || '');
                     ElementPlus.ElMessage.success('已从会话带入问题与回答');
                 } else {
                     ElementPlus.ElMessage.warning('该会话无消息可带入');

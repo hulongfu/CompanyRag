@@ -87,11 +87,7 @@ public class KnowledgeBaseTool implements AgentTool {
             KnowledgeBaseResult response = convertToKnowledgeBaseResult(result);
             
             if (response.isSuccess()) {
-                String outputSummary = response.getCitations() != null
-                        ? "citations=" + response.getCitations().stream()
-                            .map(c -> c.getFilename() + "#" + c.getChunkIndex())
-                            .collect(Collectors.joining(","))
-                        : "";
+                String outputSummary = buildOutputSummary(response.getCitations());
                 recorder.recordEnd("searchKnowledgeBase", startTime, "success", null, outputSummary);
                 recordAudit(question, topK, true, null);
             } else {
@@ -108,7 +104,26 @@ public class KnowledgeBaseTool implements AgentTool {
             return KnowledgeBaseResult.failed("工具调用失败：" + e.getMessage());
         }
     }
-    
+
+    /**
+     * 组装工具输出摘要，经 ToolCallRecorder 写入 toolContext（→ rag_session.context）供评估页透传。
+     * 同时包含引用标识与检索正文片段：前者保留 citations= 前缀兼容既有宽松启发式判定，
+     * 后者让 faithful 评估能基于真实检索内容而非仅有引用标记。摘要最终会被截断到 MAX_OUTPUT_LENGTH。
+     */
+    private String buildOutputSummary(List<KnowledgeBaseResult.Citation> citations) {
+        if (citations == null || citations.isEmpty()) {
+            return "";
+        }
+        String marker = "citations=" + citations.stream()
+                .map(c -> c.getFilename() + "#" + c.getChunkIndex())
+                .collect(Collectors.joining(","));
+        String content = citations.stream()
+                .map(c -> "[来源:" + c.getFilename() + "] "
+                        + (c.getContentPreview() != null ? c.getContentPreview() : ""))
+                .collect(Collectors.joining("\n"));
+        return marker + "\n" + content;
+    }
+
     /**
      * 记录知识库检索审计：检索为公司知识敏感操作，检索成功后异步落审计（失败不抛出）。
      * detail 记录检索的问题和返回结果数量。
