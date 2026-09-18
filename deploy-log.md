@@ -1014,6 +1014,24 @@ $ git rev-parse HEAD
 - commit_command:         git add company-rag-rag/src/main/java/com/company/rag/rag/eval/answer/FaithfulnessChecker.java company-rag-rag/src/test/java/com/company/rag/rag/eval/answer/FaithfulnessCheckerTest.java deploy-log.md && git commit ...
 - commit_exit_code:       0
 - push_command:           git push gitee feat/answer-evaluator && git push origin feat/answer-evaluator
-- push_exit_code:         （gitee）/ （origin/github，待本轮执行）
+- push_exit_code:         0（gitee）/ 0（origin/github，本次随 README 一起推达）
 - remote_head_check_command: git ls-remote gitee feat/answer-evaluator; git ls-remote origin feat/answer-evaluator
 - result:                P1 完成（TDD 红→绿）。FaithfulnessChecker.check 弃用「context 含 citations= 即判忠实」的宽松启发式，改为：保留空上下文→UNKNOWN、空回答/「抱歉」→UNFAITHFUL；新增 citations= 门槛（确有检索来源）；在剔除声明行后对检索正文做回答字符二元组覆盖判定（阈值 0.15，低于 relevancy 0.2 因忠实仅要求关键表述有据）。新增 FaithfulnessCheckerTest 7 例（有据/部分有据/无据/空上下文/无citations门槛/空回答/抱歉），红→绿。回归：FaithfulnessCheckerTest+AnswerRelevancyEvaluatorTest+KnowledgeBaseToolEndToEndTest 共 19 例全绿。修复「有检索标记但答非所问仍判忠实」的假 pass。
+
+## Git Push
+
+- commit_type:            Task
+- task_id:                0000
+- task_name:              README 补充回答评估功能与 answer_eval_result 表（P0/P1 文档同步）
+- commit_hash:            e3edbb3dc8fc922bbb15b466534d2e8668eb5d49
+- branch:                 feat/answer-evaluator
+- remote:                 gitee + origin(github)
+- staged_files:           README.md（修改 - 表结构概览新增 answer_eval_result 行 + 核心特性新增「🤖 回答评估」小节共 9 行）、deploy-log.md（修改 - 追加本条并修订 P1 推送结果）
+- commit_message:         Task:0000_README补充回答评估功能与answer_eval_result表：add eval feature docs and table struct entry
+- commit_command:         git add README.md && git commit ...
+- commit_exit_code:       0
+- push_command:           git push gitee feat/answer-evaluator && git push origin feat/answer-evaluator
+- push_exit_code:         0（gitee）/ 0（origin/github）
+- remote_head_check_command: git ls-remote gitee feat/answer-evaluator; git ls-remote origin feat/answer-evaluator
+- remote_head:            e3edbb3dc8fc922bbb15b466534d2e8668eb5d49（gitee）/ e3edbb3dc8fc922bbb15b466534d2e8668eb5d49（origin/github）
+- result:                README 文档同步 P0/P1。表结构概览补 answer_eval_result 行（RLS 租户隔离）；核心特性新增「🤖 回答评估」小节（三维评估、字符二元组覆盖算法、faithfulness citations 门槛+阈值0.15、Redis缓冲+PG落库双写、手动/在线双触发、tenantId 非空落库铁律）。纯文档改动无需编译。gitee 与 github 两端均推送到 e3edbb3 且与本地 HEAD 一致（ls-remote 校验通过）。本次同时把历史 P1 的 e48af57、6c4c0da 推达 github（上轮 origin 网络失败遗留，现已补齐）。
