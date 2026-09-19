@@ -74,14 +74,16 @@ public interface AgentTool {
 ```
 
 - **向后兼容**：默认方法，现有 5 个工具不改签名不破坏。
-- **落地（统一原则）**：**所有工具一律看 `requiresApproval()` 自声明，不内置任何 toolName 特判。**`ExecuteTool.requiresApproval()` → `true`（动作类、外部副作用）；其余工具保持默认 `false`（如 `DatabaseQueryTool` 只读 + 脱敏 + 租户隔离已够）。未来某工具是否需要审批，由该工具类自身声明决定，不在审批服务里写死。
-- **新增工具体验**：未来加工具只要让 `requiresApproval()` 返回 `true` 即自动纳入审批，**不需要改审批服务/配置/策略**。
+- **落地（统一原则）**：判定 = **高危工具兜底强制 + 其余工具自声明**。
+  - **高危工具兜底**：`ExecuteTool`（动作类、有外部副作用）在审批服务内**强制纳入审批**（兜底集合含 `execute`），即使其自声明漏写也不会被默认放行。
+  - **其余工具看自声明**：`AgentTool.requiresApproval()` 决定——其余工具保持默认 `false`（如 `DatabaseQueryTool` 只读 + 脱敏 + 租户隔离已够）；未来某工具是否需要审批，由该工具类自身声明决定，不在审批服务里为每个工具写死。
+- **新增工具体验**：未来加普通工具只要让 `requiresApproval()` 返回 `true` 即自动纳入审批，**不需要改审批服务/配置/策略**；仅当新工具属于"高危/有外部副作用"类别时，才在兜底集合追加（极少变动）。
 - **唯一全局配置**（均非 per-tool）：
   - `agent.approval.enabled`（总开关，默认 `false` 关闭）
   - `agent.approval.timeout-seconds`（同步等待上限，默认 `300`）
 - **参数级策略（扩展点，hermes `ToolArgsApprovalPolicy` 思路）**：保留函数式接口 `(toolName, argsJson) -> boolean`，供"同工具因参数不同审批要求不同"，由相应工具自身注册。本期不强制全工具实现。CompanyRag 参数为 `Map`，判定前先 `ObjectMapper` 序列化为 JSON。
 
-**判定优先级**：`AgentTool.requiresApproval()` == true 或命中该工具注册的参数级策略 → 走审批门；否则直接执行。
+**判定优先级**：`AgentTool.requiresApproval()` == true，或命中高危兜底集合（execute 强制），或命中该工具注册的参数级策略 → 走审批门；否则直接执行。
 
 ## 5. 数据模型 `tool_approval_request`
 
@@ -127,7 +129,7 @@ public interface AgentTool {
 
 ## 9. 测试策略
 
-- **判定单测**：`requiresApproval()` 命中、该工具参数级策略命中、默认放行三类。
+- **判定单测**：高危兜底命中（execute 强制）、`requiresApproval()` 命中、该工具参数级策略命中、默认放行四类。
 - **状态机单测**：PENDING→EXECUTED、PENDING→DENIED、重复 approve/deny 幂等、超时自动 DENIED。
 - **同步等待单测**：mock 工具 + 数据库状态流转，验证 approve 后执行并回填结果、deny 返回拒绝文案、超时返回超时文案。
 - **租户隔离**：审批表 RLS 生效、跨租户不可见。
@@ -135,7 +137,7 @@ public interface AgentTool {
 - 验证命令采用最窄范围：审批门相关单测类。
 
 ## 10. 改动清单（待 Phase 批准后细化）
-- **新增（agent）**：`ToolApprovalService`、`ToolApprovalRequest` 实体 + Mapper、`ApprovalProperties`、状态机常量。
+- **新增（agent）**：`ToolApprovalService`、`ToolApprovalRequest` 实体 + Mapper、`ApprovalProperties`、状态机常量、高危工具兜底集（含 execute）。
 - **修改（agent）**：`AgentTool` 接口加默认 `requiresApproval()`；`ExecuteTool` 重写返回 `true`。
 - **修改（rag）**：`AggregatedToolCallbackProvider` 构造注入 `ToolApprovalService`，在 `call()` 中 `execute()` 前插入 `gate(...)` + `await(...)` 逻辑。
 - **新增（web）**：`ToolApprovalController` + 简版 HTML 审批面板。
