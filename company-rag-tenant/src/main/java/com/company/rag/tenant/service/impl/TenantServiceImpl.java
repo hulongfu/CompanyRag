@@ -245,10 +245,33 @@ public class TenantServiceImpl implements TenantService {
                 USING (tenant_id = current_tenant_id())
                 WITH CHECK (tenant_id = current_tenant_id());
             GRANT USAGE, SELECT ON SEQUENCE %s.answer_eval_result_id_seq TO company_rag_app;
+            CREATE TABLE IF NOT EXISTS %s.tool_approval_request (
+                id BIGSERIAL PRIMARY KEY,
+                tenant_id BIGINT NOT NULL,
+                tool_name VARCHAR(64) NOT NULL,
+                args_json TEXT,
+                session_id VARCHAR(128),
+                requester_user_id BIGINT,
+                status VARCHAR(16) NOT NULL,
+                result TEXT,
+                requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                decided_at TIMESTAMP
+            );
+            ALTER TABLE %s.tool_approval_request ENABLE ROW LEVEL SECURITY;
+            ALTER TABLE %s.tool_approval_request FORCE ROW LEVEL SECURITY;
+            DROP POLICY IF EXISTS tenant_isolation_tool_approval ON %s.tool_approval_request;
+            CREATE POLICY tenant_isolation_tool_approval ON %s.tool_approval_request
+                FOR ALL
+                TO company_rag_app
+                USING (tenant_id = current_tenant_id())
+                WITH CHECK (tenant_id = current_tenant_id());
+            GRANT USAGE, SELECT ON SEQUENCE %s.tool_approval_request_id_seq TO company_rag_app;
             """.formatted(
                 schemaName, schemaName, schemaName, schemaName,
                 schemaName, schemaName, schemaName, schemaName,
-                schemaName, schemaName, schemaName, schemaName
+                schemaName, schemaName, schemaName, schemaName,
+                schemaName, schemaName, schemaName, schemaName,
+                schemaName, schemaName
             );
     }
 
@@ -268,7 +291,12 @@ public class TenantServiceImpl implements TenantService {
                 USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64);
             CREATE INDEX IF NOT EXISTS idx_%s_answer_eval_tenant_time
                 ON %s.answer_eval_result (tenant_id, create_time DESC);
+            CREATE INDEX IF NOT EXISTS idx_%s_tool_approval_status
+                ON %s.tool_approval_request (tenant_id, status);
+            CREATE INDEX IF NOT EXISTS idx_%s_tool_approval_time
+                ON %s.tool_approval_request (tenant_id, requested_at DESC);
             """.formatted(
+                schemaName, schemaName, schemaName, schemaName,
                 schemaName, schemaName, schemaName, schemaName,
                 schemaName, schemaName, schemaName, schemaName,
                 schemaName, schemaName, schemaName, schemaName,

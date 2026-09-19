@@ -226,4 +226,63 @@ public class SchemaMigrationConfig {
             }
         };
     }
+
+    /**
+     * 为所有租户 schema 幂等创建 tool_approval_request 表、索引并启用 RLS
+     * （审批门功能依赖；与 answer_eval_result 同款 RLS：tenant_id = current_tenant_id()）。
+     */
+    @Bean
+    public ApplicationRunner migrateToolApprovalTable() {
+        return args -> {
+            log.info("开始执行 tool_approval_request 表迁移...");
+            try {
+                List<String> tenantSchemas = jdbcTemplate.queryForList(
+                        "SELECT schema_name FROM information_schema.schemata " +
+                        "WHERE schema_name LIKE 'tenant_%'",
+                        String.class
+                );
+                int migratedCount = 0;
+                for (String schemaName : tenantSchemas) {
+                    // schemaName 白名单校验，防 SQL 注入
+                    if (!schemaName.matches("^[a-zA-Z_][a-zA-Z0-9_]*$")) {
+                        log.warn("跳过非法 schema 名：{}", schemaName);
+                        continue;
+                    }
+                    String ddl = """
+                        CREATE TABLE IF NOT EXISTS %1$s.tool_approval_request (
+                            id BIGSERIAL PRIMARY KEY,
+                            tenant_id BIGINT NOT NULL,
+                            tool_name VARCHAR(64) NOT NULL,
+                            args_json TEXT,
+                            session_id VARCHAR(128),
+                            requester_user_id BIGINT,
+                            status VARCHAR(16) NOT NULL,
+                            result TEXT,
+                            requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            decided_at TIMESTAMP
+                        );
+                        CREATE INDEX IF NOT EXISTS idx_%1$s_tool_approval_status
+                            ON %1$s.tool_approval_request (tenant_id, status);
+                        CREATE INDEX IF NOT EXISTS idx_%1$s_tool_approval_time
+                            ON %1$s.tool_approval_request (tenant_id, requested_at DESC);
+                        ALTER TABLE %1$s.tool_approval_request ENABLE ROW LEVEL SECURITY;
+                        ALTER TABLE %1$s.tool_approval_request FORCE ROW LEVEL SECURITY;
+                        DROP POLICY IF EXISTS tenant_isolation_tool_approval ON %1$s.tool_approval_request;
+                        CREATE POLICY tenant_isolation_tool_approval ON %1$s.tool_approval_request
+                            FOR ALL TO company_rag_app
+                            USING (tenant_id = current_tenant_id())
+                            WITH CHECK (tenant_id = current_tenant_id());
+                        GRANT SELECT, INSERT, UPDATE, DELETE ON %1$s.tool_approval_request TO company_rag_app;
+                        GRANT USAGE, SELECT ON SEQUENCE %1$s.tool_approval_request_id_seq TO company_rag_app;
+                        """.formatted(schemaName);
+                    jdbcTemplate.execute(ddl);
+                    migratedCount++;
+                }
+                log.info("tool_approval_request 表迁移完成：处理 {} 个 schema", migratedCount);
+            } catch (Exception e) {
+                // 不抛出异常，避免启动失败
+                log.error("tool_approval_request 表迁移失败：{}", e.getMessage(), e);
+            }
+        };
+    }
 }

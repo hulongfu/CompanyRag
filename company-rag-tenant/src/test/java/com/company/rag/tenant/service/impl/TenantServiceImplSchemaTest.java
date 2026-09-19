@@ -67,4 +67,24 @@ class TenantServiceImplSchemaTest {
         String sql = service.buildCreateIndexSql("tenant_abc");
         assertTrue(sql.contains("tenant_abc"));
     }
+
+    @Test
+    void createTableSql_containsToolApprovalTableWithRlsAndGrant() {
+        String sql = service.buildCreateTableSql("tenant_abc");
+        assertTrue(sql.contains("tool_approval_request"));
+        assertTrue(sql.contains("tenant_isolation_tool_approval"));
+        assertTrue(sql.contains("tool_approval_request_id_seq"));
+        // 占位符全部替换，不含裸 %s（若新增表后未同步实参，formatted 早已抛异常，
+        // 此处再强制验证已格式化的 SQL 无残留格式化占位符）
+        assertTrue(!sql.contains("%s"));
+    }
+
+    @Test
+    void createIndexSql_containsToolApprovalIndexes() {
+        String sql = service.buildCreateIndexSql("tenant_abc");
+        assertTrue(sql.contains("tool_approval_status"));
+        assertTrue(sql.contains("tool_approval_time"));
+        assertTrue(sql.contains("tool_approval_request"));
+        assertTrue(!sql.contains("%s"));
+    }
 }
