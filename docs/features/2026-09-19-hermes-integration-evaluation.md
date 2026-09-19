@@ -116,3 +116,15 @@ ReactAgent → ToolCallbackProvider(=AggregatedToolCallbackProvider)
 | 跳过 | Persona / Skill / Heartbeat / 多厂商 | — | — | 已有替代/关联弱/新风险面 |
 
 **推荐最小高价值组合** = 审批门 + Mock 离线模式（两者独立、低耦合、直接增强现有 Agent 与测试体系）。
+
+---
+
+## 附：Git 推送留证
+
+> 2026-09-19 将本评估报告推送到远端 `feat/answer-evaluator` 分支：
+>
+> - 本地提交：`08d2dcb`（父提交 `83828d5`，快进推送，安全）
+> - gitee：`https://gitee.com/LongHuDaoChang/CompanyRag.git` → `83828d5..08d2dcb` ✅
+> - github：`https://github.com/hulongfu/CompanyRag.git` → `83828d5..08d2dcb` ✅（本次 github 443 未失败）
+>
+> 注：工作区另有与本次改动无关的未跟踪目录 `agent_skills/`、`data/`，未纳入本次提交。
