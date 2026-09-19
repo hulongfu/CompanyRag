@@ -100,6 +100,13 @@ public class ExecuteTool implements AgentTool {
     }
 
     @Override
+    public boolean requiresApproval() {
+        // 动作类工具：执行受约束命令（对外部系统/工作目录有副作用），需人工确认业务恰当性。
+        // 审批门是叠加的"人肉确认"层，不削弱/替代下方命令白名单与脚本路径的硬校验。
+        return true;
+    }
+
+    @Override
     public String execute(Map<String, Object> params) {
         String command = params != null ? (String) params.get("command") : null;
         if (command == null || command.trim().isEmpty()) {
