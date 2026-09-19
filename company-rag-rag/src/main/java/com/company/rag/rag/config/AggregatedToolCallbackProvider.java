@@ -1,5 +1,7 @@
 package com.company.rag.rag.config;
 
+import com.company.rag.agent.approve.ToolApprovalRequest;
+import com.company.rag.agent.approve.ToolApprovalService;
 import com.company.rag.agent.tool.AgentTool;
 import com.company.rag.agent.tool.AgentToolRegistry;
 import com.company.rag.mcp.client.McpClientRegistry;
@@ -29,12 +31,15 @@ public class AggregatedToolCallbackProvider implements ToolCallbackProvider {
     
     private final AgentToolRegistry agentToolRegistry;
     private final McpClientRegistry mcpClientRegistry;
+    private final ToolApprovalService toolApprovalService;
     private final ObjectMapper objectMapper;
     
     public AggregatedToolCallbackProvider(AgentToolRegistry agentToolRegistry,
-                                          McpClientRegistry mcpClientRegistry) {
+                                          McpClientRegistry mcpClientRegistry,
+                                          ToolApprovalService toolApprovalService) {
         this.agentToolRegistry = agentToolRegistry;
         this.mcpClientRegistry = mcpClientRegistry;
+        this.toolApprovalService = toolApprovalService;
         this.objectMapper = new ObjectMapper();
     }
     
@@ -111,6 +116,20 @@ public class AggregatedToolCallbackProvider implements ToolCallbackProvider {
                         }
                     }
                     
+                    // 审批门（方案 A 同步等待）：命中则落 PENDING 单并阻塞等待人工裁决
+                    if (toolApprovalService.needsApproval(name, agentTool)) {
+                        ToolApprovalRequest req = toolApprovalService.createRequest(name, params);
+                        ToolApprovalService.ApprovalVerdict verdict =
+                                toolApprovalService.await(req.getId(), name);
+                        if (!verdict.shouldProceed()) {
+                            String denyMsg = verdict.getDenyMessage() != null
+                                    ? verdict.getDenyMessage() : "审批未通过";
+                            log.info("[APPROVAL] 工具 {} 被拦截（未通过审批）：{}", name, denyMsg);
+                            return "工具调用被审批门拦截，未执行。原因：" + denyMsg;
+                        }
+                        log.info("[APPROVAL] 工具 {} 审批通过，继续执行", name);
+                    }
+
                     // 调用 AgentTool
                     String result = agentTool.execute(params);
                     log.debug("工具 {} 调用完成，resultLength={}", name, 
