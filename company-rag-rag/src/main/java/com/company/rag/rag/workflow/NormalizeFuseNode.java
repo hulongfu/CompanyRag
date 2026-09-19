@@ -7,6 +7,7 @@ import com.company.rag.rag.fusion.ResultFuser;
 import com.company.rag.rag.model.NormalizedResult;
 import com.company.rag.rag.model.RagQuery;
 import com.company.rag.rag.model.RagResult;
+import com.company.rag.tenant.context.TenantContextSnapshot;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;

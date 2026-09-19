@@ -15,6 +15,7 @@ import com.company.rag.rag.retriever.impl.FullTextRetriever;
 import com.company.rag.rag.retriever.impl.FuzzyRetriever;
 import com.company.rag.rag.retriever.impl.VectorRetriever;
 import com.company.rag.tenant.context.TenantContext;
+import com.company.rag.tenant.context.TenantContextSnapshot;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;

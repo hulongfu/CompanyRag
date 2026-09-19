@@ -130,6 +130,8 @@ rag:
 
 # MyBatis-Plus
 mybatis-plus:
+  # 自动注册自定义 TypeHandler（含 UuidTypeHandler），解决 UUID 主键 insert 报 "Type handler was null"
+  type-handlers-package: com.company.rag.document.handler
   configuration:
     map-underscore-to-camel-case: true
     # 生产环境关闭 SQL 日志，减少性能开销
@@ -230,3 +232,20 @@ logging:
   level:
     com.company.rag: DEBUG
     org.springframework.ai: INFO
+
+# 文档入库管道配置（异步分步状态机 ETL）
+document:
+  pipeline:
+    # 异步处理线程池
+    core-pool-size: 4
+    max-pool-size: 8
+    queue-capacity: 100
+    # 分步失败重试
+    retry:
+      interval: 1000
+      max-attempts: 2
+      vectorize-max-attempts: 3
+    # 崩溃补偿并发上限
+    compensate-concurrency: 2
+    # 上传文件临时落盘目录
+    file-temp-dir: ${UPLOAD_TEMP_DIR:./data/uploads}

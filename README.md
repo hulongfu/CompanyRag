@@ -281,6 +281,67 @@ psql -U postgres -d company_rag -c "SELECT tenant_code, tenant_name FROM sys_ten
 
 ---
 
+#### 5.0.1 手动执行 V4 迁移（RAG 文档 ETL 健壮性改造）
+
+> **注意：V4 之后的迁移 Flyway 已被禁用，需手动执行。** V1/V2/V3 由 Flyway 自动执行；**V4 不在 Flyway 管理范围内**，首次启动前或数据模型升级时需手动执行。
+
+**为何不使用 Flyway 管理 V4 之后的迁移？**
+
+Flyway 是成熟可靠的数据库迁移工具，以上禁用属于**针对本项目多租户架构的工程取舍**，主要原因如下：
+
+1. **多租户场景 Flyway 覆盖不到**：每个租户一个 schema（`tenant_*`），迁移须用 `DO $$ ... plpgsql` 循环动态 `EXECUTE format(...)` 遍历所有 schema。Flyway 的迁移模型是"对整个数据库跑一次固定脚本"，对"动态遍历 N 个 schema"这类操作是弱项——它只记录一次成功，无法细粒度感知每个 schema 的执行状态。
+2. **幂等 vs 版本绑定冲突**：本项目迁移脚本（如 V4）用 `CREATE TABLE IF NOT EXISTS / DROP IF EXISTS / ADD COLUMN IF NOT EXISTS` 实现幂等、可重复执行；而 Flyway 的版本机制是"已记录即跳过、改动须新增版本"，与"脚本可安全重跑"的思路不匹配。
+3. **运维侧可控性**：手动执行便于 DBA 在 psql/DBeaver 中先备份、再审查、再执行，尤其对 V4 这类含存量去重/回填（有破坏性操作）的脚本，可显著降低误操作风险。
+4. **兼容性排除**：启动类在 `CompanyRagApplication` 中通过 `@SpringBootApplication(exclude = FlywayAutoConfiguration.class)` 主动排除（详见 `application.yml` 注），规避了 Spring Cloud Function 与 Spring Boot 3.4.4 集成时的兼容性问题。
+
+> 若日后需要纳管迁移，恢复方式：从 `CompanyRagApplication` 的 exclude 中移除 `FlywayAutoConfiguration.class`，并确保迁移版本序号连续。
+
+**V4 脚本作用**（作用于每个租户 schema，脚本内已做幂等，可重复执行）：
+- 1️⃣ 新建 `document_pipeline_state` 任务状态表（支撑异步分步 ETL 管线）+ RLS 策略
+- 2️⃣ 为 `doc_chunk` 增加 `(document_id, chunk_index)` 唯一约束（幂等切分）
+- 3️⃣ 为 `vector_store` 增加 `chunk_id` 列 + 部分唯一索引（幂等向量化）
+
+**执行前必须先备份**（脚本含存量 `doc_chunk` 去重与 `vector_store` 回填，破坏存量不可恢复）：
+
+**Linux/macOS：**
+```bash
+# 1. 备份存量库（容器方式）
+docker exec -e PGPASSWORD='<POSTGRES_PASSWORD>' docker-pgvector-1 \
+  pg_dump -U postgres -d company_rag -Fc -f /tmp/company_rag_backup.dump
+# 备份文件留在容器内 /tmp/company_rag_backup.dump，验证后可删除
+
+# 2. 执行 V4 迁移
+docker exec -i docker-pgvector-1 psql -U postgres -d company_rag \
+  < sql/migrations/V4__rag_etl_pipeline.sql
+```
+
+**Windows PowerShell：**
+```powershell
+# 1. 备份存量库（容器方式）
+docker exec -e PGPASSWORD='<POSTGRES_PASSWORD>' docker-pgvector-1 `
+  pg_dump -U postgres -d company_rag -Fc -f /tmp/company_rag_backup.dump
+
+# 2. 执行 V4 迁移
+Get-Content -Raw sql/migrations/V4__rag_etl_pipeline.sql |
+  docker exec -i docker-pgvector-1 psql -U postgres -d company_rag
+```
+
+**验证迁移结果**（确认每个租户 schema 都已建好）：
+```bash
+docker exec docker-pgvector-1 psql -U postgres -d company_rag -c \
+  "SELECT schemaname, tablename FROM pg_tables WHERE tablename = 'document_pipeline_state' ORDER BY 1;"
+
+docker exec docker-pgvector-1 psql -U postgres -d company_rag -c \
+  "SELECT schemaname, conname FROM pg_constraint c JOIN pg_class t ON t.oid=c.conrelid JOIN pg_namespace n ON n.oid=t.relnamespace WHERE c.conname='uq_doc_chunk_doc_idx' ORDER BY 1;"
+
+docker exec docker-pgvector-1 psql -U postgres -d company_rag -c \
+  "SELECT schemaname, indexname FROM pg_indexes WHERE indexname='uq_vector_store_chunk' ORDER BY 1;"
+```
+
+> 说明：`<POSTGRES_PASSWORD>` 为 `.env` 中的 `POSTGRES_PASSWORD`。若在宿主机装有 psql，亦可用 `psql -U postgres -d company_rag -f sql/migrations/V4__rag_etl_pipeline.sql` 直接执行；确认无误后可删除容器内备份 `docker exec docker-pgvector-1 rm -f /tmp/company_rag_backup.dump`。
+
+---
+
 #### 5.1 前端登录流程（推荐）
 
 1. **访问登录页**：浏览器打开 `http://localhost:8080/login`

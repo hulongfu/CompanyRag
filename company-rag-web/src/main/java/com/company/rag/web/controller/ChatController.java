@@ -13,7 +13,7 @@ import com.company.rag.rag.response.ChatRequest;
 import com.company.rag.rag.response.ChatResponse;
 import com.company.rag.rag.service.RagSearchService;
 import com.company.rag.rag.service.RagSessionService;
-import com.company.rag.rag.workflow.TenantContextSnapshot;
+import com.company.rag.tenant.context.TenantContextSnapshot;
 import com.company.rag.tenant.context.TenantContext;
 import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
