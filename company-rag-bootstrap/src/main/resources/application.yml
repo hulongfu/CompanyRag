@@ -205,6 +205,19 @@ agent:
     # 单个文件最大大小（字节），默认 50MB
     max-file-size: ${DOWNLOAD_MAX_FILE_SIZE:52428800}
 
+  # 工具审批门配置（Agent 工具执行前人工确认）
+  # 默认关闭：关闭时全部工具直接执行、不走审批门（向后兼容，主链路零变化）。
+  # 开启后命中审批的工具调用会落 PENDING 单并同步等待人工 approve/deny，
+  # 超时自动转 DENIED；execute 为高危工具兜底集（强制审批）。
+  approval:
+    enabled: ${AGENT_APPROVAL_ENABLED:false}
+    # 同步等待人工审批的上限（秒），超时自动转 DENIED
+    timeout-seconds: ${AGENT_APPROVAL_TIMEOUT:300}
+    # 等待期间轮询 DB 状态间隔（毫秒）
+    poll-interval-ms: ${AGENT_APPROVAL_POLL_INTERVAL:500}
+    # 高危工具兜底集（逗号分隔工具名）：即便未声明 requiresApproval 也强制审批
+    high-risk-tools: ${AGENT_APPROVAL_HIGH_RISK_TOOLS:execute}
+
 # 代码搜索工具配置
 app:
   code-search:

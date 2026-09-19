@@ -112,3 +112,11 @@ mcp:
 logging:
   level:
     com.company.rag: DEBUG
+
+# 工具审批门配置（本地联调默认关闭，保持主链路零变化；按需通过环境变量打开）
+agent:
+  approval:
+    enabled: ${AGENT_APPROVAL_ENABLED:false}
+    timeout-seconds: ${AGENT_APPROVAL_TIMEOUT:300}
+    poll-interval-ms: ${AGENT_APPROVAL_POLL_INTERVAL:500}
+    high-risk-tools: ${AGENT_APPROVAL_HIGH_RISK_TOOLS:execute}
