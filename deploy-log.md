@@ -1047,7 +1047,25 @@ $ git rev-parse HEAD
 - push_command:           git push gitee feat/answer-evaluator && git push origin feat/answer-evaluator
 - push_exit_code:         0（gitee）/ 0（origin/github，本次随 README 一起推达）
 - remote_head_check_command: git ls-remote gitee feat/answer-evaluator; git ls-remote origin feat/answer-evaluator
-- result:                P1 完成（TDD 红→绿）。FaithfulnessChecker.check 弃用「context 含 citations= 即判忠实」的宽松启发式，改为：保留空上下文→UNKNOWN、空回答/「抱歉」→UNFAITHFUL；新增 citations= 门槛（确有检索来源）；在剔除声明行后对检索正文做回答字符二元组覆盖判定（阈值 0.15，低于 relevancy 0.2 因忠实仅要求关键表述有据）。新增 FaithfulnessCheckerTest 7 例（有据/部分有据/无据/空上下文/无citations门槛/空回答/抱歉），红→绿。回归：FaithfulnessCheckerTest+AnswerRelevancyEvaluatorTest+KnowledgeBaseToolEndToEndTest 共 19 例全绿。修复「有检索标记但答非所问仍判忠实」的假 pass。
+- result:                P1 完成（TDD 红→绿）。FaithfulnessChecker.check 弃用「context 含 citations= 即判忠实」的宽松启发式，改为：保留空上下文→UNKNOWN、空回答/「抱歉」→UNFAITHFUL；新增 citations= 门槛（确有检索来源）；在剔除声明行后对检索正文做回答字符二元组覆盖判定（阈值 0.15，低于 relevancy 0.2 因忠实仅要求关键表述有据）。新增 FaithfulnessCheckerTest 7 例（有据/部分有据/无据/空上下文/无citat
+
+## Git Push
+
+- commit_type:            Task
+- task_id:                0000
+- task_name:              环境变量模板补全
+- commit_hash:            a0ab798254bbdf5785cee6d586e13d1edae33f07
+- branch:                 feat/answer-evaluator
+- remote:                 gitee + origin(github)
+- staged_files:           .env.example（修改）、company-rag-bootstrap/.env.docker.example（修改）、company-rag-bootstrap/src/main/resources/application.yml（修改）
+- commit_message:         Task:0000_环境变量模板补全：补全 .env.example 与 .env.docker.example 缺失变量并调整默认值
+- commit_command:         git add .env.example company-rag-bootstrap/.env.docker.example company-rag-bootstrap/src/main/resources/application.yml && git commit -m "Task:0000_环境变量模板补全：补全 .env.example 与 .env.docker.example 缺失变量并调整默认值"
+- commit_exit_code:       0
+- push_command:           git push gitee HEAD:feat/answer-evaluator && git -c http.version=HTTP/1.1 push origin HEAD:feat/answer-evaluator
+- push_exit_code:         0（gitee）/ github 网络失败（HTTP/2 流异常 → Recv failure: Connection was reset → Failed to connect to github.com port 443）
+- remote_head_check_command: git ls-remote gitee refs/heads/feat/answer-evaluator; git ls-remote origin refs/heads/feat/answer-evaluator
+- remote_head:            a0ab798254bbdf5785cee6d586e13d1edae33f07（gitee）/ github 未连接成功
+- result:                补全 .env.example 与 .env.docker.example 缺失的环境变量（AGENT_SKILL_BASE/PYTHON_EXEC_PATH/DOWNLOAD_BASE_DIR/DOWNLOAD_MAX_FILE_SIZE/CODE_SEARCH_SRC_BASE/TRUSTED_DIRS/AGENT_WORK_DIR/UPLOAD_TEMP_DIR/LOG_PATH），并将 application.yml 的 CODE_SEARCH_SRC_BASE 默认值由 company-rag-agent 调整为项目根目录。显式清理删除 company-rag-bootstrap/.env 与 .env.local.backup。gitee 已推送且远端 HEAD 与本地一致（ls-remote 校验 a0ab798 通过）；github 当前网络无法直连（三次尝试均失败），推送待网络恢复后补推。无关未跟踪项（agent_skills/find-skills、agent_skills/skill-creator、data/）未纳入本次提交。ions门槛/空回答/抱歉），红→绿。回归：FaithfulnessCheckerTest+AnswerRelevancyEvaluatorTest+KnowledgeBaseToolEndToEndTest 共 19 例全绿。修复「有检索标记但答非所问仍判忠实」的假 pass。
 
 ## Git Push
 
