@@ -1,5 +1,6 @@
 package com.company.rag.agent.approve;
 
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.company.rag.agent.config.ApprovalProperties;
 import com.company.rag.agent.tool.AgentTool;
 import com.company.rag.tenant.context.TenantContext;
@@ -25,10 +26,17 @@ import java.util.stream.Collectors;
  * 出租户上下文处理约定：本服务不 set/clear TenantContext，沿用调用线程的上下文。
  * 方案 A 的落库/轮询/approve 后 execute 都在 agent 异步子线程内完成 —— 该线程已由
  * {@code caller} 手动 setSchema + setTenantId，命中正确租户 schema。
+ * <p>
+ * 幂等/并发：approve/deny 采用【原子条件更新】（WHERE id=? AND status=PENDING）并依据
+ * 影响行数判定成败。PENDING 是唯一可决策状态，同时只有一个操作能成功，杜绝并发覆盖与
+ * 重复决策（read-modify-write 竞态）。
  */
 @Slf4j
 @Service
 public class ToolApprovalService {
+
+    /** 审批超时（含收敛器）统一拒绝文案，避免多处漂移 */
+    private static final String TIMEOUT_DENY_MSG = "审批超时";
 
     private final ToolApprovalRequestMapper mapper;
     private final ApprovalProperties props;
@@ -79,66 +87,67 @@ public class ToolApprovalService {
             ToolApprovalRequest row = mapper.selectById(requestId);
             if (row == null) {
                 log.warn("[APPROVAL] 审批单不存在 id={}", requestId);
-                return ApprovalVerdict.deny("审批单不存在", false);
+                return ApprovalVerdict.deny("审批单不存在");
             }
             if (ToolApprovalStatus.EXECUTED.equals(row.getStatus())) {
                 return ApprovalVerdict.proceed();
             }
             if (ToolApprovalStatus.DENIED.equals(row.getStatus())) {
-                return ApprovalVerdict.deny(row.getResult(), true);
+                return ApprovalVerdict.deny(row.getResult());
             }
             try {
                 Thread.sleep(props.getPollIntervalMs());
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                return ApprovalVerdict.deny("等待被中断", false);
+                return ApprovalVerdict.deny("等待被中断");
             }
         }
         // 超时：直接收敛为 DENIED
-        markDenied(requestId, "审批超时(" + props.getTimeoutSeconds() + "s)，已自动拒绝");
-        return ApprovalVerdict.deny("审批超时，已自动拒绝", false);
+        String msg = timeoutMessage(props.getTimeoutSeconds());
+        deny(requestId, msg);
+        return ApprovalVerdict.deny(msg);
     }
 
     /**
-     * approve：幂等，仅 PENDING 可决策。
+     * 批准：基于状态机的原子条件更新。仅 PENDING 单能成功，天然幂等且防并发覆盖。
+     *
+     * @return true 表示本次调用成功把它从 PENDING 更新为 EXECUTED
      */
     public boolean approve(Long id) {
-        ToolApprovalRequest row = mapper.selectById(id);
-        if (row == null) {
-            return false;
+        LambdaUpdateWrapper<ToolApprovalRequest> wrapper = new LambdaUpdateWrapper<ToolApprovalRequest>()
+                .eq(ToolApprovalRequest::getId, id)
+                .eq(ToolApprovalRequest::getStatus, ToolApprovalStatus.PENDING);
+        ToolApprovalRequest update = new ToolApprovalRequest();
+        update.setStatus(ToolApprovalStatus.EXECUTED);
+        update.setDecidedAt(LocalDateTime.now());
+        int rows = mapper.update(update, wrapper);
+        if (rows > 0) {
+            log.info("[APPROVAL] 已批准 id={}", id);
+            return true;
         }
-        if (!ToolApprovalStatus.PENDING.equals(row.getStatus())) {
-            log.warn("[APPROVAL] 已决策，忽略重复 approve id={}, status={}", id, row.getStatus());
-            return false;
-        }
-        row.setStatus(ToolApprovalStatus.EXECUTED);
-        row.setDecidedAt(LocalDateTime.now());
-        mapper.updateById(row);
-        log.info("[APPROVAL] 已批准 id={}, tool={}", id, row.getToolName());
-        return true;
+        log.warn("[APPROVAL] 单不存在或已被决策，忽略重复 approve id={}", id);
+        return false;
     }
 
     /**
-     * deny：置 DENIED，可选原因。幂等。
+     * 拒绝：基于状态机的原子条件更新。仅 PENDING 单能成功，天然幂等且防并发覆盖。
+     *
+     * @return true 表示本次调用成功把它从 PENDING 更新为 DENIED
      */
     public boolean deny(Long id, String reason) {
-        ToolApprovalRequest row = mapper.selectById(id);
-        if (row == null) {
-            return false;
+        LambdaUpdateWrapper<ToolApprovalRequest> wrapper = new LambdaUpdateWrapper<ToolApprovalRequest>()
+                .eq(ToolApprovalRequest::getId, id)
+                .eq(ToolApprovalRequest::getStatus, ToolApprovalStatus.PENDING);
+        ToolApprovalRequest update = new ToolApprovalRequest();
+        update.setStatus(ToolApprovalStatus.DENIED);
+        update.setResult(reason);
+        update.setDecidedAt(LocalDateTime.now());
+        int rows = mapper.update(update, wrapper);
+        if (rows > 0) {
+            log.info("[APPROVAL] 已拒绝 id={}, reason={}", id, reason);
+            return true;
         }
-        if (!ToolApprovalStatus.PENDING.equals(row.getStatus())) {
-            return false;
-        }
-        row.setStatus(ToolApprovalStatus.DENIED);
-        row.setResult(reason);
-        row.setDecidedAt(LocalDateTime.now());
-        mapper.updateById(row);
-        log.info("[APPROVAL] 已拒绝 id={}, tool={}, reason={}", id, row.getToolName(), reason);
-        return true;
-    }
-
-    private void markDenied(Long id, String reason) {
-        deny(id, reason);
+        return false;
     }
 
     public long getTimeoutSeconds() {
@@ -164,25 +173,27 @@ public class ToolApprovalService {
         }
     }
 
+    /** 统一超时拒绝文案（附具体阈值秒数） */
+    private String timeoutMessage(long seconds) {
+        return TIMEOUT_DENY_MSG + "(" + seconds + "s)，已自动拒绝";
+    }
+
     /** 审批等待裁决。 */
     public static final class ApprovalVerdict {
         private final boolean proceed;
-        @SuppressWarnings("unused")
-        private final boolean deniedByUser;
         private final String denyMessage;
 
-        private ApprovalVerdict(boolean proceed, boolean deniedByUser, String denyMessage) {
+        private ApprovalVerdict(boolean proceed, String denyMessage) {
             this.proceed = proceed;
-            this.deniedByUser = deniedByUser;
             this.denyMessage = denyMessage;
         }
 
         public static ApprovalVerdict proceed() {
-            return new ApprovalVerdict(true, false, null);
+            return new ApprovalVerdict(true, null);
         }
 
-        public static ApprovalVerdict deny(String msg, boolean byUser) {
-            return new ApprovalVerdict(false, byUser, msg);
+        public static ApprovalVerdict deny(String msg) {
+            return new ApprovalVerdict(false, msg);
         }
 
         public boolean shouldProceed() {

@@ -12,18 +12,20 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.never;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
  * {@link ToolApprovalService} 单元测试 —— 覆盖正常 / 边界 / 异常场景。
  *
- * <p>判定 = 高危兜底集 OR 工具自声明；approve/deny 幂等；await 三种结果（proceed/deny/超时）。
+ * <p>判定 = 高危兜底集 OR 工具自声明；approve/deny 采用原子条件更新（仅 PENDING 可决策、
+ * 按影响行数判成败，天然幂等）；await 三种结果（proceed/deny/超时）。
  * 使用 Mockito mock Mapper 与 Properties，不依赖 DB。
  */
 class ToolApprovalServiceTest {
@@ -104,45 +106,62 @@ class ToolApprovalServiceTest {
         assertEquals(9L, req.getId());
     }
 
-    // ---------- approve / deny ----------
+    // ---------- approve（原子条件更新） ----------
 
     @Test
-    void approve_whenPending_returnsTrueAndMarksExecuted() {
-        props.setEnabled(true);
-        ToolApprovalRequest row = pendingRow();
-        when(mapper.selectById(1L)).thenReturn(row);
+    void approve_whenPending_returnsTrueAndUpdatesStatusToExecuted() {
+        // 条件更新命中 1 行 → 成功
+        when(mapper.update(any(ToolApprovalRequest.class), any())).thenReturn(1);
 
         assertTrue(service.approve(1L));
-        assertSame(ToolApprovalStatus.EXECUTED, row.getStatus());
-        assertTrue(row.getDecidedAt() != null);
-        verify(mapper).updateById(row);
+
+        // 验证从 read-modify-write 改为原子条件更新：走两参 update(entity, wrapper)，而非单参 updateById
+        ArgumentCaptor<ToolApprovalRequest> entity = ArgumentCaptor.forClass(ToolApprovalRequest.class);
+        ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.Wrapper<ToolApprovalRequest>> wp =
+                ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.Wrapper.class);
+        verify(mapper).update(entity.capture(), wp.capture());
+        assertSame(ToolApprovalStatus.EXECUTED, entity.getValue().getStatus());
+        assertNotNull(entity.getValue().getDecidedAt());
+        assertNotNull(wp.getValue());
     }
 
     @Test
     void approve_whenAlreadyDecided_returnsFalse() {
-        ToolApprovalRequest row = pendingRow();
-        row.setStatus(ToolApprovalStatus.DENIED);
-        when(mapper.selectById(1L)).thenReturn(row);
+        // 条件更新命中 0 行（该单已非 PENDING）→ 忽略重复
+        when(mapper.update(any(ToolApprovalRequest.class), any())).thenReturn(0);
 
         assertFalse(service.approve(1L));
-        verify(mapper, never()).updateById(any(ToolApprovalRequest.class));
     }
 
     @Test
     void approve_whenNotFound_returnsFalse() {
-        when(mapper.selectById(1L)).thenReturn(null);
+        // 条件更新命中 0 行（单不存在）→ 失败
+        when(mapper.update(any(ToolApprovalRequest.class), any())).thenReturn(0);
         assertFalse(service.approve(1L));
     }
 
+    // ---------- deny（原子条件更新） ----------
+
     @Test
-    void deny_whenPending_setsRejectedWithReason() {
-        ToolApprovalRequest row = pendingRow();
-        when(mapper.selectById(1L)).thenReturn(row);
+    void deny_whenPending_returnsTrueAndSetsRejected() {
+        when(mapper.update(any(ToolApprovalRequest.class), any())).thenReturn(1);
 
         assertTrue(service.deny(1L, "业务原因"));
-        assertSame(ToolApprovalStatus.DENIED, row.getStatus());
-        assertSame("业务原因", row.getResult());
-        assertTrue(row.getDecidedAt() != null);
+
+        ArgumentCaptor<ToolApprovalRequest> entity = ArgumentCaptor.forClass(ToolApprovalRequest.class);
+        ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.Wrapper<ToolApprovalRequest>> wp =
+                ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.Wrapper.class);
+        verify(mapper).update(entity.capture(), wp.capture());
+        assertSame(ToolApprovalStatus.DENIED, entity.getValue().getStatus());
+        assertSame("业务原因", entity.getValue().getResult());
+        assertNotNull(entity.getValue().getDecidedAt());
+        assertNotNull(wp.getValue());
+    }
+
+    @Test
+    void deny_whenAlreadyDecided_returnsFalse() {
+        when(mapper.update(any(ToolApprovalRequest.class), any())).thenReturn(0);
+        assertFalse(service.deny(1L, "原因"));
     }
 
     // ---------- await ----------
@@ -176,13 +195,18 @@ class ToolApprovalServiceTest {
     void await_whenTimeout_returnsDenyAndConverges() {
         props.setTimeoutSeconds(0); // 立即超时
         ToolApprovalRequest row = pendingRow();
-        when(mapper.selectById(1L)).thenReturn(row);
 
         ToolApprovalService.ApprovalVerdict verdict = service.await(1L, "execute");
+
         assertFalse(verdict.shouldProceed());
-        // 超时应同步收敛为 DENIED
-        assertSame(ToolApprovalStatus.DENIED, row.getStatus());
-        verify(mapper).updateById(row);
+        assertNotNull(verdict.getDenyMessage());
+        assertTrue(verdict.getDenyMessage().startsWith("审批超时"));
+        // 超时应同步收敛为 DENIED（原子条件更新）
+        ArgumentCaptor<ToolApprovalRequest> entity = ArgumentCaptor.forClass(ToolApprovalRequest.class);
+        ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.Wrapper<ToolApprovalRequest>> wp =
+                ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.Wrapper.class);
+        verify(mapper).update(entity.capture(), wp.capture());
+        assertSame(ToolApprovalStatus.DENIED, entity.getValue().getStatus());
     }
 
     @Test
