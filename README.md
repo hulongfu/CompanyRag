@@ -126,6 +126,30 @@
 - **落库铁律**：跨线程落库强制校验 `AnswerCase.tenantId` 非空，杜绝异步线程 ThreadLocal 丢失租户导致 `tenant_id=0` 永久不可见
 - **实现路径**：Superpowers 工作流，代码见 `company-rag-rag/.../eval/answer/`，评估页见 `eval.html`
 
+### 🛂 工具审批门（Agent 高危工具人工确认）
+- **能力**：Agent 强制调用某些高危工具前，落一条 PENDING 审批单并同步阻塞等待，人工 approve 才继续执行、deny 则返回拒绝文案给 LLM
+- **判定规则**：总开关关闭时全部工具直接执行（向后兼容、主链路零变化）；开启后 = **高危兜底集** 或 工具自身的 `requiresApproval()`
+  - 高危兜底集默认含 `execute`（`ExecuteTool`），即使工具未声明 `requiresApproval` 也被强制拦截
+  - 工具声明 `requiresApproval()=true` 也可被识别，见 `AgentTool` 接口
+- **并发安全**：`approve`/`deny` 采用「原子条件更新」(`UPDATE ... WHERE id=? AND status=PENDING`)，以影响行数判定成败，天然幂等、杜绝并发覆盖
+- **超时兜底**：同步等待超时自动转 DENIED（`agent.approval.timeout-seconds`），并有后台收敛器 `ToolApprovalConverger` 兜底清理会话外残留 PENDING 单
+- **租户隔离**：审批单落每租户 Schema（RLS 行级安全），接口按 `X-Tenant-Id` 头隔离当前租户
+- **配置**（`application.yml` / `.env`）：
+
+```bash
+AGENT_APPROVAL_ENABLED=false            # 总开关（默认关，开启才走审批门）
+AGENT_APPROVAL_TIMEOUT=300              # 同步等待人工审批上限（秒），超时转 DENIED
+AGENT_APPROVAL_POLL_INTERVAL=500        # 等待期间轮询 DB 状态间隔（毫秒）
+AGENT_APPROVAL_HIGH_RISK_TOOLS=execute  # 高危兜底集（逗号分隔工具名）
+```
+
+- **使用步骤**：将 `AGENT_APPROVAL_ENABLED` 设为 `true` 重启应用 → Agent 命中 `execute` 等工具时自动落单阻塞 → 管理员在审批页 `http://localhost:8080/tool-approval` 查看待审批列表并 approve / deny
+- **API**（`/api/tool-approval`）：
+  - `GET /api/tool-approval/pending`：当前租户待审批列表（含参数快照）
+  - `POST /api/tool-approval/{id}/approve`：批准，唤醒等待线程继续执行
+  - `POST /api/tool-approval/{id}/deny`（body 可选 reason）：拒绝，返回拒绝文案
+- **实现路径**：Superpowers 工作流，代码见 `company-rag-agent/.../approve/`（`ToolApprovalService` / `ToolApprovalConverger`），审批页见 `tool-approval.html`
+
 ## 技术栈
 
 | 组件 | 技术选型 |
@@ -1215,7 +1239,8 @@ company-rag/
 │   ├── prompt/                # Prompt模板管理
 │   └── observability/         # Prometheus指标埋点
 ├── company-rag-agent/         # Agent模块(MCP工具)
-│   ├── tool/                  # 数据库查询/代码检索/API文档工具
+│   ├── tool/                  # 数据库查询/代码检索/API文档/执行工具
+│   ├── approve/               # 工具审批门(审批单/服务/超时收敛器)
 │   └── service/               # Agent编排服务
 ├── company-rag-web/           # Web层(Controller + 前端页面)
 ├── company-rag-bootstrap/     # 启动模块(配置/入口)
