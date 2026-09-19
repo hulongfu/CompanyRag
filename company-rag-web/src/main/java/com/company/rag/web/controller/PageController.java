@@ -35,6 +35,12 @@ public class PageController {
         return "eval";
     }
 
+    /** 工具审批面板页面 */
+    @GetMapping("/tool-approval")
+    public String toolApproval() {
+        return "tool-approval";
+    }
+
     @GetMapping("/audit-log.html")
     public String auditLog() {
         return "audit-log";
