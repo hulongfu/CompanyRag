@@ -2,6 +2,37 @@
 
 ## Git Push
 
+### 最新推送（2026-09-16/17 RAG 文档入库 ETL 健壮性改造 → gitee 成功 / github 成功）
+
+- commit_type:            Task
+- task_id:                RAGETL
+- task_name:              RAG文档入库ETL健壮性改造
+- commit_hash:            1763a0c7c5c7dfd717286eee0c205af7327fd7b6
+- branch:                 feat/answer-evaluator（已有分支）
+- remote:                 gitee（成功）；origin 即 github（成功，本次网络正常）
+- staged_files:
+  - README.md（修改 - 新增 5.0.1 手动执行 V4 迁移说明 + 为何不使用 Flyway 管理 V4 之后迁移的四点原因）
+  - docs/superpowers/specs/2026-09-14-rag-etl-hardening-design.md（修改 - 修订 ETL 健壮性设计 Spec）
+  - docs/superpowers/plans/2026-09-16-rag-etl-hardening.md（新增 - 实施计划 T1-T7）
+  - sql/migrations/V4__rag_etl_pipeline.sql（新增 - 每个租户 schema 建 document_pipeline_state + doc_chunk 唯一约束 + vector_store.chunk_id 回填 + 授权）
+  - company-rag-tenant/.../context/TenantContextSnapshot.java（新增 - 下沉共用的租户上下文快照，含 of(tenantId,schema) 工厂）
+  - company-rag-rag/.../workflow/TenantContextSnapshot.java 及 6 节点（修改 - 原类改包占位、6 节点 + 2 测试补 import）
+  - company-rag-web/.../controller/ChatController.java（修改 - import 改 tenant 下沉类）
+  - company-rag-web/.../controller/DocumentController.java（修改 - upload 改调 submitUpload 返回 R<UUID>，新增 status/{taskId} 与 {taskId}/retry-step）
+  - company-rag-document/pom.xml（修改 - 新增 resilience4j-spring-boot3 依赖）
+  - company-rag-document/.../document/handler/UuidTypeHandler.java（新增 - UUID TypeHandler 修复）
+  - company-rag-document/.../document/pipeline/*（新增 - 状态机 DocumentPipelineState/PipelineStatus/Mapper、PipelineTask、DocumentPipelineProcessor、Config、AsyncDocumentPipelineExecutor、DocumentPipelineStep、PipelineNotFoundAfterDelete、DocumentPipelineRecover、ParseStepFileRef、ChunkStep、IngestStep、VectorizeStep、PipelineStepExecutorTemplate、DocumentPipelineCompensation、PipelineStatusVO、DocumentPipelineService/Impl）
+  - company-rag-bootstrap/.../CompanyRagApplication.java（修改 - 新增 pipeline 包 MapperScan(annotationClass=Mapper.class)）
+  - company-rag-bootstrap/.../application.yml / application-dev.yml（修改 - document.pipeline.* 配置 + type-handlers-package）
+- commit_message:         Task:RAGETL_RAG文档入库ETL健壮性改造：implement async pipeline steps, tenant snapshot downlift, V4 migration and status controllers
+- commit_command:         git commit -m "Task:RAGETL_RAG文档入库ETL健壮性改造：implement async pipeline steps, tenant snapshot downlift, V4 migration and status controllers"
+- commit_exit_code:       0（1763a0c，40 files changed, 1915 insertions(+), 138 deletions(-)）
+- push_command:           git push gitee feat/answer-evaluator; git push origin feat/answer-evaluator; ls-remote 校验
+- push_exit_code:         gitee=0（c4c8985..1763a0c）；origin=0（c4c8985..1763a0c）
+- remote_head_check_command: git rev-parse HEAD && git ls-remote gitee feat/answer-evaluator && git ls-remote origin feat/answer-evaluator
+- remote_head:            本地 / gitee / origin 三处均 = 1763a0c7c5c7dfd717286eee0c205af7327fd7b6（一致，均有 ls-remote 佐证）
+- result:                 本地提交 1763a0c 已推送 gitee 与 github 均成功，两端远端 HEAD 与本地 1763a0c 三处一致（证据完整）。变更内容：RAG 文档入库 ETL 健壮性改造 T1-T7——①下沉 TenantContextSnapshot 到 tenant 共用（原 rag 同类删改为包占位）；②V4 迁移脚本为每个租户建 document_pipeline_state 表 + doc_chunk/document_id,chunk_index 唯一约束 + vector_store.chunk_id 回填（用 DISTINCT ON 避免 min(uuid) 不可用）；③异步分步状态机（PENDING→PARSING→CHUNKING→RAG_INGEST→VECTORIZING→SUCCESS/FAILED）+ 每步独立落库 + Resilience4j 重试 + 崩溃补偿（ApplicationRunner 遍历 tenant_% schema 重建未终态任务）+ fail-closed current_schema() 断言 + 删除竞态清理；④VectorizeStep 手写 JDBC INSERT ON CONFLICT(chunk_id) DO NOTHING 实现真幂等（Spring AI PgVectorStore 不写 chunk_id 列）；⑤新增 submitUpload/getStatus/retry-step 接口并保留 uploadAndParse 契约；⑥修复运行期 7 个错误（Mapper 漏扫/整包扫描撞名/补偿缺表/UUID TypeHandler/V4 min(uuid)/step null/VectorizeStep id 类型），上传全链跑通到 SUCCESS。验证（窄范围）：rag RetrieveNodeTest + NormalizeFuseNodeTest 通过；document VectorizeIdTest/FixedSizeSplitterTest/SemanticChunkSplitterTest/TokenLimitIntegrationTest 通过（DocumentParseServiceImplEventTest 为既有 mockito MockMaker 环境失败，非本次改动）；bootstrap 联合编译 EXIT=0。
+
 ### 最新推送（2026-09-17 修复评估指标相关性判定与评估上下文来源 → gitee 成功 / github 网络失败）
 
 - commit_type:            BugFix
