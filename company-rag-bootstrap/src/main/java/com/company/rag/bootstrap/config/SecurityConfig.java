@@ -84,6 +84,7 @@ public class SecurityConfig {
                 auth.requestMatchers(new AntPathRequestMatcher("/eval")).permitAll();
                 auth.requestMatchers(new AntPathRequestMatcher("/admin")).permitAll();
                 auth.requestMatchers(new AntPathRequestMatcher("/documents")).permitAll();
+                auth.requestMatchers(new AntPathRequestMatcher("/tool-approval")).permitAll();
 
                 // 放行静态资源
                 auth.requestMatchers(new AntPathRequestMatcher("/static/**")).permitAll();
