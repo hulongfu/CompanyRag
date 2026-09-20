@@ -117,6 +117,7 @@
             <button class="hdr-btn" :class="{ active: currentTab === 'tenant' }" @click="currentTab = 'tenant'">🏢 租户</button>
             <button class="hdr-btn" v-if="role === 'admin'" :class="{ active: currentTab === 'user' }" @click="currentTab = 'user'">👤 用户</button>
             <button class="hdr-btn" v-if="role === 'admin'" @click="goAuditLog">📋 日志</button>
+            <button class="hdr-btn" @click="goToolApproval">🛂 审批面板</button>
             <button class="hdr-btn" @click="goEval">📊 评估</button>
             <button class="hdr-btn" v-if="role !== 'viewer'" @click="showUpload = true">📤 上传文件</button>
             <button class="hdr-btn" :class="{ active: showMetrics }" @click="showMetrics = !showMetrics">📊 实时指标</button>
@@ -1267,6 +1268,11 @@ createApp({
             window.location.href = '/audit-log.html';
         }
 
+        function goToolApproval() {
+            // 审批面板：新窗口打开，便于边聊天边关注审批
+            window.open('/tool-approval', '_blank');
+        }
+
         function goEval() {
             window.location.href = '/eval';
         }
@@ -1300,7 +1306,7 @@ createApp({
             // 高级模式
             chatMode, showAdvanced,
             // 认证
-            handleLogout, goAuditLog, goEval
+            handleLogout, goAuditLog, goEval, goToolApproval
         };
     }
 }).use(ElementPlus).mount('#app');
