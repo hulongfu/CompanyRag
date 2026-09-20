@@ -705,24 +705,23 @@ public class ExecuteTool implements AgentTool {
         char quoteChar = 0;
         boolean hasToken = false;
 
+        // 方案B：无 shell（ProcessBuilder 直 exec），命令不做字符转义。
+        // 反斜杠 \ 一律作为普通字符保留，避免 Windows 路径（D:\tmp\...）被破坏；
+        // 引号仅用于分割含空格的单 token，不参与转义。路径中的反斜杠由 new File() 原样识别。
         for (int i = 0; i < command.length(); i++) {
             char c = command.charAt(i);
             if (inQuote) {
                 if (c == quoteChar) {
                     inQuote = false;
                     quoteChar = 0;
-                } else if (c == '\\' && i + 1 < command.length()) {
-                    current.append(command.charAt(++i));
                 } else {
+                    // 引号内反斜杠同样保留（Windows 路径），不做转义
                     current.append(c);
                 }
             } else {
                 if (c == '"' || c == '\'') {
                     inQuote = true;
                     quoteChar = c;
-                    hasToken = true;
-                } else if (c == '\\' && i + 1 < command.length()) {
-                    current.append(command.charAt(++i));
                     hasToken = true;
                 } else if (Character.isWhitespace(c)) {
                     if (hasToken) {

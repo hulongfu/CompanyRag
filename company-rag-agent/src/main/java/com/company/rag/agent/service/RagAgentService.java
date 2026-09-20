@@ -45,10 +45,11 @@ public class RagAgentService {
     private final ToolCallRecorder recorder;
 
     /**
-     * Agent 整体超时时间（分钟）
+     * Agent 整体超时时间（分钟），可配置
      * 包括所有工具调用和 LLM 响应时间
+     * 配置项：rag.agent.executor.timeout-minutes，默认 5 分钟
      */
-    private static final int AGENT_TIMEOUT_MINUTES = 5;
+    private final int agentTimeoutMinutes;
 
     /**
      * Agent 核心线程数（可配置）
@@ -78,12 +79,15 @@ public class RagAgentService {
                            ToolCallRecorder recorder,
                            @org.springframework.beans.factory.annotation.Value("${rag.agent.executor.core-pool-size:4}") int corePoolSize,
                            @org.springframework.beans.factory.annotation.Value("${rag.agent.executor.max-pool-size:8}") int maxPoolSize,
-                           @org.springframework.beans.factory.annotation.Value("${rag.agent.executor.queue-capacity:100}") int queueCapacity) {
+                           @org.springframework.beans.factory.annotation.Value("${rag.agent.executor.queue-capacity:100}") int queueCapacity,
+                           @org.springframework.beans.factory.annotation.Value("${rag.agent.executor.timeout-minutes:5}") int agentTimeoutMinutes) {
         this.streamingAgentExecutor = streamingAgentExecutor;
         this.recorder = recorder;
         this.corePoolSize = corePoolSize;
         this.maxPoolSize = maxPoolSize;
         this.queueCapacity = queueCapacity;
+        // 超时时长必须为正数，启动时校验兜底，避免非法配置导致 logical 错误
+        this.agentTimeoutMinutes = Math.max(agentTimeoutMinutes, 1);
         // 核心线程数不能大于最大线程数，启动时校验兜底，避免构造异常
         int effectiveMax = Math.max(maxPoolSize, corePoolSize);
         // 创建有界线程池：队列容量受控，超过 capacity 后由 AbortPolicy 直接拒绝并抛出 RejectedExecutionException，
@@ -99,7 +103,7 @@ public class RagAgentService {
         log.info("RagAgentService 初始化：streamingAgentExecutor={}, timeout={} minutes, " +
                         "线程池 core={}, max={}, queue={}",
                  streamingAgentExecutor != null ? streamingAgentExecutor.getClass().getSimpleName() : "null",
-                 AGENT_TIMEOUT_MINUTES, corePoolSize, effectiveMax, queueCapacity);
+                 this.agentTimeoutMinutes, corePoolSize, effectiveMax, queueCapacity);
     }
 
     /**
@@ -217,12 +221,12 @@ public class RagAgentService {
                         }
                     }, executorService);
 
-            return future.get(AGENT_TIMEOUT_MINUTES, TimeUnit.MINUTES);
+            return future.get(agentTimeoutMinutes, TimeUnit.MINUTES);
 
         } catch (TimeoutException e) {
-            log.error("[AGENT] 调用超时：timeout={} minutes，请简化问题或减少工具调用", AGENT_TIMEOUT_MINUTES);
+            log.error("[AGENT] 调用超时：timeout={} minutes，请简化问题或减少工具调用", agentTimeoutMinutes);
             throw new TimeoutException(String.format("Agent 调用超时：%d 分钟，可能原因：1) LLM 响应过慢 2) 工具调用次数过多 3) ReAct 循环",
-                    AGENT_TIMEOUT_MINUTES));
+                    agentTimeoutMinutes));
         } catch (Exception e) {
             // 解包装 RuntimeException 中的 GraphRunnerException
             if (e.getCause() instanceof GraphRunnerException) {

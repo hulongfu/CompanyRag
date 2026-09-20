@@ -127,6 +127,9 @@ rag:
       max-pool-size: 8
       # 任务队列容量（待执行任务超出时开始拒绝新请求）
       queue-capacity: 100
+      # Agent 整体超时时间（分钟），包含所有工具调用和 LLM 响应时间
+      # 超时后按“系统繁忙”降级返回；需大于单次 LLM 调用耗时（默认 5 分钟）
+      timeout-minutes: 5
 
 # MyBatis-Plus
 mybatis-plus:
