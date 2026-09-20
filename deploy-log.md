@@ -1129,3 +1129,21 @@ $ git rev-parse HEAD
 - remote_head_check_command: git ls-remote gitee feat/answer-evaluator; git ls-remote origin feat/answer-evaluator
 - remote_head:            e3edbb3dc8fc922bbb15b466534d2e8668eb5d49（gitee）/ e3edbb3dc8fc922bbb15b466534d2e8668eb5d49（origin/github）
 - result:                README 文档同步 P0/P1。表结构概览补 answer_eval_result 行（RLS 租户隔离）；核心特性新增「🤖 回答评估」小节（三维评估、字符二元组覆盖算法、faithfulness citations 门槛+阈值0.15、Redis缓冲+PG落库双写、手动/在线双触发、tenantId 非空落库铁律）。纯文档改动无需编译。gitee 与 github 两端均推送到 e3edbb3 且与本地 HEAD 一致（ls-remote 校验通过）。本次同时把历史 P1 的 e48af57、6c4c0da 推达 github（上轮 origin 网络失败遗留，现已补齐）。
+
+## Git Push
+
+- commit_type:            BugFix
+- task_id:                0000
+- task_name:              Windows反斜杠路径命令误拒修复
+- commit_hash:            88af922b208260eaf1b74c5161d2adfa2f68e47b
+- branch:                 feat/answer-evaluator
+- remote:                 gitee + origin(github)
+- staged_files:           company-rag-agent/.../RagAgentService.java、ExecuteTool.java、RagAgentServiceTest.java、ExecuteToolTest.java、company-rag-bootstrap/src/main/resources/application.yml、agent_skills/browser-search/（SKILL.md + scripts/browser_search.py）
+- commit_message:         BugFix:0000_Windows反斜杠路径命令误拒修复：可配置agent超时并修复parseCommand反斜杠
+- commit_command:         git add <5 个代码文件> agent_skills/browser-search/ && git commit -m "BugFix:0000_Windows反斜杠路径命令误拒修复：可配置agent超时并修复parseCommand反斜杠"
+- commit_exit_code:       0
+- push_command:           git push origin feat/answer-evaluator; git push gitee feat/answer-evaluator
+- push_exit_code:         gitee=0；origin(github) 失败（Recv failure: Connection was reset → Failed to connect to github.com port 443，三次重试均超时）
+- remote_head_check_command: git ls-remote gitee feat/answer-evaluator; git ls-remote origin feat/answer-evaluator
+- remote_head:            88af922b208260eaf1b74c5161d2adfa2f68e47b（gitee，ccd3a6d..88af922 推送成功）/ github 未连接成功（无代理、HTTPS 443 被墙、SSH key 无授权）
+- result:                Agent 超时改为可配置（rag.agent.executor.timeout-minutes，默认 5 分钟，Math.max 兜底≥1）+ parseCommand 移除反斜杠转义语义（方案B：无 shell、ProcessBuilder 直 exec，\ 一律作为普通字符保留），修复 Windows 反斜杠绝对路径 python 命令被 parseCommand 破坏导致的安全校验误拒。新增 ExecuteToolTest 复现测试（正斜杠基线放行+反斜杠路径放行）；RagAgentServiceTest 同步构造器新增参。ExecuteToolTest 24 例 + RagAgentServiceTest 1 例全绿。新增 browser-search 技能（SKILL.md + browser_search.py）。gitee 已推送且远端 HEAD 与本地一致（ls-remote 校验 88af922 通过）；github 当前网络无法直连（HTTPS 443 被墙、本机无可用 HTTP 代理、SSH key publickey 认证失败），推送待网络恢复后补推。无关未跟踪项 data/（运行期上传空占位目录）未纳入本次提交，已按用户确认跳过。
