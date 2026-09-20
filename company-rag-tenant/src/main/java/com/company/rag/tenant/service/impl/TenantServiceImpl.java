@@ -43,10 +43,22 @@ public class TenantServiceImpl implements TenantService {
         return tenantMapper.selectById(id);
     }
 
+    /**
+     * 归一化租户 schema 名：一律转小写。
+     * <p>
+     * PostgreSQL 对不带双引号的标识符（CREATE SCHEMA xxx）会折叠为小写，
+     * 若直接沿用含大写的 tenantCode 拼接值，则「实际 schema 名」与「存 sys_tenant.schema_name 的值」
+     * 会因大小写不一致而失配（如收敛器反查、search_path 设置均按 schema_name 精确匹配）。
+     * 统一转小写可保证两者始终一致，避免此类脏数据隐患。
+     */
+    String normalizeSchemaName(String tenantCode) {
+        return "tenant_" + tenantCode.toLowerCase();
+    }
+
     @Override
     @Transactional
     public void createTenantSchema(Tenant tenant) {
-        String schemaName = "tenant_" + tenant.getTenantCode();
+        String schemaName = normalizeSchemaName(tenant.getTenantCode());
         // 校验schema名称合法性，防止SQL注入
         if (!schemaName.matches("^[a-zA-Z_][a-zA-Z0-9_]*$")) {
             throw new BizException("非法Schema名称: " + schemaName);

@@ -1,5 +1,6 @@
 package com.company.rag.tenant.service.impl;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
@@ -86,5 +87,24 @@ class TenantServiceImplSchemaTest {
         assertTrue(sql.contains("tool_approval_time"));
         assertTrue(sql.contains("tool_approval_request"));
         assertTrue(!sql.contains("%s"));
+    }
+
+    @Test
+    void normalizeSchemaName_plainCodeKeepsLowercasePrefix() {
+        // 正常全小写 tenantCode：归一化后与原拼接一致
+        assertEquals("tenant_test_company", service.normalizeSchemaName("test_company"));
+    }
+
+    @Test
+    void normalizeSchemaName_upperMixedCodeLowercasedToMatchPgFold() {
+        // 回归：tenantCode='HufuInSky' 时，若不转小写，schema_name 存入
+        // 'tenant_HufuInSky'，而 CREATE SCHEMA 被折叠成 'tenant_hufuinsky'，二者失配，
+        // 导致收敛器反查 public.sys_tenant 匹配不到而 WARN 跳过。
+        assertEquals("tenant_hufuinsky", service.normalizeSchemaName("HufuInSky"));
+    }
+
+    @Test
+    void normalizeSchemaName_allUpperCodeLowercased() {
+        assertEquals("tenant_abc", service.normalizeSchemaName("ABC"));
     }
 }
