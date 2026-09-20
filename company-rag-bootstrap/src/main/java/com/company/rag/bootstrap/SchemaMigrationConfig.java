@@ -285,4 +285,66 @@ public class SchemaMigrationConfig {
             }
         };
     }
+
+    /**
+     * 为所有租户 schema 幂等创建 document_pipeline_state 表、索引并启用 RLS。
+     *
+     * 文档入库异步分步 ETL 依赖该表（DocumentPipelineServiceImpl.submitUpload 会首先写
+     * PENDING 状态）；V4 迁移只对当次执行时的存量 schema 建表，之后新建的 schema 若缺表，
+     * 该租户上传文档会在插入状态时抛 "relation does not exist" 且留下孤儿 document 记录。
+     * 本启动迁移为所有缺表的 schema 兜底补建（与答案评估/审批门同类机制）。
+     */
+    @Bean
+    public ApplicationRunner migrateDocumentPipelineStateTable() {
+        return args -> {
+            log.info("开始执行 document_pipeline_state 表迁移...");
+            try {
+                List<String> tenantSchemas = jdbcTemplate.queryForList(
+                        "SELECT schema_name FROM information_schema.schemata " +
+                        "WHERE schema_name LIKE 'tenant_%'",
+                        String.class
+                );
+                int migratedCount = 0;
+                for (String schemaName : tenantSchemas) {
+                    // schemaName 白名单校验，防 SQL 注入
+                    if (!schemaName.matches("^[a-zA-Z_][a-zA-Z0-9_]*$")) {
+                        log.warn("跳过非法 schema 名：{}", schemaName);
+                        continue;
+                    }
+                    String ddl = """
+                        CREATE TABLE IF NOT EXISTS %1$s.document_pipeline_state (
+                            task_id UUID PRIMARY KEY,
+                            document_id BIGINT NOT NULL,
+                            tenant_id BIGINT NOT NULL,
+                            step VARCHAR(32) NOT NULL,
+                            status VARCHAR(32) NOT NULL,
+                            error_step VARCHAR(32),
+                            error_msg TEXT,
+                            retry_count INT NOT NULL DEFAULT 0,
+                            create_time TIMESTAMP NOT NULL DEFAULT now(),
+                            update_time TIMESTAMP NOT NULL DEFAULT now()
+                        );
+                        CREATE INDEX IF NOT EXISTS idx_%1$s_pipeline_tenant
+                            ON %1$s.document_pipeline_state (tenant_id);
+                        CREATE INDEX IF NOT EXISTS idx_%1$s_pipeline_status
+                            ON %1$s.document_pipeline_state (status);
+                        ALTER TABLE %1$s.document_pipeline_state ENABLE ROW LEVEL SECURITY;
+                        ALTER TABLE %1$s.document_pipeline_state FORCE ROW LEVEL SECURITY;
+                        DROP POLICY IF EXISTS tenant_isolation_pipeline ON %1$s.document_pipeline_state;
+                        CREATE POLICY tenant_isolation_pipeline ON %1$s.document_pipeline_state
+                            FOR ALL TO company_rag_app
+                            USING (tenant_id = current_tenant_id())
+                            WITH CHECK (tenant_id = current_tenant_id());
+                        GRANT SELECT, INSERT, UPDATE, DELETE ON %1$s.document_pipeline_state TO company_rag_app;
+                        """.formatted(schemaName);
+                    jdbcTemplate.execute(ddl);
+                    migratedCount++;
+                }
+                log.info("document_pipeline_state 表迁移完成：处理 {} 个 schema", migratedCount);
+            } catch (Exception e) {
+                // 不抛出异常，避免启动失败
+                log.error("document_pipeline_state 表迁移失败：{}", e.getMessage(), e);
+            }
+        };
+    }
 }

@@ -278,12 +278,34 @@ public class TenantServiceImpl implements TenantService {
                 USING (tenant_id = current_tenant_id())
                 WITH CHECK (tenant_id = current_tenant_id());
             GRANT USAGE, SELECT ON SEQUENCE %s.tool_approval_request_id_seq TO company_rag_app;
+            CREATE TABLE IF NOT EXISTS %s.document_pipeline_state (
+                task_id UUID PRIMARY KEY,
+                document_id BIGINT NOT NULL,
+                tenant_id BIGINT NOT NULL,
+                step VARCHAR(32) NOT NULL,
+                status VARCHAR(32) NOT NULL,
+                error_step VARCHAR(32),
+                error_msg TEXT,
+                retry_count INT NOT NULL DEFAULT 0,
+                create_time TIMESTAMP NOT NULL DEFAULT now(),
+                update_time TIMESTAMP NOT NULL DEFAULT now()
+            );
+            -- 文档入库分步状态表（异步分步 ETL 管线依赖，缺表会导致该租户上传即失败）
+            ALTER TABLE %s.document_pipeline_state ENABLE ROW LEVEL SECURITY;
+            ALTER TABLE %s.document_pipeline_state FORCE ROW LEVEL SECURITY;
+            DROP POLICY IF EXISTS tenant_isolation_pipeline ON %s.document_pipeline_state;
+            CREATE POLICY tenant_isolation_pipeline ON %s.document_pipeline_state
+                FOR ALL
+                TO company_rag_app
+                USING (tenant_id = current_tenant_id())
+                WITH CHECK (tenant_id = current_tenant_id());
             """.formatted(
                 schemaName, schemaName, schemaName, schemaName,
                 schemaName, schemaName, schemaName, schemaName,
                 schemaName, schemaName, schemaName, schemaName,
                 schemaName, schemaName, schemaName, schemaName,
-                schemaName, schemaName
+                schemaName, schemaName, schemaName, schemaName,
+                schemaName, schemaName, schemaName
             );
     }
 
@@ -307,7 +329,12 @@ public class TenantServiceImpl implements TenantService {
                 ON %s.tool_approval_request (tenant_id, status);
             CREATE INDEX IF NOT EXISTS idx_%s_tool_approval_time
                 ON %s.tool_approval_request (tenant_id, requested_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_%s_pipeline_tenant
+                ON %s.document_pipeline_state (tenant_id);
+            CREATE INDEX IF NOT EXISTS idx_%s_pipeline_status
+                ON %s.document_pipeline_state (status);
             """.formatted(
+                schemaName, schemaName, schemaName, schemaName,
                 schemaName, schemaName, schemaName, schemaName,
                 schemaName, schemaName, schemaName, schemaName,
                 schemaName, schemaName, schemaName, schemaName,

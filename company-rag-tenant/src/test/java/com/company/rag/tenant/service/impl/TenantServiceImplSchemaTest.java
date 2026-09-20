@@ -90,6 +90,25 @@ class TenantServiceImplSchemaTest {
     }
 
     @Test
+    void createTableSql_containsDocumentPipelineStateWithRls() {
+        // 回归：文档入库异步分步 ETL 依赖该表，新建租户若不建，上传文档会在插入 PENDING 状态时失败
+        String sql = service.buildCreateTableSql("tenant_abc");
+        assertTrue(sql.contains("document_pipeline_state"));
+        assertTrue(sql.contains("tenant_isolation_pipeline"));
+        // 占位符全部替换，不含裸 %s
+        assertTrue(!sql.contains("%s"));
+    }
+
+    @Test
+    void createIndexSql_containsDocumentPipelineIndexes() {
+        String sql = service.buildCreateIndexSql("tenant_abc");
+        assertTrue(sql.contains("pipeline_tenant"));
+        assertTrue(sql.contains("pipeline_status"));
+        assertTrue(sql.contains("document_pipeline_state"));
+        assertTrue(!sql.contains("%s"));
+    }
+
+    @Test
     void normalizeSchemaName_plainCodeKeepsLowercasePrefix() {
         // 正常全小写 tenantCode：归一化后与原拼接一致
         assertEquals("tenant_test_company", service.normalizeSchemaName("test_company"));
