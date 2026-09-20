@@ -2,6 +2,26 @@
 
 ## Git Push
 
+### 最新推送（2026-09-20 browser-search 技能增强：打开百度后抓取并返回搜索结果 → gitee 成功 / github 成功）
+
+- commit_type:            Task
+- task_id:                0000
+- task_name:              browser-search技能增强
+- commit_hash:            a6b05e583511c74e4c669ba3bb0a83b409de8ce7
+- branch:                 feat/answer-evaluator（已有分支）
+- remote:                 gitee（成功：fcd4b62..a6b05e5）；origin(github)（成功：abeb2af..a6b05e5，本次网络正常）
+- staged_files:
+  - agent_skills/browser-search/scripts/browser_search.py（修改 - 原脚本只用 webbrowser.open 打开百度搜索页、从不抓取内容，导致 agent「搜了却拿不到结果」；新增 fetch_page（requests+浏览器 UA 请求百度搜索页）+ extract_results（bs4 解析 div.result/div.c-container 提取标题/链接/摘要），新增 --fetch-only 模式（只抓取返回结果，适无头环境）、--top N 控制条数（默认 8），默认模式打开浏览器并返回 results，--no-open 保持只出 URL 向后兼容，风控失败附 error+hint）
+  - agent_skills/browser-search/SKILL.md（修改 - description 与文档更新为「打开百度并可抓取/返回搜索结果」，补充 --fetch-only/--top 用法、输出 JSON 结构、失败处理与示例）
+- commit_message:         Task:0000_browser-search技能增强：add baidu search result fetch and return
+- commit_command:         git commit -m "Task:0000_browser-search技能增强：add baidu search result fetch and return"
+- commit_exit_code:       0（a6b05e5，2 files changed, 145 insertions(+), 30 deletions(-)）
+- push_command:           timeout 120 git push gitee feat/answer-evaluator; timeout 90 git push origin feat/answer-evaluator; ls-remote 校验
+- push_exit_code:         gitee=0（fcd4b62..a6b05e5）；origin=0（abeb2af..a6b05e5）
+- remote_head_check_command: git rev-parse HEAD && git ls-remote gitee feat/answer-evaluator && git ls-remote origin feat/answer-evaluator
+- remote_head:            本地 / gitee / origin 三处均 = a6b05e583511c74e4c669ba3bb0a83b409de8ce7（一致，两端均有 ls-remote 佐证）
+- result:                 本地提交 a6b05e5 已推送 gitee 与 github 均成功，两端远端 HEAD 与本地 a6b05e5 三处一致（证据完整）。变更内容：修复 browser-search 技能「打开百度却拿不到搜索结果」——原 browser_search.py 仅调用 webbrowser.open(url) 打开页面并返回 url，从不抓取网页内容，agent 无法获取结果；本次新增 fetch_page（requests 携带浏览器 UA 请求百度 /s?wd= 页）+ extract_results（bs4 提取 div.result/div.c-container 中标题/链接/摘要），默认模式打开浏览器并返回 results 数组，新增 --fetch-only 供无头/服务器环境只抓取不弹窗，--top 控制条数（默认 8），--no-open 保持旧版只输出 URL 行为，百度风控导致抓取失败时返回 success=false + error + hint 提示改用 --no-open。验证（窄范围）：脚本语法 ast 通过；--no-open 正确返回 url 不含 results；--fetch-only 实抓「通义千问」返回 success=True 且正确解析中文标题（Qwen3.8-Max 等 2 条）；默认模式 opened=true 同时返回「RAG 是什么」的 2 条结果；SKILL.md 内容同步更新。依赖 requests/bs4 已在 agent_skills/requirements.txt 中。
+
 ### 最新推送（2026-09-20 审批面板按租户+发起用户双过滤、首页新增审批入口 → gitee 成功 / github 网络失败）
 
 - commit_type:            Task
