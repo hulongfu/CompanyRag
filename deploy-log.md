@@ -2,6 +2,27 @@
 
 ## Git Push
 
+### 最新推送（2026-09-20 为新建/存量租户 schema 补齐 document_pipeline_state 建表 → gitee 成功 / github 网络失败）
+
+- commit_type:            BugFix
+- task_id:                0000
+- task_name:              补齐document_pipeline_state建表
+- commit_hash:            3e11ff15bce947ce60b1a995549ae766f656ec08
+- branch:                 feat/answer-evaluator（已有分支）
+- remote:                 gitee（成功：abeb2af..3e11ff1）；origin(github)（失败：Failed to connect to github.com:443，网络不可达，符合预期）
+- staged_files:
+  - company-rag-tenant/.../service/impl/TenantServiceImpl.java（修改 - buildCreateTableSql 新增 document_pipeline_state 建表 + RLS 策略；buildCreateIndexSql 新增 idx_pipeline_tenant/idx_pipeline_status）
+  - company-rag-bootstrap/.../SchemaMigrationConfig.java（修改 - 新增 migrateDocumentPipelineStateTable 启动迁移，为存量缺表 schema 幂等补建该表 + 索引 + RLS + grant）
+  - company-rag-tenant/.../service/impl/TenantServiceImplSchemaTest.java（修改 - 新增 document_pipeline_state 建表/索引 DDL 完整性回归单测 2 例）
+- commit_message:         BugFix:0000_补齐document_pipeline_state建表：add pipeline table to tenant build-create DDL and startup migration
+- commit_command:         git commit -m "BugFix:0000_补齐document_pipeline_state建表：add pipeline table to tenant build-create DDL and startup migration"
+- commit_exit_code:       0（3e11ff1，3 files changed, 109 insertions(+), 1 deletion(-)）
+- push_command:           git push gitee feat/answer-evaluator; git push origin feat/answer-evaluator; ls-remote 校验
+- push_exit_code:         gitee=0（abeb2af..3e11ff1）；origin=128（github 网络不可达，未推送）
+- remote_head_check_command: git rev-parse HEAD && git ls-remote gitee feat/answer-evaluator && git ls-remote origin feat/answer-evaluator
+- remote_head:            本地 / gitee 均 = 3e11ff15bce947ce60b1a995549ae766f656ec08（一致）；github ls-remote 失败（网络不可达，无法校验）
+- result:                 本地提交 3e11ff1 已推送 gitee 成功且远端 HEAD 与本地一致；github/origin 因 Failed to connect to github.com:443 网络不可达未能推送（按预期）。gitee 推送证据完整；github 推送失败需网络恢复后重推。变更内容：新增/存量租户 schema 缺 document_pipeline_state 表会导致该租户上传文档在插入 PENDING 状态时抛 "relation does not exist" 且留下孤儿 rag_document 记录 + 临时文件；本提交在新建租户建表 DDL（TenantServiceImpl.buildCreateTableSql/buildCreateIndexSql）补齐该表及索引、RLS，并在 SchemaMigrationConfig 增加启动迁移 migrateDocumentPipelineStateTable 兜底存量缺表 schema（幂等 CREATE TABLE IF NOT EXISTS + RLS + grant），与 answer_eval_result/tool_approval_request 同类机制。验证（窄范围）：company-rag-tenant 编译通过；TenantServiceImplSchemaTest 12 测试全过（新增 2 例）；company-rag-bootstrap 编译通过。
+
 ### 最新推送（2026-09-16/17 RAG 文档入库 ETL 健壮性改造 → gitee 成功 / github 成功）
 
 - commit_type:            Task
