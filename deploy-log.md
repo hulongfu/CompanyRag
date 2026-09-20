@@ -2,6 +2,30 @@
 
 ## Git Push
 
+### 最新推送（2026-09-20 审批面板按租户+发起用户双过滤、首页新增审批入口 → gitee 成功 / github 网络失败）
+
+- commit_type:            Task
+- task_id:                0000
+- task_name:              审批面板双过滤与首页入口
+- commit_hash:            490117b68012300fea19f1099581aa6db921049a
+- branch:                 feat/answer-evaluator（已有分支）
+- remote:                 gitee（成功：ca78ab5..490117b）；origin(github)（失败：Failed to connect to github.com:443，网络不可达，符合预期）
+- staged_files:
+  - company-rag-web/.../controller/ToolApprovalController.java（修改 - pending 按 tenantId+requesterUserId 双过滤仅看本人单；approve/deny 先 selectById 校验 tenantId+requesterUserId 归属当前用户，防越权盲操作）
+  - company-rag-web/.../templates/index.html（修改 - 首页导航新增「🛂 审批面板」入口，window.open 新窗口打开 /tool-approval）
+  - company-rag-web/.../controller/ToolApprovalControllerTest.java（修改 - 以 SecurityContext 注入当前用户 42，新增他人单/他租户单/单不存在越权用例）
+  - agent_skills/find-skills/（新增 - SKILL.md）
+  - agent_skills/skill-creator/（新增 - 技能目录源码/文档）
+  - docs/superpowers/plans/2026-09-19-approval-gate-production.md（新增 - 审批门生产化实现计划）
+- commit_message:         Task:0000_审批面板双过滤与首页入口：add tenant+user filtering and home approval entry
+- commit_command:         git commit -m "Task:0000_审批面板双过滤与首页入口：add tenant+user filtering and home approval entry"
+- commit_exit_code:       0（490117b，26 files changed, 154 insertions(+), 8 deletions(-)）
+- push_command:           git push gitee feat/answer-evaluator; git push origin feat/answer-evaluator; ls-remote 校验
+- push_exit_code:         gitee=0（ca78ab5..490117b）；origin=128（github 网络不可达，未推送）
+- remote_head_check_command: git rev-parse HEAD && git ls-remote gitee feat/answer-evaluator
+- remote_head:            本地 / gitee 均 = 490117b68012300fea19f1099581aa6db921049a（一致）；github 网络不可达，无法校验
+- result:                 本地提交 490117b 已推送 gitee 成功且远端 HEAD 与本地一致；github/origin 因 Failed to connect to github.com:443 网络不可达未能推送（按预期），需网络恢复后重推。gitee 推送证据完整。变更内容：方案①落地——待审批单按 tenantId+requesterUserId 双过滤，仅当前用户可见并审批本人发起的单；approve/deny 增加越权前置校验（与 await 原子条件更新幂等互补）；首页导航新增审批面板入口（新窗口打开）。验证（窄范围）：company-rag-web ToolApprovalControllerTest 13/13 通过（含越权用例）。
+
 ### 最新推送（2026-09-20 为新建/存量租户 schema 补齐 document_pipeline_state 建表 → gitee 成功 / github 网络失败）
 
 - commit_type:            BugFix
