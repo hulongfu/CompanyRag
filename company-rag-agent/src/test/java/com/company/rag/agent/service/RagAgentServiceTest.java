@@ -28,11 +28,13 @@ class RagAgentServiceTest {
     @Test
     void processWithHistory_returnsRealToolContext() throws Exception {
         when(streamingAgentExecutor.execute(org.mockito.ArgumentMatchers.anyList()))
-                .thenReturn(new AgentResult("answer", "searchKnowledgeBase:citations=c1"));
+                .thenReturn(new AgentResult("answer", "searchKnowledgeBase:citations=c1", true));
 
         AgentResult result = service.processWithHistory(null, "hi");
 
         assertEquals("answer", result.getAnswer());
         assertEquals("searchKnowledgeBase:citations=c1", result.getToolContext());
+        // RAG 已被调用时应透传 ragUsed=true（供在线评估过滤）
+        assertEquals(true, result.isRagUsed());
     }
 }

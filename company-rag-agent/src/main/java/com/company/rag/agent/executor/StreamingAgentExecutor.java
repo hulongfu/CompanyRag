@@ -52,7 +52,14 @@ public class StreamingAgentExecutor {
             log.info("[AGENT-EXEC] Agent 调用完成，响应长度={}", content.length());
             
             String toolContext = recorder.captureToolContext();
-            return new AgentResult(content, toolContext);
+            // 判断本次是否执行过 RAG 检索（searchKnowledgeBase），供在线评估据此过滤：
+            // 仅对真实检索过的回答评估 faithfulness，避免无上下文的普通回复被误判为 0 分。
+            boolean ragUsed = recorder.usedTool("searchKnowledgeBase");
+            return AgentResult.builder()
+                    .answer(content)
+                    .toolContext(toolContext)
+                    .ragUsed(ragUsed)
+                    .build();
         } catch (GraphRunnerException e) {
             log.error("[AGENT-EXEC] Agent 执行失败 | error={}", e.getMessage(), e);
             throw e;

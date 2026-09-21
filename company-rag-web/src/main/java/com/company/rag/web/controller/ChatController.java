@@ -177,7 +177,9 @@ public class ChatController {
 
             // 在线自动评估（默认关闭）：异步触发，失败不影响主回复。
             // answerEvaluationService 为可选注入，enabled=false 时为 null，此处判空跳过（主链路不受影响）
-            if (evalOnlineEnabled && savedRowId != null && answerEvaluationService != null) {
+            // 仅对真实执行过 RAG 检索（searchKnowledgeBase）的回答评估：非 RAG 回复无检索上下文，
+            // faithfulness 会恒判 0 分（faithfulness 评估依赖 citations= 正文），评估结果无意义且污染统计。
+            if (evalOnlineEnabled && savedRowId != null && answerEvaluationService != null && result.isRagUsed()) {
                 String queryForEval = request.getQuery();
                 String answerForEval = result.getAnswer();
                 // 【铁律】context 可能为 null（无工具调用时），空值归一化为 ""，

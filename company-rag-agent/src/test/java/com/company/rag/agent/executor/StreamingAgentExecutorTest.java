@@ -39,6 +39,24 @@ class StreamingAgentExecutorTest {
 
         assertEquals("hello", result.getAnswer());
         assertEquals("searchKnowledgeBase:citations=c1", result.getToolContext());
+        // 实际调用了 searchKnowledgeBase，ragUsed 应为 true（供在线评估过滤）
+        assertEquals(true, result.isRagUsed());
+    }
+
+    @Test
+    void execute_ragUsedFalse_whenNoSearchCalled() throws Exception {
+        when(reactAgent.call(List.of(new UserMessage("hi"))))
+                .thenReturn(new AssistantMessage("hello"));
+
+        // 仅调用其他工具（如 code_search），未调用 searchKnowledgeBase
+        long start = recorder.recordStart("code_search", java.util.Map.of("q", "k"));
+        recorder.recordEnd("code_search", start, "success", null, "matched=1");
+
+        AgentResult result = executor.execute(List.of(new UserMessage("hi")));
+
+        // 未执行 RAG 检索，ragUsed 应为 false
+        assertEquals("hello", result.getAnswer());
+        assertEquals(false, result.isRagUsed());
     }
 
     @Test

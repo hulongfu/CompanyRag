@@ -119,6 +119,18 @@ public class ToolCallRecorder {
     }
 
     /**
+     * 判断本次请求是否调用了指定工具。
+     * 供上层据此决定是否需要走特定语义（如仅对检索过的回答做在线评估）。
+     */
+    public boolean usedTool(String toolName) {
+        List<ToolCallRecord> records = recordsHolder.get();
+        if (records == null || toolName == null) {
+            return false;
+        }
+        return records.stream().anyMatch(r -> toolName.equals(r.getToolName()));
+    }
+
+    /**
      * 从 MDC 读取当前 traceId，获取不到时返回空串（避免拼 null）
      */
     private String traceIdFromMdc() {

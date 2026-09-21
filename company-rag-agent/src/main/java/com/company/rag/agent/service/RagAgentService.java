@@ -156,12 +156,17 @@ public class RagAgentService {
             log.info("[AGENT] tools=[{}], total={}ms", toolsSummary, totalMs);
 
             return new AgentResult(response != null ? response : "",
-                    agentResult.getToolContext() != null ? agentResult.getToolContext() : MDC.get("traceId"));
+                    agentResult.getToolContext() != null ? agentResult.getToolContext() : MDC.get("traceId"),
+                    agentResult.isRagUsed());
 
         } catch (Exception e) {
             long totalMs = System.currentTimeMillis() - requestStart;
             log.error("[AGENT] total={}ms, error={}", totalMs, e.getMessage(), e);
-            return new AgentResult("抱歉，系统繁忙，请稍后重试。", "error:" + e.getMessage());
+            return AgentResult.builder()
+                    .answer("抱歉，系统繁忙，请稍后重试。")
+                    .toolContext("error:" + e.getMessage())
+                    .ragUsed(false)
+                    .build();
         }
     }
 
