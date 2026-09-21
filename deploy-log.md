@@ -2,6 +2,31 @@
 
 ## Git Push
 
+### 最新推送（2026-09-20 在线评估仅对真实 RAG 检索的回答触发 → gitee 成功 / github 成功）
+
+- commit_type:            Task
+- task_id:                0000
+- task_name:              untitled
+- commit_hash:            92ded7e8338b4abb83f23d430cd637ac2273e3bb
+- branch:                 feat/answer-evaluator（已有分支）
+- remote:                 gitee（成功：8620f3f..92ded7e）；origin(github)（成功：8620f3f..92ded7e，本次网络正常）
+- staged_files:
+  - company-rag-agent/.../service/AgentResult.java（修改 - 新增 ragUsed 布尔位 + @Builder）
+  - company-rag-common/.../tool/ToolCallRecorder.java（修改 - 新增 usedTool(toolName) 精确判定本次是否调用过某工具）
+  - company-rag-agent/.../executor/StreamingAgentExecutor.java（修改 - 在 captureToolContext 后、clearRecords 前置位 ragUsed=usedTool("searchKnowledgeBase")）
+  - company-rag-agent/.../service/RagAgentService.java（修改 - 正常路径透传 agentResult.isRagUsed()；异常路径显式 ragUsed=false）
+  - company-rag-web/.../controller/ChatController.java（修改 - 在线评估触发条件追加 && result.isRagUsed()，非 RAG 回复不再评估）
+  - company-rag-agent/src/test/.../executor/StreamingAgentExecutorTest.java（修改 - 新增「调用 searchKnowledgeBase→ragUsed=true」「仅调其他工具→ragUsed=false」两用例）
+  - company-rag-agent/src/test/.../service/RagAgentServiceTest.java（修改 - AgentResult 改三参构造并断言 ragUsed 透传）
+- commit_message:         Task:0000_untitled：add ragUsed gate for online eval evaluation
+- commit_command:         git commit -m "Task:0000_untitled：add ragUsed gate for online eval evaluation"
+- commit_exit_code:       0（92ded7e，7 files changed, 62 insertions(+), 7 deletions(-)）
+- push_command:           git push gitee feat/answer-evaluator; git push origin feat/answer-evaluator; git ls-remote gitee/origin 校验
+- push_exit_code:         gitee=0（8620f3f..92ded7e）；origin=0（8620f3f..92ded7e）
+- remote_head_check_command: git rev-parse HEAD && git ls-remote gitee feat/answer-evaluator && git ls-remote origin feat/answer-evaluator
+- remote_head:            本地 / gitee / origin 三处均 = 92ded7e8338b4abb83f23d430cd637ac2273e3bb（一致，两端均有 ls-remote 佐证）
+- result:                 本地提交 92ded7e 已推送 gitee 与 github 均成功，两端远端 HEAD 与本地 92ded7e 三处一致（证据完整）。变更内容：收窄在线评估范围——原 ChatController.chat() 对所有 AI 回复都触发三维评估，但 faithfulness 语义完全依赖检索上下文（FaithfulnessChecker 空 context→UNKNOWN、无 citations=→UNFAITHFUL），非 RAG 的纯对话/其他工具回复 context 为空，导致 faithfulness 恒判 0 分、答卷即使正确也被判「不忠实」，污染 answer_eval_result 落库与 /api/eval/stats 统计；本次为 AgentResult 新增 ragUsed 布尔位，StreamingAgentExecutor 在 clearRecords 之前用 recorder.usedTool("searchKnowledgeBase") 置位（按 ToolCallRecord.toolName 精确判定，优于原按 citations= 字符串启发式），RagAgentService 正常/异常两路径透传，ChatController 在线评估触发条件追加 && result.isRagUsed() 仅对真实执行过 RAG 的回答评估。验证（窄范围）：company-rag-common/agent install 后 StreamingAgentExecutorTest+RagAgentServiceTest EXIT=0（含 2 新增用例）；company-rag-web compile EXIT=0。说明：ChatControllerTest 为既有失败（测试配置未 mock RagAgentService 构造依赖 bean，stash 回退同样失败，非本次引入），按最小改动未处理；"searchKnowledgeBase" 工具名在 agent/rag 两模块字符串耦合，建议后续抽常量。
+
 ### 最新推送（2026-09-20 browser-search 技能增强：打开百度后抓取并返回搜索结果 → gitee 成功 / github 成功）
 
 - commit_type:            Task
