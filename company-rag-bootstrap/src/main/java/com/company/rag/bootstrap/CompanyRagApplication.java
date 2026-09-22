@@ -13,6 +13,7 @@ import org.springframework.cloud.function.context.config.ContextFunctionCatalogA
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.scheduling.annotation.EnableAsync;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 import java.util.List;
 
@@ -32,6 +33,7 @@ import java.util.List;
 @MapperScan({"com.company.rag.tenant.mapper", "com.company.rag.document.mapper", "com.company.rag.rag.mapper", "com.company.rag.rag.eval.answer", "com.company.rag.agent.approve"})
 @MapperScan(basePackages = "com.company.rag.document.pipeline", annotationClass = Mapper.class)
 @EnableAsync  // 启用异步方法支持（用于下载工具的异步清理）
+@EnableScheduling  // 启用定时调度（MCP 健康探活与失败重连）
 public class CompanyRagApplication {
 
     public static void main(String[] args) {

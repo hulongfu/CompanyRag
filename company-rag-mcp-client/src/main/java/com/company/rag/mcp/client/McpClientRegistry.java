@@ -3,6 +3,7 @@ package com.company.rag.mcp.client;
 import com.company.rag.agent.tool.AgentToolRegistry;
 import com.company.rag.mcp.model.McpToolDefinition;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -29,7 +30,13 @@ public class McpClientRegistry {
     /** 进入失败态的 clientId 集合（供调度器重连） */
     private final Set<String> failedClients = ConcurrentHashMap.newKeySet();
     private final AgentToolRegistry agentToolRegistry;
-    
+    /** 记录最近一次探活成功时间与结果（幂等）。 */
+    private final Map<String, String> lastProbe = new ConcurrentHashMap<>();
+
+    /** 字段注入避免与 McpFailureHandler 构造相互依赖导致的循环 */
+    @Autowired
+    private McpFailureHandler mcpFailureHandler;
+
     /**
      * 构造函数注入 AgentToolRegistry
      */
@@ -136,12 +143,18 @@ public class McpClientRegistry {
         if (client == null) {
             throw new IllegalArgumentException("未找到 MCP Client: " + clientId);
         }
-        
         log.info("MCP Client [{}] 调用工具：{}, 参数：{}", clientId, toolName, params);
-        Object result = client.callTool(toolName, params);
-        log.info("MCP Client [{}] 工具 {} 调用完成", clientId, toolName);
-        
-        return result;
+        try {
+            Object result = client.callTool(toolName, params);
+            log.info("MCP Client [{}] 工具 {} 调用完成", clientId, toolName);
+            return result;
+        } catch (RuntimeException e) {
+            // 调用失败即时自愈（参数错误忽略；非参数错误按远端可达性移除/同步）
+            if (mcpFailureHandler != null) {
+                mcpFailureHandler.handle(clientId, e);
+            }
+            throw e;
+        }
     }
     
     /**
@@ -229,6 +242,7 @@ public class McpClientRegistry {
                     .clientId(clientId)
                     .connected(connected)
                     .toolCount(owned.size())
+                    .lastProbeResult(lastProbe.getOrDefault(clientId, "unknown"))
                     .registeredToolNames(List.copyOf(owned))
                     .build();
         }).collect(Collectors.toList());
@@ -237,6 +251,16 @@ public class McpClientRegistry {
     /** 当前失败清单（只读快照），供调度器重连 */
     public Set<String> getFailedClients() {
         return Set.copyOf(failedClients);
+    }
+
+    /** 标记某 client 探活正常（用于状态快照展示）。 */
+    public void markReachable(String clientId) {
+        lastProbe.put(clientId, "reachable@" + System.currentTimeMillis());
+    }
+
+    /** 将某 client 标记为失败（启动失败时调用），供重连任务处理。 */
+    public void markFailed(String clientId) {
+        failedClients.add(clientId);
     }
     
     /**

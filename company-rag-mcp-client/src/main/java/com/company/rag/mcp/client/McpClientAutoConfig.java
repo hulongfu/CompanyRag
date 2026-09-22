@@ -54,7 +54,8 @@ public class McpClientAutoConfig {
                 registry.registerClient(config.getId(), client);
                 log.info("MCP Client [{}] 初始化成功，URL: {}", config.getId(), config.getUrl());
             } catch (Exception e) {
-                log.error("MCP Client [{}] 初始化失败", config.getId(), e);
+                log.error("MCP Client [{}] 初始化失败，登记失败清单", config.getId(), e);
+                registry.markFailed(config.getId());
             }
         }
         
