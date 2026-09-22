@@ -41,6 +41,12 @@ public class PageController {
         return "tool-approval";
     }
 
+    /** MCP 服务器状态管理页面 */
+    @GetMapping("/mcp-status")
+    public String mcpStatus() {
+        return "mcp-status";
+    }
+
     @GetMapping("/audit-log.html")
     public String auditLog() {
         return "audit-log";
