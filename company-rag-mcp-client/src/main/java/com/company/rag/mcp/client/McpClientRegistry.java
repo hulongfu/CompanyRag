@@ -6,9 +6,13 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 /**
  * MCP Client 注册中心
@@ -20,6 +24,10 @@ public class McpClientRegistry {
     
     private final Map<String, McpClient> clients = new ConcurrentHashMap<>();
     private final Map<String, List<McpToolDefinition>> toolCache = new ConcurrentHashMap<>();
+    /** clientId -> 该源已注册进 Agent 的工具名集合（按来源归属追踪） */
+    private final Map<String, Set<String>> agentToolNamesByClient = new ConcurrentHashMap<>();
+    /** 进入失败态的 clientId 集合（供调度器重连） */
+    private final Set<String> failedClients = ConcurrentHashMap.newKeySet();
     private final AgentToolRegistry agentToolRegistry;
     
     /**
@@ -47,8 +55,10 @@ public class McpClientRegistry {
             
             // 自动注册所有工具到 AgentToolRegistry
             registerToolsToAgent(clientId, tools);
+            failedClients.remove(clientId); // 连接成功，移出失败清单
         } catch (Exception e) {
-            log.error("MCP Client [{}] 初始化失败", clientId, e);
+            failedClients.add(clientId); // 登记失败清单供调度器重连
+            log.error("MCP Client [{}] 初始化失败，已加入失败清单", clientId, e);
         }
     }
     
@@ -60,10 +70,13 @@ public class McpClientRegistry {
             return;
         }
         
+        // 记录该源已注册进 Agent 的工具归属，供按源移除/同步使用
+        Set<String> owned = agentToolNamesByClient.computeIfAbsent(clientId, k -> ConcurrentHashMap.newKeySet());
         for (McpToolDefinition tool : tools) {
             try {
                 ExternalMcpTool externalTool = new ExternalMcpTool(clientId, tool, this);
                 agentToolRegistry.register(externalTool);
+                owned.add(externalTool.getName());
                 log.info("注册外部 MCP 工具到 Agent: {}", externalTool.getName());
             } catch (Exception e) {
                 log.error("注册外部工具失败：{}", clientId + "_" + tool.getName(), e);
@@ -129,6 +142,98 @@ public class McpClientRegistry {
         log.info("MCP Client [{}] 工具 {} 调用完成", clientId, toolName);
         
         return result;
+    }
+    
+    /**
+     * 用远端最新工具列表替换该源(clientId)已注册到 Agent 的工具集：
+     * 移除已下架的工具、注册新增的工具，并更新归属追踪与工具缓存。
+     * 幂等且并发安全（依赖 ConcurrentHashMap 与 AgentToolRegistry.removeAll 幂等）。
+     */
+    public void syncTools(String clientId) {
+        McpClient client = clients.get(clientId);
+        if (client == null) {
+            log.warn("syncTools 跳过：未找到 MCP Client: {}", clientId);
+            return;
+        }
+        List<McpToolDefinition> remoteList;
+        try {
+            remoteList = client.listToolsRemote();
+        } catch (Exception e) {
+            log.error("MCP Client [{}] 远端获取工具列表失败，无法同步：{}", clientId, e.getMessage());
+            return;
+        }
+        // 远端现有名称集合
+        Set<String> remoteNames = new HashSet<>();
+        for (McpToolDefinition t : remoteList) {
+            remoteNames.add(clientId + "_" + t.getName());
+        }
+        // 移除已不在远端的工具
+        Set<String> owned = agentToolNamesByClient.getOrDefault(clientId, Collections.emptySet());
+        List<String> toRemove = owned.stream()
+                .filter(n -> !remoteNames.contains(n))
+                .collect(Collectors.toList());
+        int removed = agentToolRegistry.removeAll(toRemove);
+        // 注册远端新增的工具并重新建立归属
+        Set<String> newOwned = ConcurrentHashMap.newKeySet();
+        for (McpToolDefinition t : remoteList) {
+            String name = clientId + "_" + t.getName();
+            if (!owned.contains(name)) {
+                try {
+                    agentToolRegistry.register(new ExternalMcpTool(clientId, t, this));
+                } catch (Exception e) {
+                    log.error("syncTools 注册新增工具失败：{}", name, e);
+                }
+            }
+            newOwned.add(name);
+        }
+        agentToolNamesByClient.put(clientId, newOwned);
+        toolCache.put(clientId, remoteList);
+        log.info("MCP Client [{}] 同步完成：移除 {} 个，活跃工具 {} 个", clientId, removed, remoteNames.size());
+    }
+
+    /**
+     * 移除指定 MCP 来源的全部已注册工具，并释放连接、登记失败清单。
+     * 用于探活失败 / 调用失败且远端不可达时按源整机移除。
+     */
+    public void removeToolsFor(String clientId) {
+        Set<String> owned = agentToolNamesByClient.remove(clientId);
+        if (owned != null && !owned.isEmpty()) {
+            int removed = agentToolRegistry.removeAll(owned);
+            log.info("MCP Client [{}] 已移除 {} 个工具", clientId, removed);
+        }
+        toolCache.remove(clientId);
+        McpClient client = clients.remove(clientId);
+        if (client != null) {
+            try {
+                client.disconnect();
+            } catch (Exception e) {
+                log.warn("MCP Client [{}] 断开失败：{}", clientId, e.getMessage());
+            }
+        }
+        failedClients.add(clientId); // 移除后进入失败清单，等待重连
+        log.info("MCP Client [{}] 已按源移除全部工具并标记失败", clientId);
+    }
+
+    /**
+     * 采集各 MCP 端点当前状态快照（内存态），供管理员状态查询。
+     */
+    public List<McpEndpointStatus> statusSnapshots() {
+        return clients.keySet().stream().map(clientId -> {
+            McpClient client = clients.get(clientId);
+            Set<String> owned = agentToolNamesByClient.getOrDefault(clientId, Collections.emptySet());
+            boolean connected = client != null && client.isConnected();
+            return McpEndpointStatus.builder()
+                    .clientId(clientId)
+                    .connected(connected)
+                    .toolCount(owned.size())
+                    .registeredToolNames(List.copyOf(owned))
+                    .build();
+        }).collect(Collectors.toList());
+    }
+
+    /** 当前失败清单（只读快照），供调度器重连 */
+    public Set<String> getFailedClients() {
+        return Set.copyOf(failedClients);
     }
     
     /**
