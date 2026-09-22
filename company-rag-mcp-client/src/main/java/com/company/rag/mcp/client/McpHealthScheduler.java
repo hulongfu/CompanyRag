@@ -82,8 +82,9 @@ public class McpHealthScheduler {
             try {
                 HttpMcpClient client = new HttpMcpClient(
                         config.getId(), config.getUrl(), config.getTimeout(), config.getHeaders());
-                registry.registerClient(config.getId(), client); // 成功后自动从失败清单移除并注册工具
-                if (registry.getClient(config.getId()) != null) {
+                // registerClient 先放入 clients 再 connect，最终成功以是否仍留在失败清单为准
+                registry.registerClient(config.getId(), client);
+                if (!registry.getFailedClients().contains(config.getId())) {
                     startupFailures.remove(config.getId());
                     audit("MCP_RECONNECT", config.getId(), "重连成功并重新注册工具，url=" + config.getUrl());
                 }

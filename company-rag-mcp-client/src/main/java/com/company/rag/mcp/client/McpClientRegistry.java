@@ -227,6 +227,7 @@ public class McpClientRegistry {
             }
         }
         failedClients.add(clientId); // 移除后进入失败清单，等待重连
+        lastProbe.remove(clientId); // 清除旧的探活成功标记，避免展示陈旧状态
         log.info("MCP Client [{}] 已按源移除全部工具并标记失败", clientId);
     }
 
@@ -261,6 +262,7 @@ public class McpClientRegistry {
     /** 将某 client 标记为失败（启动失败时调用），供重连任务处理。 */
     public void markFailed(String clientId) {
         failedClients.add(clientId);
+        lastProbe.remove(clientId); // 进入失败态后清除旧的探活成功标记
     }
     
     /**
