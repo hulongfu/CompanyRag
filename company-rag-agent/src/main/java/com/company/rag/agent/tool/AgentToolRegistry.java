@@ -8,6 +8,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Agent工具注册中心
@@ -17,7 +18,7 @@ import java.util.*;
 @Component
 public class AgentToolRegistry {
 
-    private final Map<String, AgentTool> tools = new HashMap<>();
+    private final Map<String, AgentTool> tools = new ConcurrentHashMap<>();
     private volatile int version = 0; // 工具列表版本号，每次工具变更时递增
 
     @Autowired
@@ -107,6 +108,34 @@ public class AgentToolRegistry {
         return tools.containsKey(name);
     }
     
+    /**
+     * 移除单个工具。仅当工具真实存在时移除并递增版本号，返回是否移除成功（幂等，避免重复计数）。
+     */
+    public boolean remove(String name) {
+        AgentTool removed = tools.remove(name);
+        if (removed != null) {
+            version++; // 工具移除也属于变更，递增版本号供下游重建感知
+            log.debug("移除 Agent 工具：{} (version={})", name, version);
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * 批量移除工具，仅统计"实际存在的被移除数"。常用于按 MCP 来源(clientId)移除整机工具集。
+     */
+    public int removeAll(Collection<String> names) {
+        int removed = 0;
+        if (names != null) {
+            for (String name : names) {
+                if (remove(name)) {
+                    removed++;
+                }
+            }
+        }
+        return removed;
+    }
+
     /**
      * 获取当前工具列表版本号
      * @return 版本号，每次工具注册或变更时递增
