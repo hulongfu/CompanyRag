@@ -180,11 +180,14 @@ public class McpClientRegistry {
             if (!owned.contains(name)) {
                 try {
                     agentToolRegistry.register(new ExternalMcpTool(clientId, t, this));
+                    newOwned.add(name);
                 } catch (Exception e) {
                     log.error("syncTools 注册新增工具失败：{}", name, e);
                 }
+            } else {
+                // 已在名下的工具保持归属
+                newOwned.add(name);
             }
-            newOwned.add(name);
         }
         agentToolNamesByClient.put(clientId, newOwned);
         toolCache.put(clientId, remoteList);
