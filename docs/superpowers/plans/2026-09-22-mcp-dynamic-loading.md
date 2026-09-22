@@ -1321,7 +1321,7 @@ EPLICIT:
 - `McpEndpointStatus` 字段名（clientId/connected/toolCount/registeredToolNames/lastProbeResult）在页面与测试中一致。
 - `McpFailureHandler.handle(String, RuntimeException)` 与 `McpClientRegistry.callTool` 的调用形式一致。
 
-> **实现注意（需在编码时按真实签名核对）：** `ExternalMcpTool` 构造 `new ExternalMcpTool(clientId, tool, this)` 已确认。`R<T>` 为 `@Data` 直读字段：断言用 `getCode()`（成功=200）/`getData()`，无 `isSuccess()`。
+> **实现注意（需在编码时按真实签名核对）：** `ExternalMcpTool` 构造 `new ExternalMcpTool(clientId, tool, this)` 已确认。`R<T>` 为 `@Data` 直读字段：断言用 `getCode()`（成功=200）/`getData()`。
 
 **执行交接：** 计划已保存到 `docs/superpowers/plans/2026-09-22-mcp-dynamic-loading.md`。可选执行方式：
 
