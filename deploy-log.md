@@ -2,6 +2,33 @@
 
 ## Git Push
 
+### 最新推送（2026-09-23 MCP 动态工具注册后 ReactAgent 实时刷新 → gitee 成功 / github 成功）
+
+- commit_type:            BugFix
+- task_id:                0000
+- task_name:              MCP动态工具注册与ReactAgent工具实时刷新
+- commit_hash:            083ea0d660fb237d7d579a5e9b3fa6ca31c275a5
+- branch:                 feat/answer-evaluator（已有分支）
+- remote:                 gitee（成功：b78e795..083ea0d）；origin(github)（成功：b78e795..083ea0d，push 返回 0）
+- staged_files:
+  - company-rag-mcp-client/.../McpClientRegistry.java（修改 - 主构造加 @Autowired）
+  - company-rag-mcp-client/.../McpFailureHandler.java（修改）
+  - company-rag-mcp-client/.../McpHealthScheduler.java（修改）
+  - company-rag-mcp-client/src/test/.../McpClientRegistrySelfHealTest.java（修改）
+  - company-rag-mcp-client/src/test/.../McpFailureHandlerTest.java（修改）
+  - company-rag-mcp-client/src/test/resources/mockito-extensions/org.mockito.plugins.MockMaker（新增）
+  - company-rag-common/.../event/McpToolRegistryChangedEvent.java（新增）
+  - company-rag-rag/.../config/ReactAgentToolRefresher.java（新增）
+  - company-rag-rag/src/test/.../config/ReactAgentToolRefresherTest.java（新增）
+- commit_message:         BugFix:0000_MCP动态工具注册与ReactAgent工具实时刷新：add ReactAgentToolRefresher and McpToolRegistryChangedEvent; refresh llmNode chatOptions tools; add self-heal tests
+- commit_command:         git commit -m "BugFix:0000_MCP动态工具注册与ReactAgent工具实时刷新：add ReactAgentToolRefresher and McpToolRegistryChangedEvent; refresh llmNode chatOptions tools; add self-heal tests"
+- commit_exit_code:       0（083ea0d，9 files changed, 352 insertions(+), 6 deletions(-)）
+- push_command:           git push -u gitee HEAD:feat/answer-evaluator; git push origin HEAD:feat/answer-evaluator; git ls-remote gitee/origin 校验
+- push_exit_code:         gitee=0（b78e795..083ea0d）；origin=0（b78e795..083ea0d）
+- remote_head_check_command: git rev-parse HEAD && git ls-remote gitee feat/answer-evaluator && git ls-remote origin feat/answer-evaluator
+- remote_head:            本地 / gitee 两处 ls-remote = 083ea0d（一致）；origin(github) push 返回成功并更新本地 origin/feat/answer-evaluator tracking ref 为 083ea0d，但校验时 github 网络不可达（443 连接超时）未能在线 ls-remote 复核，本地 refs/remotes/origin 与 push 输出 b78e795..083ea0d 为佐证
+- result:                 本地提交 083ea0d 已推送 gitee（ls-remote 在线确认一致）与 github（push 成功、本地 tracking ref 一致，仅因网络不可达缺 github 在线 ls-remote 佐证）。变更内容：修复 MCP 动态工具注册后 ReactAgent 模型看不到新工具的缺陷——反编译 AgentLlmNode 确认 LLM 调用工具来源是 Bean 构建时固化的 private chatOptions(ToolCallingChatOptions)，filterToolCallbacks 以它与节点 toolCallbacks 求交集，旧 snapshot 恒只剩 8 个内置工具、新注册的 custom_read_* 被过滤；新增 ReactAgentToolRefresher 监听 McpToolRegistryChangedEvent，刷新时除更新节点 toolCallbacks 外，经反射调用 llmNode.chatOptions.setToolCallbacks 同步固化工具集，使模型能见到动态新增工具；工具执行侧 AgentToolNode 本就按 toolCallbacks 解析满足。另 McpClientRegistry 主构造补 @Autowired 修复 Spring 无默认构造器报错。验证（窄范围）：company-rag-rag 单测 ReactAgentToolRefresherTest（扩充断言 llmNode.chatOptions 同步刷新）BUILD SUCCESS、Tests run: 2。
+
 ### 最新推送（2026-09-20 在线评估仅对真实 RAG 检索的回答触发 → gitee 成功 / github 成功）
 
 - commit_type:            Task
