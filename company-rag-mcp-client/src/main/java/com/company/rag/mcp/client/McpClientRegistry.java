@@ -1,9 +1,12 @@
 package com.company.rag.mcp.client;
 
 import com.company.rag.agent.tool.AgentToolRegistry;
+import com.company.rag.common.event.McpToolRegistryChangedEvent;
 import com.company.rag.mcp.model.McpToolDefinition;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -33,15 +36,32 @@ public class McpClientRegistry {
     /** 记录最近一次探活成功时间与结果（幂等）。 */
     private final Map<String, String> lastProbe = new ConcurrentHashMap<>();
 
-    /** 字段注入避免与 McpFailureHandler 构造相互依赖导致的循环 */
+    /**
+     * 惰性字段注入避免与 McpFailureHandler 构造注入产生的循环依赖：
+     * McpFailureHandler 构造依赖本类，而本类又通过字段依赖它；@Lazy 让其延迟到
+     * 首次调用（callTool 运行时）才创建，彼时本 bean 已完整初始化，可打破循环。
+     */
     @Autowired
+    @Lazy
     private McpFailureHandler mcpFailureHandler;
+    /** 用于在工具集变更后发布事件，驱动 Agent 侧补偿刷新 */
+    private ApplicationEventPublisher eventPublisher;
 
     /**
      * 构造函数注入 AgentToolRegistry
      */
     public McpClientRegistry(AgentToolRegistry agentToolRegistry) {
+        this(agentToolRegistry, null);
+    }
+
+    /**
+     * 主构造函数：注入 AgentToolRegistry 与事件发布器
+     */
+    @Autowired
+    public McpClientRegistry(AgentToolRegistry agentToolRegistry,
+                             ApplicationEventPublisher eventPublisher) {
         this.agentToolRegistry = agentToolRegistry;
+        this.eventPublisher = eventPublisher;
     }
     
     /**
@@ -76,7 +96,6 @@ public class McpClientRegistry {
         if (tools == null || agentToolRegistry == null) {
             return;
         }
-        
         // 记录该源已注册进 Agent 的工具归属，供按源移除/同步使用
         Set<String> owned = agentToolNamesByClient.computeIfAbsent(clientId, k -> ConcurrentHashMap.newKeySet());
         for (McpToolDefinition tool : tools) {
@@ -88,6 +107,17 @@ public class McpClientRegistry {
             } catch (Exception e) {
                 log.error("注册外部工具失败：{}", clientId + "_" + tool.getName(), e);
             }
+        }
+        // 工具集已变化，发布事件驱动 Agent 补偿刷新，使运行时动态加载的工具对模型可见
+        publishRegistryChanged(clientId);
+    }
+    
+    /**
+     * 发布工具注册表变更事件（若无事件发布器则静默忽略，保证失败不影响主流程）
+     */
+    private void publishRegistryChanged(String clientId) {
+        if (eventPublisher != null) {
+            eventPublisher.publishEvent(new McpToolRegistryChangedEvent(this, clientId));
         }
     }
     
@@ -205,6 +235,7 @@ public class McpClientRegistry {
         agentToolNamesByClient.put(clientId, newOwned);
         toolCache.put(clientId, remoteList);
         log.info("MCP Client [{}] 同步完成：移除 {} 个，活跃工具 {} 个", clientId, removed, remoteNames.size());
+        publishRegistryChanged(clientId);
     }
 
     /**
@@ -229,6 +260,7 @@ public class McpClientRegistry {
         failedClients.add(clientId); // 移除后进入失败清单，等待重连
         lastProbe.remove(clientId); // 清除旧的探活成功标记，避免展示陈旧状态
         log.info("MCP Client [{}] 已按源移除全部工具并标记失败", clientId);
+        publishRegistryChanged(clientId);
     }
 
     /**

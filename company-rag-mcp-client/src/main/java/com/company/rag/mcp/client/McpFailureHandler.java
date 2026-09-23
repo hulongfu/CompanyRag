@@ -76,13 +76,17 @@ public class McpFailureHandler {
 
     private void audit(String actionType, String clientId, String detail) {
         try {
+            // 后台自愈线程（异步）无租户/用户上下文，落库前用系统哨兵占位，避免违反 audit_log NOT NULL 约束。
+            // 平台级 MCP 事件不归属任何具体租户，语义上标记为 system。
+            Long tenantId = TenantContext.getTenantId();
+            Long userId = TenantContext.getUserId();
             auditLogService.recordAsync(AuditLogContext.builder()
                     .actionType(actionType)
                     .targetType("mcp")
                     .targetId(clientId)
                     .detail(detail)
-                    .tenantId(TenantContext.getTenantId() != null ? String.valueOf(TenantContext.getTenantId()) : null)
-                    .userId(TenantContext.getUserId())
+                    .tenantId(tenantId != null ? String.valueOf(tenantId) : "system")
+                    .userId(userId != null ? userId : 0L)
                     .build());
         } catch (Exception e) {
             log.warn("MCP 自愈审计失败，不影响处理：{}", clientId, e);

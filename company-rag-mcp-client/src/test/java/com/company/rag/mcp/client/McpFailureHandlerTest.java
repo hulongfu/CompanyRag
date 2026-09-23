@@ -1,15 +1,19 @@
 package com.company.rag.mcp.client;
 
 import com.company.rag.agent.tool.AgentToolRegistry;
+import com.company.rag.common.model.AuditLogContext;
 import com.company.rag.common.service.AuditLogService;
 import com.company.rag.mcp.model.McpToolDefinition;
+import com.company.rag.tenant.context.TenantContext;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 
 class McpFailureHandlerTest {
 
@@ -79,5 +83,28 @@ class McpFailureHandlerTest {
         h.handle("a", new McpToolException(-32000, "server says tool gone"));
 
         assertTrue(ar.hasTool("a_t"), "远端可达时应保留工具集（同步而非整机移除）");
+    }
+
+    @Test
+    void audit_uses_system_sentinel_when_no_tenant_context() {
+        // 无租户/用户上下文（模拟后台调度线程）：审计应回退为系统哨兵，避免违反 audit_log NOT NULL 约束
+        TenantContext.clear();
+        AuditLogService audit = mock(AuditLogService.class);
+        AgentToolRegistry ar = new AgentToolRegistry(List.of());
+        McpClientRegistry registry = new McpClientRegistry(ar);
+        FakeMcpClient client = new FakeMcpClient("a");
+        registry.registerClient("a", client);
+        McpFailureHandler h = new McpFailureHandler(registry, audit);
+
+        client.reachable = false;
+        h.handle("a", new McpToolException(-32000, "server internal error"));
+
+        org.mockito.ArgumentCaptor<AuditLogContext> captor =
+                org.mockito.ArgumentCaptor.forClass(AuditLogContext.class);
+        verify(audit).recordAsync(captor.capture());
+        AuditLogContext ctx = captor.getValue();
+        assertEquals("MCP_REMOVE_SOURCE", ctx.getActionType());
+        assertEquals("system", ctx.getTenantId(), "无租户上下文时应落系统哨兵 tenantId");
+        assertEquals(0L, ctx.getUserId(), "无用户上下文时应落系统哨兵 userId");
     }
 }
