@@ -93,7 +93,13 @@ RagChatMemory.get(sessionId): List<Message>          // 返回类型 = Message �
 - **`RagChatMemory` 只读不写**：仅实现"读历史注入"（`get`，有界），**不调用 `saveConversation`**，不做 write-back。
 - **`ChatController.chat`（主链路）**：保留其 `saveConversation`（ChatController.java:156-164），身份用 `headerTenantId` + `SecurityContext.userId`（现状可信，不改）。
 - **`ChatController.ragSearch`（`/api/rag/search`）**：补齐落库责任与身份信任——
-  - 从 `SecurityContext` 取得 `verifiedUserId`，**不再信任 body 的 `query.getUserId()`**；
+  - **【净新增】`SecurityContext` 身份提取是必须新写的代码块，非微调/挪库**：当前 `ragSearch`（ChatController.java:243-260）**完全没有** `SecurityUser` 提取（仅 `chat` 在 L108-124 有）。实现时须仿照 `chat` L108-124 新增：
+
+    > Object principal = SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+    > if (principal instanceof SecurityUser) { verifiedUserId = ((SecurityUser) principal).getUserId(); }
+    > if (verifiedUserId == null) { throw new IllegalStateException("用户 ID 不能为空"); }
+
+    `search` 返回后**一律用该 `verifiedUserId` 落库，不再信任 body 的 `query.getUserId()`**——否则只移了落库位置、未加身份提取，🔴 userId 越权洞等于没修。
   - 在 `search` 返回后，若客户端带 `sessionId`，由 Controller 用 `headerTenantId` + `verifiedUserId` 自行 `saveConversation(query, answer, context)`，保住该存活端点带 `sessionId` 的历史持久化语义；
   - **context 来源（须显式规定）**：`RagResult` 无 `context` 字段（RagResult.java:11-16 仅有 answer/chunks/sessions/sessionId/metrics）。Controller 拿不到 context 时，**必须按 `search` 现状相同规则从 `result.getChunks()` 重建**（即 `"[来源:" + documentName + "] " + content` 逐块拼接，换行 `\n\n`）。建议把 `search` 内 L79-84 的拼接逻辑**抽成公共方法**（如 `RagResultContextBuilder.build(RagResult)`），`search` 与 `ragSearch` 共用，避免两处漂移、杜绝 `rag_session.context` 静默为空而破坏后续 faithfulness 评估（见 §7）。
   - 需要时补 `TenantContext` 填充（见 §3.2 前置条件），但落库身份以显式参数传递，不依赖其回填。
@@ -170,7 +176,7 @@ RagChatMemory.get(sessionId): List<Message>          // 返回类型 = Message �
 - **新增**：`RagSessionService.getRecentSessionDetail(tenantId, userId, sessionId, int limit)`（DB 层 `ORDER BY createTime/id DESC LIMIT limit`，取最近 limit 条再反转升序；`window-size=-1` 时退化为全量查询）。实现于 `RagSessionServiceImpl`。
 - **修改**：`ChatController`——去手拼，改经 `ragChatMemory.get(request.getSessionId())` 获取历史再注入；`chat` 的 `saveConversation` 保留（可信身份，唯一 Owner）。
 - **修改**：`RagSearchServiceImpl`——**移除 L111-122 条件性 `saveConversation`**（search 零副作用；不用 persist 开关）；将 L79-84 的 context 拼接逻辑**抽出为公共方法** `RagResultContextBuilder.build`（`search` 与 `ragSearch` 共用）。
-- **修改**：`ChatController.ragSearch`（`/api/rag/search`，废弃但存活）——**从 `SecurityContext` 取 `verifiedUserId`（不再信任 `query.getUserId()`）**；`search` 返回后带 `sessionId` 时用可信身份自行 `saveConversation`，**context 用 `RagResultContextBuilder.build(result)` 从 `result.getChunks()` 重建**；必要时补齐 `TenantContext` 填充（#1/#3/#8/#14）。
+- **修改**：`ChatController.ragSearch`（`/api/rag/search`，废弃但存活）——**净新增 `SecurityContext` 身份提取**（当前无 SecurityUser 提取，须仿照 `chat` L108-124 新写：`principal instanceof SecurityUser` 取 `verifiedUserId`，null 抛 `IllegalStateException`），**不再信任 `query.getUserId()`**；`search` 返回后带 `sessionId` 时用可信身份自行 `saveConversation`，**context 用 `RagResultContextBuilder.build(result)` 从 `result.getChunks()` 重建**；必要时补齐 `TenantContext` 填充（#1/#3/#8/#14）。⚠️ 若只移落库位置、漏加身份提取，🔴 userId 越权洞未修。
 - **修改**：`RagAgentService`——`processWithHistory` 兼容保留，内部逻辑不动。
 - **新增配置**：仅 `rag.memory.window-size`（默认有界值，单位=轮/2 行，如 50 轮；`-1`=全量）。**不新增 `rag.memory.enabled` 开关**——`RagChatMemory` 是薄安全包装、风险极低，去掉开关可彻底避免「新组件 + 旧手拼」两份历史加载逻辑长期共存（YAGNI，见 §5/§8）。
 - **不动**：`rag_session` 表、`RagSessionService` 落库逻辑（`saveConversation`）、既有会话接口、mem0。
