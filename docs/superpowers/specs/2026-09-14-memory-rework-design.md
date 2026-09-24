@@ -64,31 +64,35 @@ RagChatMemory.get(CONVERSATION_ID):
 **根因核实结论**：`/api/chat` 主链路本不存在双写。
 - `RagSearchServiceImpl.search` 的落库是有条件的（`RagSearchServiceImpl.java:112`），仅当 `query.getSessionId() != null` 才触发 L115 `saveConversation`。
 - `KnowledgeBaseTool.searchKnowledgeBase`（`KnowledgeBaseTool.java:80-83`）构造的 `RagQuery` 只设置 `tenantId/query/topK`，**从不设置 sessionId** → `/api/chat` 主链路 agent 调用检索工具时 `getSessionId()` 为 null，**L115 不落库**。
-- 唯一设置 `ragQuery.setSessionId` 的是已废弃 `ChatRouter.buildRagQuery`（L308，仅测试与向后兼容），非主路径。
+- `ChatRouter.buildRagQuery`（L308，仅测试与向后兼容）与 `ChatController.ragSearch`（`/api/rag/search`，废弃但存活，见下方 S1 盘点）会设置 `sessionId`；`/api/chat` 主链路 agent 检索工具**从不设置 sessionId** → 主链路 L115 不落库。
 
 **因此真正的隐患是设计耦合而非现状故障**：`RagSearchServiceImpl.search` 内嵌了隐性的 `saveConversation` 副作用，依赖调用方是否传 sessionId。若未来调用方在 `search` 上补传 sessionId，将真实双写。
 
+> **新增调用方盘点（S1 修订）**：除 `ChatRouter.buildRagQuery` 外，还有一个**真实存活的调用方**——`ChatController.ragSearch`（`ChatController.java:40-60`），废弃 `POST /api/rag/search` 端点接受客户端 `RagQuery`（body 可含 `sessionId`），直接 `ragSearchService.search(query)` 返回，**Controller 内无任何 `saveConversation`**，完全依赖 `search` 的隐式落库。故 `search` 移除隐式落库后，该端点带 `sessionId` 的历史记录将静默丢失。必须在改动清单/方案中显式补齐该端点的落库责任，或让其显式触发 `persist`。
+
 **决定（落库责任收敛）**：
-- **唯一落库 Owner = `ChatController`**：保留 `ChatController.chat` L121 `saveConversation`。
+- **唯一落库 Owner = `ChatController`**：保留 `ChatController.chat` 的 `saveConversation`。
 - **`RagChatMemory` 只读不写**：仅实现"读历史注入"（`get`），`add` 为空操作，不调用 `saveConversation`。
-- **消除 `RagSearchServiceImpl.search` 的隐式落库**：移除 L112-122 的 `saveConversation` 内嵌逻辑（或改为显式 `persist` 开关并由调用方显式触发），使所有落库事件收敛到唯一 Owner，杜绝隐藏双写路径。
+- **消除 `RagSearchServiceImpl.search` 的隐式落库**：将 L112-122 的 `saveConversation` 内嵌逻辑改为**显式 `persist` 开关**（默认关闭），不直接删除，从而：
+  - `KnowledgeBaseTool` / `/api/chat` 主链路不持久化（现状一致，无行为变化）；
+  - `ChatController.ragSearch`（`/api/rag/search`，保留 `sessionId` 持久化语义）在 `search` 调用前显式开启 `persist`，**避免移除后该端点丢历史**；
+  - 杜绝隐藏双写路径（未来调用方不显式开 `persist` 不会意外落库）。
 
-> 备选（不采用）：若未来改由 Advisor 写、ChatController 删保存，需同步删掉 L121 `saveConversation`，并验证回填 id / 异步元数据更新不受影响。本 spec 默认选"ChatController 落库"，改动更小、风险更低。
+> 备选（不采用）：若未来改由 Advisor 写、ChatController 删保存，需同步删掉 ChatController 的 `saveConversation`，并验证回填 id / 异步元数据更新不受影响。本 spec 默认选"ChatController 落库"（`/api/chat`）+ "`/api/rag/search` 显式 `persist`"，改动更小、风险更低。
 
-### 3.4 调用链（主路径手动注入）
+### 3.4 调用链（主路径手动注入；签名对外不变）
 
 ```
 现状：ChatController 手拼 history → processWithHistory(history, query) → saveConversation 落库
-方案A（主路径）：
-  ChatController 不手拼，改为传 sessionId（来自请求）
-  RagAgentService.processWithHistory 内部手动加载：
-      List<Message> history = ragChatMemory.get(buildConversationId(sessionId));  // 手动注入，不依赖 Advisor 自动钩子
-      messages.addAll(history);
-  → callAgentWithTimeout(messages) → 回答
-  → 仍由 ChatController 调 saveConversation 落库（唯一 Owner，不改）
+方案A（主路径，processWithHistory 签名对外不变）：
+  ChatController 不再手拼，改为调用唯一读取入口 ragChatMemory.get 获取全量历史：
+      List<Message> history = ragChatMemory.get(buildConversationId(request.getSessionId()));
+  → processWithHistory(history, query)        // 签名 (List<Message>, String) 对外保留不变
+  → 回答后仍由 ChatController 调 saveConversation 落库（唯一 Owner，不改）
 ```
 
-- **手动注入优先**：在 `RagAgentService` 构建 messages 时显式 `addAll(ragChatMemory.get(...))`，与现有 L131-134 手动拼历史逻辑保持一致，**不强依赖 Advisor 自动注入钩子**。
+- **签名兼容（S2 修订）**：`processWithHistory(List<Message>, String)` **签名对外保持不变**。历史加载责任从「ChatController 手拼 SQL 结果」前移到「通过 `RagChatMemory.get` 获取」，但**仍在 Controller 内显式获取并注入**，`RagAgentService` 内部逻辑不动。这样既满足"RagChatMemory 为唯一读取入口"，又不对调用方造成签名破坏。
+- **手动注入优先**：历史由 Controller 经 `ragChatMemory.get(...)`（内部恒取 `TenantContext` 身份）显式传入，与现有手动拼历史逻辑保持一致，**不强依赖 Advisor 自动注入钩子**。
 - `MessageChatMemoryAdvisor` 仅作可选增强（若 ReAct 支持），不作为主路径依赖；即使接管，其 `ChatMemoryRepository` 仍是不写库的 `RagChatMemory`。
 
 ### 3.5 全量语义与 window-size（🟡 界定）
@@ -100,17 +104,18 @@ RagChatMemory.get(CONVERSATION_ID):
 ## 4. 数据流
 
 1. `ChatController.chat` 传入 `sessionId`；`tenantId/userId` 已由请求鉴权链注入 `TenantContext`。
-2. `RagAgentService.processWithHistory` 手动调 `ragChatMemory.get(buildConversationId(sessionId))`：
+2. `ChatController` 经唯一读取入口 `ragChatMemory.get(buildConversationId(sessionId))` 获取全量历史：
    - 内部恒取 `TenantContext` 的 tenantId/userId + 仅从 ID 提取 sessionId → 全量历史注入。
-3. ReAct 在含历史上下文下生成回答。
-4. `ChatController.chat` 调 `saveConversation` 落库（**唯一 Owner**，回填 id、异步元数据更新不变）。
+3. `ChatController` 将历史作为 `List<Message>` 传给 `processWithHistory(history, userMessage)`（签名对外不变）。
+4. ReAct 在含历史上下文下生成回答。
+5. `ChatController.chat` 调 `saveConversation` 落库（**唯一 Owner**，回填 id、异步元数据更新不变）。`/api/rag/search`（废弃）由 `ChatController.ragSearch` 在 `search` 前显式开启 `persist` 以保住 `sessionId` 持久化语义。
 
 ## 5. 安全与兼容性
 
 | 关注点 | 策略 |
 |---|---|
 | 多租户隔离（🔴2） | 鉴权身份恒取 `TenantContext.getTenantId()/getUserId()`，**不从可伪造 ID 解析**；伪造 ID 不越权 |
-| 唯一落库 Owner（🔴3） | `RagChatMemory` 只读不写；落库仍由 `ChatController` 负责；并移除 `RagSearchServiceImpl.search` 的隐式 `saveConversation`，收敛落库边界，防隐藏双写 |
+| 唯一落库 Owner（🔴3） | `RagChatMemory` 只读不写；`/api/chat` 落库仍由 `ChatController` 负责；`RagSearchServiceImpl.search` 隐式 `saveConversation` 改为**默认关闭的显式 `persist` 开关**，收敛落库边界，防隐藏双写；`ChatController.ragSearch`（`/api/rag/search`）在 `search` 前显式开启 `persist` 保住存活端点的持久化语义 |
 | 废弃 `ChatRouter` 越权边界（🟡5） | `ChatRouter`（`buildRagQuery` L308 用不可信 `request.getTenantId()` + `processAgent` L191-193 落库）**已 `@Deprecated`、不在 `/api/chat` 主链路**，仅测试与向后兼容引用。若未来重新启用，落库身份必须与 `ChatController` 同源改走可信 `X-Tenant-Id`，spec 明确此边界 |
 | 全量历史语义 | `get` 不截断；`window-size` 默认 -1=全量，开放需显式配置 |
 | 落库兼容 | 不动 `saveConversation` 逻辑与元数据批量更新 |
@@ -122,22 +127,25 @@ RagChatMemory.get(CONVERSATION_ID):
 - **隔离测试（关键）**：伪造 `CONVERSATION_ID`（`tenantB|userB|...`），验证 `get` 仍按 `TenantContext`（tenantA）过滤，**绝不返回 tenantB 数据**；这是 🔴2 的回归验证。
 - **单测（`RagChatMemory`）**：`extractSessionId` 正确；`get` 恒用上下文身份、全量返回不截断；`add`（若保留）不触发 `saveConversation`。
 - **双写回归**：同 session 一轮对话后，`rag_session` 表只新增 1 行（非 2 行），验证唯一 Owner。
-- **工具检索不落库（🔴3 回归）**：`KnowledgeBaseTool`（不传 sessionId）触发 `ragSearchService.search` 后，`saveConversation` 不被调用 / `rag_session` 不新增——证明工具检索无隐式落库残留。
+- **工具检索不落库（🔴3 回归）**：`KnowledgeBaseTool`（不传 sessionId、`persist=false`）触发 `ragSearchService.search` 后，`saveConversation` 不被调用 / `rag_session` 不新增——证明工具检索无隐式落库残留。
+- **`/api/rag/search` 持久化保持（S1 回归）**：`ChatController.ragSearch` 带 `sessionId` 调用 `search` 后，`rag_session` 表新增 1 行——证明移除隐式落库后，该存活废弃端点由显式 `persist` 兜底，不丢历史。
 - **集成**：同 session 多轮能正确携带历史；rowId 回填正常。
 - 验证命令采用最窄范围：`company-rag-agent` + `company-rag-rag` 相关测试类。
 
 ## 7. 改动清单
 
 - **新增**：`RagChatMemory`（`ChatMemoryRepository` 实现；`get` 恒从 `TenantContext` 取身份 + `extractSessionId`；**不写库**）、`buildConversationId(sessionId)` 辅助。
-- **修改**：`RagAgentService`（主路径手动加载历史注入；`processWithHistory` 兼容保留）、`ChatController`（去手拼，传 sessionId；**L121 `saveConversation` 保留为唯一落库 Owner**）。
-- **修改**：`RagSearchServiceImpl`（**移除 L112-122 内嵌 `saveConversation` 隐式落库**，或改为显式 `persist` 开关并由唯一 Owner 显式触发，收敛落库边界）。
+- **修改**：`RagAgentService`（`processWithHistory` 兼容保留，内部逻辑不动）、`ChatController`（去手拼，改为经 `ragChatMemory.get(request.getSessionId())` 获取历史再注入；**`saveConversation` 保留为唯一落库 Owner**）。
+- **修改**：`RagSearchServiceImpl`（将 L112-122 内嵌 `saveConversation` 隐式落库改为**显式 `persist` 开关**、默认关闭，收敛落库边界）。
+- **修改**：`ChatController.ragSearch`（`/api/rag/search`，废弃但存活）——调用 `search` 前**显式开启 `persist`**，保住该端点带 `sessionId` 的历史持久化语义，避免移除隐式落库后丢历史（S1 修订）。
 - **新增配置**：`rag.memory.enabled / window-size(默认-1=全量)`。
 - **不动**：`rag_session` 表、`RagSessionService` 落库逻辑、既有会话接口、mem0。
 
 ## 8. 风险与观察项
 
 - **隔离被绕过（最高优先级，评审 🔴2）**：必须保证 `tenantId/userId` 恒取自 `TenantContext`，ID 仅承载 sessionId。**验收铁律 + 隔离测试双重约束**。
-- **双写隐患（评审 🔴3，已重写）**：主链路本无双写；真正需收敛的是 `RagSearchServiceImpl.search` 的隐式 `saveConversation` 副作用。唯一 Owner = ChatController；`RagChatMemory` 不落库；`search` 移除隐式落库。改动清单明确"谁删保存/谁不写"。
+- **双写隐患（评审 🔴3，已重写）**：主链路本无双写；真正需收敛的是 `RagSearchServiceImpl.search` 的隐式 `saveConversation` 副作用，改为默认关闭的显式 `persist` 开关。唯一 Owner = ChatController；`RagChatMemory` 不落库。
+- **`/api/rag/search` 回归（评审 S1）**：该废弃端点存活且依赖 `search` 隐式落库，移除后必须由 `ChatController.ragSearch` 显式开 `persist` 兜底，**否则带 `sessionId` 的旧客户端静默丢历史**。改动清单与测试已明确此边界。
 - **Advisor 与 ReAct 兼容（🟡）**：主路径用**手动注入**，不依赖 Advisor 自动钩子；Advisor 仅可选增强，降低框架风险。
 - **window-size 语义（🟡）**：全量不截断；开放窗口需显式配置并带取舍说明。
 - **成本**：全量历史注入长会话放大 token；如需截断应显式配置，不默默改变现状语义。
