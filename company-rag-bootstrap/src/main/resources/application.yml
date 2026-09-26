@@ -131,6 +131,12 @@ rag:
       # 超时后按“系统繁忙”降级返回；需大于单次 LLM 调用耗时（默认 5 分钟）
       timeout-minutes: 5
 
+  # 会话历史读取窗口
+  # 单位 = 轮（turn）：一轮 = 一行用户消息 + 一行助手回答（rag_session 中 Q/A 各占一行）
+  # 实现层 DB LIMIT 取 window-size × 2 行；设置为 -1 表示退化为全量读取（运维显式打开，知晓 O(n)+token 风险）
+  memory:
+    window-size: 50
+
 # MyBatis-Plus
 mybatis-plus:
   # 自动注册自定义 TypeHandler（含 UuidTypeHandler），解决 UUID 主键 insert 报 "Type handler was null"
