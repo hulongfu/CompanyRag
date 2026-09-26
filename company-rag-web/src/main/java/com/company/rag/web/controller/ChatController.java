@@ -4,11 +4,12 @@ import com.company.rag.agent.service.AgentResult;
 import com.company.rag.agent.service.RagAgentService;
 import com.company.rag.common.model.R;
 import com.company.rag.common.security.SecurityUser;
-import com.company.rag.rag.entity.RagSession;
 import com.company.rag.rag.eval.answer.AnswerCase;
 import com.company.rag.rag.eval.answer.AnswerEvaluationService;
 import com.company.rag.rag.model.RagQuery;
 import com.company.rag.rag.model.RagResult;
+import com.company.rag.rag.memory.RagChatMemory;
+import com.company.rag.rag.model.RagQuery;
 import com.company.rag.rag.response.ChatRequest;
 import com.company.rag.rag.response.ChatResponse;
 import com.company.rag.rag.service.RagSearchService;
@@ -25,16 +26,12 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
-import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
-
-import java.util.ArrayList;
 
 /**
  * 统一对话 Controller
@@ -49,6 +46,8 @@ public class ChatController {
     private final RagAgentService ragAgentService;
     private final RagSearchService ragSearchService;
     private final RagSessionService ragSessionService;
+    // 只读会话历史：Controller 层唯一读取入口，身份取自 TenantContext（可信）
+    private final RagChatMemory ragChatMemory;
 
     // 在线评估服务：可选注入（enabled=false 时为 null），主链路不得因评估 bean 缺失而启动失败
     @Autowired(required = false)
@@ -127,20 +126,12 @@ public class ChatController {
             // 如果有 sessionId 和 tenantId，读取历史会话记录并传入
             AgentResult result;
             if (request.getSessionId() != null && request.getTenantId() != null) {
-                // 读取历史会话（按时间升序）
-                List<RagSession> historySessions = ragSessionService.getSessionDetail(
-                        request.getTenantId(), verifiedUserId, request.getSessionId());
-                
-                // 转换为 Message 列表
-                List<Message> historyMessages = new ArrayList<>();
-                for (RagSession session : historySessions) {
-                    historyMessages.add(new UserMessage(session.getQuery()));
-                    historyMessages.add(new AssistantMessage(session.getAnswer()));
-                }
-                
-                log.debug("加载会话历史：sessionId={}, historySize={}", 
+                // 唯一读取入口：经 RagChatMemory 获取有界历史（内部取 TenantContext 身份 + 转换为 Message）
+                List<Message> historyMessages = ragChatMemory.get(request.getSessionId());
+
+                log.debug("加载会话历史：sessionId={}, historySize={}",
                         request.getSessionId(), historyMessages.size() / 2);
-                
+
                 // 调用带历史的处理方法
                 result = ragAgentService.processWithHistory(historyMessages, request.getQuery());
             } else {
