@@ -2,7 +2,18 @@
 
 > 日期：2026-09-14
 > 类型：设计规格（Spec）
-> 状态：待用户审阅
+> 状态：**已归档（不实现）** —— 经设计评审后决定暂不落地本方案②（提示式），仅保留作为参考资料。判断依据与替代方案见下。
+> 归属：`docs/superpowers/specs/2026-09-14-human-in-the-loop-design.md`
+>
+> ## 归档说明（2026-09-19+）
+>
+> **结论：本 spec 不实施，仅归档。**
+>
+> - 本 spec 采用**方案②（提示式、非阻塞）**，与后续 `2026-09-19-approval-gate-design.md` 的**方案①（强制阻塞审批）**面向**不同的工具场景**，二者并非替代关系：方案①只拦截 `ExecuteTool`（命令类、有外部副作用），本方案②针对的是 `DatabaseQueryTool` 的敏感列/写操作/高消耗查询场景。
+> - 方案①（审批门）已落地实现，但**未覆盖** database_query 的敏感数据风险提示场景，故审批门不能替代本方案②。
+> - **判断依据**：本方案的增量价值仅在于"数据库命中敏感数据时 LLM 主动作风险提示"，安全强度弱（脱敏已兜底防泄露），且需新增 `ToolResult`/`WarningItem`/`AgentResult.warnings` 富载体并依赖"阶段 0 富载体透传"前置。当前无硬性业务要求，按 YAGNI 原则**暂不实现**。
+> - **替代/后续路径**：若未来确需对 database_query 的敏感查询做强管控，应延伸 `requiresApproval()` 到 database_query（仿审批门），或在 DatabaseQueryTool 内对该场景追加 LLM 文本内嵌提示（最小改动），而非本 spec 的富载体透传方案。
+
 > 前置决策：**方案②（提示式）**——对「敏感操作 / 高消耗操作」在执行前附加**非阻塞的准入提示**，不真正挂起等待人工审批。方案①（强制阻塞审批）因会破坏现有同步 chat 模型（`future.get(5min)` + AbortPolicy）而**暂缓**，本 spec 只做提示式。
 > 修订说明：明确与 nl2sql **同改 `DatabaseQueryTool`、阶段 2 合并实现**；`warning` 与 nl2sql 的 `SqlSchemaValidator` 共用一套结构化 `ToolResult`（内部载体）封装；并修复 🟡2 透传冲突——`AgentResult` 只有 `answer`/`toolContext` 两个 String 字段，无法同时承载 reflection 的「检索上下文」与 human 的「warning[]」。**不再复用 `toolContext` 字符串传 warning**：warning 走独立载体（内部 `AgentExecutionResult` / 新增 `AgentResult.warnings` 字段）到前端；若阶段 0 走降级（B），warning 改回文本内嵌转发。
 
