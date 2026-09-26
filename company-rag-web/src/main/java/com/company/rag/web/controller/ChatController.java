@@ -14,6 +14,7 @@ import com.company.rag.rag.response.ChatRequest;
 import com.company.rag.rag.response.ChatResponse;
 import com.company.rag.rag.service.RagSearchService;
 import com.company.rag.rag.service.RagSessionService;
+import com.company.rag.rag.service.support.RagResultContextBuilder;
 import com.company.rag.tenant.context.TenantContextSnapshot;
 import com.company.rag.tenant.context.TenantContext;
 import java.util.List;
@@ -245,7 +246,30 @@ public class ChatController {
         // 将已验证的租户 ID 设置到请求对象中（供后续使用）
         query.setTenantId(headerTenantId);
         
+        // 【安全关键】用户 ID 必须从已认证的安全上下文中获取，不能信任请求体 query.getUserId()
+        Object principal = SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        Long verifiedUserId = null;
+        if (principal instanceof SecurityUser) {
+            verifiedUserId = ((SecurityUser) principal).getUserId();
+        }
+        if (verifiedUserId == null) {
+            log.error("用户 ID 缺失，拒绝服务：query={}", query.getQuery());
+            throw new IllegalStateException("用户 ID 不能为空，请确认用户已正确登录");
+        }
+        
         RagResult result = ragSearchService.search(query);
+        
+        // 【落库 Owner = Controller 层】带 sessionId 时用服务端可信身份自行保存（context 从 chunks 重建）
+        if (query.getSessionId() != null) {
+            // 补齐会话/用户上下文（幂等），若后续功能依赖可在此读取
+            TenantContext.setSessionId(query.getSessionId());
+            // 用公共方法从 chunks 重建 context，避免 rag_session.context 静默为空破坏 faithfulness 评估
+            String context = RagResultContextBuilder.build(result);
+            ragSessionService.saveConversation(
+                    headerTenantId, query.getSessionId(), verifiedUserId,
+                    query.getQuery(), result.getAnswer(), context,
+                    null, null, null);
+        }
         
         return R.ok(result);
     }
