@@ -37,6 +37,13 @@ public interface RagSessionService {
     List<RagSession> getSessionDetail(Long tenantId, Long userId, String sessionId);
 
     /**
+     * 获取最近会话详情（DB 层 LIMIT 有界截断）。
+     * @param limit 最大返回行数（= window-size × 2，一轮=2 行）；limit <= 0 时等价于全量（供 window-size=-1 运维显式退化）
+     * @return 按时间升序返回最近 limit 条；超长只取最近 limit 条再反转回升序
+     */
+    List<RagSession> getRecentSessionDetail(Long tenantId, Long userId, String sessionId, int limit);
+
+    /**
      * 软删除会话
      */
     void deleteSession(Long tenantId, Long userId, String sessionId);
