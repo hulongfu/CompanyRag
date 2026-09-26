@@ -2,7 +2,15 @@
 
 > 日期：2026-09-14
 > 类型：设计规格（Spec）
-> 状态：待用户审阅（已根据 2026-09-14-design-review 修订）
+> 状态：**挂起（暂不实现，数据驱动再决策）**
+> 归属：`docs/superpowers/specs/2026-09-14-reflection-design.md`
+>
+> ## 挂起说明（2026-09 复审）
+>
+> - **阶段 0 前置已落地**（早于本决策）：`StreamingAgentExecutor`/`RagAgentService` 已透传真实 `toolContext`（commit `4bab759`/`e0e5e2a`）；`ToolCallRecorder` 已支持 `outputSummary` payload；共享 `FaithfulnessChecker` 与 answer-evaluator 在线异步评估均已上线（评估页面 + `answer_eval_result` 落库）。本 spec 剩余未实现的仅 `ReflectionService` 在线修正本身。
+> - **挂起理由**：① 现有 `toolContext` 为每条 500 字符截断摘要，faithful 修正参照过弱，实际只能走方案 B 降级；② 在线二次 LLM 调用使 token/延迟约翻倍，而 faithfulness 质检已由异步 answer-evaluator 低成本覆盖；③ 改写返回文本引入记忆一致性副作用。
+> - **重启触发条件**：评估页面观察到 faithfulness/相关性低分回答占比显著、确需在线即时修正时，再重启本 spec；届时需先修订本文（删除已完成的阶段 0 章节）再出实现计划。
+
 > 前置决策：在 Agent 首次回答后追加一次「自省→修正」LLM 调用，提升回答质量；作为低成本高价值项先行。
 > 修订说明：修复评审指出 🔴1（`AgentResult.toolContext` 前提错误）并加入阶段 0 前置修复，界定超时叠加，明确与 answer-evaluator 的 faithfulness 分工。
 

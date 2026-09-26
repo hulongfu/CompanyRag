@@ -2,8 +2,14 @@
 
 > 日期：2026-09-14
 > 类型：设计规格（Spec）
-> 状态：待用户审阅（已根据 2026-09-14-design-review 修订）
+> 状态：**待实现**（2026-09 复审确认实施，见下复审说明）
 > 前置决策：**nl2sql-A**——只对既有 `DatabaseQueryTool` 做增量加固（补 schema 自校验 + 友好纠错提示），**不引入**闭源 NL2SQL 引擎，也**不在工具内调用 LLM**。
+>
+> ## 复审说明（2026-09，确认实施）
+>
+> - **实施理由**：`SqlSchemaValidator` 至今未实现，LLM 生成 SQL 写错表名/列名时工具只回传 PG 原始报错，ReAct 自愈成功率低，属高频且用户可见的坏体验；改动封闭（新增 1 个校验类 + 工具内插一处调用），安全底座零改动。
+> - **合并约束已解除**：原设计第 3.1/5/7/8 节要求"与 human-in-the-loop 共用 `ToolResult` 封装、阶段 2 同文件合并实现"。该 spec（`2026-09-14-human-in-the-loop-design.md`）已于 2026-09-19 复审后**归档不实现**，故本约束**不再适用**：本次**不引入 `ToolResult` 富载体**，缺失清单与提示直接内联进现有 `String` 返回（即原 🟡3 结论的取值），实现范围进一步收窄。
+> - **不改动项保持不变**：工具对外签名、只 SELECT/危险词拦截、租户 schema 前缀 + RLS、`SENSITIVE_COLUMNS` 脱敏、`MAX_ROWS` 上限、审计落库、`SqlSecurityValidator` 既有逻辑。
 > 修订说明：修复 🔴4（`DatabaseQueryTool` 无 `ChatModel`，工具内调 LLM 不可行，改为走现有 ReAct 错误重试）、修正文件路径（该工具在 `agent` 模块，非 rag）、校验类名（`SqlSecurityValidator` 而非 `SqlSchemaValidator`）；并修复 🟡3 返回结构矛盾——**保留 `execute`/`queryDatabase` 的 `String` 对外签名（LLM 可见结构不变），`warning`/缺失清单内联进返回文本；`ToolResult(data/error/warning)` 仅作工具内部解析载体，不改变 LLM 可见返回类型**；明确与 human-in-the-loop 同文件合并实现。
 
 ## 1. 目标
