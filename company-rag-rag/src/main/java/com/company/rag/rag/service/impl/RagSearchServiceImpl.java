@@ -13,7 +13,7 @@ import com.company.rag.rag.retriever.impl.FullTextRetriever;
 import com.company.rag.rag.retriever.impl.VectorRetriever;
 import com.company.rag.rag.service.MultiRetrieveService;
 import com.company.rag.rag.service.RagSearchService;
-import com.company.rag.rag.service.RagSessionService;
+import com.company.rag.rag.service.support.RagResultContextBuilder;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
 import lombok.RequiredArgsConstructor;
@@ -41,7 +41,6 @@ public class RagSearchServiceImpl implements RagSearchService {
     private final RagCacheManager cacheManager;
     private final RagMetricsRecorder metricsRecorder;
     private final PromptTemplate promptTemplate;
-    private final RagSessionService ragSessionService;
     private final MultiRetrieveService multiRetrieveService;
     private final VectorRetriever vectorRetriever;
     private final FullTextRetriever fullTextRetriever;
@@ -76,20 +75,16 @@ public class RagSearchServiceImpl implements RagSearchService {
 
         // 4. 构建 Prompt 并调用 LLM
         long llmStart = System.currentTimeMillis();
-        String context = chunks.stream()
-                .map(c -> {
-                    String name = c.getDocumentName() != null ? c.getDocumentName() : "未知";
-                    return "[来源:" + name + "] " + c.getContent();
-                })
-                .collect(Collectors.joining("\n\n"));
+        // context 由公共方法从 chunks 重建（与 ragSearch 落库共用，避免两处漂移）
+        RagResult result = new RagResult();
+        result.setChunks(chunks);
+        String context = RagResultContextBuilder.build(result);
         String prompt = promptTemplate.buildChatPrompt(query.getQuery(), context);
         String answer = chatModelProvider.getObject().call(prompt);
         long llmMs = System.currentTimeMillis() - llmStart;
 
         // 5. 组装结果
-        RagResult result = new RagResult();
         result.setAnswer(answer);
-        result.setChunks(chunks);
         result.setSessions(chunks.stream()
                 .map(c -> {
                     String name = c.getDocumentName() != null ? c.getDocumentName() : "未知";
@@ -108,18 +103,8 @@ public class RagSearchServiceImpl implements RagSearchService {
         metrics.setTotalMs(System.currentTimeMillis() - start);
         result.setMetrics(metrics);
 
-        // 6. 保存对话记录（如果有 sessionId）
-        if (query.getSessionId() != null) {
-            try {
-                Long userId = query.getUserId() != null ? query.getUserId() : 1L;
-                ragSessionService.saveConversation(
-                        query.getTenantId(), query.getSessionId(), userId,
-                        query.getQuery(), answer, context,
-                        0, 0, (int) (System.currentTimeMillis() - start));
-            } catch (Exception e) {
-                log.warn("保存对话记录失败", e);
-            }
-        }
+        // 6. 落库责任已上移到 Controller 层（见 ChatController.chat / ragSearch）
+        //    search 保持纯检索零副作用，避免隐藏双写与 body userId 污染
 
         // 7. 缓存结果
         cacheManager.putSearchResult(cacheKey, result);
