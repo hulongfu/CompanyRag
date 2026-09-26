@@ -9,7 +9,6 @@ import com.company.rag.rag.eval.answer.AnswerEvaluationService;
 import com.company.rag.rag.model.RagQuery;
 import com.company.rag.rag.model.RagResult;
 import com.company.rag.rag.memory.RagChatMemory;
-import com.company.rag.rag.model.RagQuery;
 import com.company.rag.rag.response.ChatRequest;
 import com.company.rag.rag.response.ChatResponse;
 import com.company.rag.rag.service.RagSearchService;
