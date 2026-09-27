@@ -1,6 +1,7 @@
 package com.company.rag.agent.tool;
 
 import com.company.rag.agent.security.SqlSecurityValidator;
+import com.company.rag.agent.security.SqlSchemaValidator;
 import com.company.rag.common.exception.BizException;
 import com.company.rag.common.model.AuditLogContext;
 import com.company.rag.common.service.AuditLogService;
@@ -42,6 +43,14 @@ public class DatabaseQueryTool implements AgentTool {
 
     private final JdbcTemplate jdbcTemplate;
     private static final int MAX_ROWS = 100;
+
+    /** 可选；为 null 时跳过表/列名校验（兼容既有直接 new 的单测） */
+    private SqlSchemaValidator schemaValidator;
+
+    @Autowired
+    public void setSchemaValidator(SqlSchemaValidator schemaValidator) {
+        this.schemaValidator = schemaValidator;
+    }
 
     /**
      * 结果返回时需脱敏的敏感列（防止密码/手机号/邮箱等泄露给 LLM 或前端）。
@@ -132,6 +141,8 @@ public class DatabaseQueryTool implements AgentTool {
             不适用场景：
             - 查询用户、租户、审计日志等平台内部信息 -> 不可用
             - 知识库文档问答 -> 使用 searchKnowledgeBase
+            
+            若返回"缺失表"/"缺失列"，请参考其中的"可用表"与"近似候选"清单，修正 SQL 的表名/列名后重试。
             """
     )
     public String queryDatabase(
@@ -176,6 +187,14 @@ public class DatabaseQueryTool implements AgentTool {
         if (containsExplicitSchema(cleanSql)) {
             log.warn("检测到显式 schema 指定，拒绝跨租户访问：{}", cleanSql);
             return "错误：禁止显式指定 schema，只能访问当前租户数据";
+        }
+
+        // ✅ 第四道防线：nl2sql 表/列名自校验（缺失时让 ReAct 自愈）
+        if (schemaValidator != null) {
+            String validationError = schemaValidator.validate(cleanSql, currentSchema);
+            if (validationError != null) {
+                return validationError;
+            }
         }
 
         // 自动添加当前租户 schema 前缀（使用移除注释后的 SQL）

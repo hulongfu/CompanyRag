@@ -204,6 +204,12 @@ agent:
   # 开发环境：D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe
   # 生产环境：/usr/bin/python3 或 /opt/venv/bin/python
   python-exec-path: ${PYTHON_EXEC_PATH:D:/uv_project/mcp-server-docker/.venv/Scripts/python.exe}
+
+  # nl2sql 表/列名自校验配置
+  nl2sql:
+    schema-validation:
+      # 是否启用表/列名自校验；默认 true，可用环境变量覆盖（热关断）
+      enabled: ${NL2SQL_SCHEMA_VALIDATION_ENABLED:true}
   
   # 下载工具配置
   download:
