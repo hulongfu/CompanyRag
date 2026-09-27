@@ -1,8 +1,8 @@
-# 方案A：答案质量闭环（反馈 → 数据集 → 评测回归）设计 v5.2
+# 方案A：答案质量闭环（反馈 → 数据集 → 评测回归）设计 v5.3
 
 > 日期：2026-09-27
 > 类型：设计规格（Spec）
-> 状态：待用户审阅（v5.2 整合 1阻断项+4黄项+多绿项）
+> 状态：待用户审阅（v5.3 整合 3黄+2未钉死+多绿项）
 > 版本变更：
 > - v1→v2：整合首轮 R1-R3 / M1-M7。
 > - v2→v3：XML→@Select、b 降观察项改 ignoreTable、dataset_fingerprint、F1 退化修正、显式租户、同源校验。
@@ -10,6 +10,7 @@
 > - v4→v5：整合四轮审阅——①schema 改取 `TenantContext.getSchema()`（**引用既有 JwtAuthenticationFilter 服务端反查机制**，废止错误的 `tenant_`+tenantId 推导）；②doEvaluate 新增指定 record `EvalDecision`（布尔维度），落库侧沿用 `dimensionScores(Map<String,Double>)`；③SchemaMigrationConfig 明确新增同范式 runner + init.sql 位置约束；④rule_version 改为配置项；⑤30s 锁语义钉死；⑥limit 缺省/透传；⑦指纹改 Java 侧计算；⑧补 persisted_pass_agree；⑨s.tenant_id 断言；⑩/history 分页+二级排序；⑪多项细节。
 > - v5→v5.1（五轮审阅）：①阻断项——迁移语义**收敛为一条路线**（init.sql 业务表模板段 :82-181 是块注释**从不执行**；建表一律由 runner 执行，init.sql 仅注释存档，避免 `<schema>` DDL 在 psql 阶段建到 public 并撞 :146 sequence 授权）；②黄项1——补 `EvalDecision → AnswerEvalResult` 唯一还原规则（pass=三维与、score=均值、dimensionScores 全名键 1.0/0.0）；③黄项2——新增 `EvalProperties @ConfigurationProperties("rag.eval")` 统一绑定（废 `model.maxDatasetLimit`，复用既有 200 硬编码规则）；④黄项3——**本期单实例假设**，进程内 ConcurrentHashMap 锁，多副本升级 Redisson RLock；⑤绿项——feedback SMALLINT DEFAULT 0 无 NULL、200 样本返回体/内存截断口径、快照 WITH CHECK RLS best-effort 说明。
 > - v5.2（第5轮审阅）：①**阻断项——LIMIT 冻结**——`DISTINCT ON` 内层输出必按 `session_row_id` 升序，直接 `LIMIT n` 取最老样本、数据集首跑即冻结；改外层 `ORDER BY t.create_time DESC` 再 `LIMIT`，取最新 n 会话。②黄——迁移语义澄清"**DDL 单一定义、两处引用**"（废"唯一执行入口"歧义；`buildEvalRegressionReportSql` 唯一源，createTenantSchema 与 runner 共用；补**列清单一致性断言**，因 answer_eval_result 已双份漂移且 grant 口径不一）。③黄——`/dataset` `/regression` `/history` **共用 schema 校验**（`/history` 走自定义 @Select、表不在 ignoreTable、schema 空行为未定义）。④黄——**0 样本响应语义钉死**（HTTP 200 + 提示字段，不落快照）。⑤黄——`/regression` 缺省 limit **= 50 同 /dataset**，缺省后原样透传。⑥绿——DTO 补 `evalId` 防 SELECT 列静默丢弃；`EvalDecision.pass == allPass` 改测试断言而非各自推导；快照表 DDL 本期仅 SELECT/INSERT、保留策略补 DELETE 授权写清；标题/状态统一 v5.2。
+> - v5.3（第6轮审阅）：①黄——**0 样本响应字段名/code 修正**：`R` 仅 code/msg/data，`R.ok` 里 code=200、msg="success"；改 `R.ok(null).setMsg("无匹配样本，未落快照")`，响应 `{"code":200,"msg":...,"data":null}`；**code=200 是区分空结果/未落快照的唯一依据**（原写 code=0/message= 三处皆错）。②黄——**"列清单一致性断言"为空断言**：DDL 已收单一常量、两路径必然相同，`information_schema.columns` 比对只得并集；改"两处 DDL 片段逐字符相同"哨兵（当前自动成立，仅防未来分叉）。③黄——**feedback 引用源修正**：真实定义在 `SchemaMigrationConfig.migrateRagSessionFeedbackColumn` 的 `ALTER ... feedback SMALLINT NOT NULL DEFAULT 0`（:70），勿引 init.sql:140（块注释内、无 NOT NULL）。④未钉死——**tenantId 单源钉死为 `TenantContext.getTenantId()`**（null→400），与 schema 同源（JWT filter 同一 token claims 双写，:81,86），不取 `@RequestHeader X-Tenant-Id`（既有四接口用 header、可能分叉）。⑤未钉死——`EvalProperties` **不加 @ConditionalOnProperty**，对齐 ApprovalProperties/RerankConfigProperties 先例（两者均无该注解），enabled 门控留在 EvalController/AnswerEvaluationService。⑥绿——新增第 6 份 runner 建议抽公共 `forAllTenantSchemas` helper（不重构既有 5 份）；`/dataset` 显式 limit≤0 回落 50；`/history` 分页响应结构钉死（records/total/size/current）。
 
 ## 1. 目标
 
@@ -52,13 +53,14 @@ MyBatis XML 事实：用 `mybatis-plus-spring-boot3-starter`，`mapperLocations`
 
 通过读取侧 join 按 `answer_eval_result.session_row_id = rag_session.id` 关联 `rag_session.feedback`：
 - `feedback = 1` → humanLabel = 1；`feedback = -1` → humanLabel = -1；`feedback = 0` 或无关联 → **不纳入**。
-- **无 NULL 风险（五轮确认）**：`rag_session.feedback SMALLINT DEFAULT 0`（init.sql:140，NOT NULL 且带默认），join 结果必非 NULL，humanLabel(Short) 隐式非空前提成立。
+- **无 NULL 风险（五轮确认）**：`rag_session.feedback SMALLINT NOT NULL DEFAULT 0`，真实定义在 `SchemaMigrationConfig.migrateRagSessionFeedbackColumn` 的 `ALTER TABLE ... ADD COLUMN feedback SMALLINT NOT NULL DEFAULT 0`（SchemaMigrationConfig:70）。**注意勿引 init.sql:140**——那行在 `/* 业务表模板 */` 块注释（:82-181）内、且无 NOT NULL，仅作参考不执行。join 结果必非 NULL，humanLabel(Short) 隐式非空前提成立。
 
 ### 3.2 数据集抽取（@Select + TenantContext schema + 租户断言）
 
 #### 3.2.1 租户隔离方案
 
 - **schema 取 `TenantContext.getSchema()`（四轮阻断项1 修正）**：由服务端在 JWT 过滤器经 `tenantId→tenant→getSchemaName()` 反查写入（JwtAuthenticationFilter:80-88），**不接受客户端传入、客户端不可控**；null/blank → **400**；再过白名单 `^[a-zA-Z_][a-zA-Z0-9_]*$`。与运行时 `search_path` 同一值，杜绝"SQL 指向 A / 拦截器设 B"错位。
+- **tenantId 取 `TenantContext.getTenantId()`（六轮钉死）**：三个新接口方法签名的 `Long tenantId` **一律来自 `TenantContext.getTenantId()`**（null → 400），与 schema 同源（JWT 过滤器由同一 token claims 同时写 TenantContext.getTenantId()/getSchema()，见 JwtAuthenticationFilter:81,86）。**不走 `@RequestHeader X-Tenant-Id`**（既有四个接口 EvalController:40/57/72/84 用 header 判空，但 header 与服务端推导可能分叉，新接口统一收敛到 context 单一来源，防 schema/tenant 指向不一致）。测试断言 tenantId null→400。
 - **ignoreTable 豁免**：`TenantMyBatisPlusConfig.ignoreTable` 追加 `answer_eval_result`、`rag_session`（同租户 schema，零全局影响，已核实两表既有查询均带显式租户断言）。
 - **@Select 手写租户断言**：`e.tenant_id = #{tenantId}` **且 `s.tenant_id = #{tenantId}`**（四轮细节：rag_session 进入 ignoreTable 后无插件过滤器，显式断言让不变量可读，防未来删 schema 前缀）。
 
@@ -67,7 +69,7 @@ MyBatis XML 事实：用 `mybatis-plus-spring-boot3-starter`，`mapperLocations`
 `dataset(Long tenantId, LocalDateTime from, LocalDateTime to, int limit)`：
 - `schema = TenantContext.getSchema()`（null/blank→400，白名单）。
 - **from/to 均非 null 校验**：缺任一 → 400。
-- **limit 缺省 `50`，越界收敛 `≤ 200`**——复用既有硬编码上限（`listResults`:190 `/ last("LIMIT "+pageSize)` 用 `limit<=0||limit>200 ? 50 : limit`，无 `model` 配置前缀）。取值为 `EvalProperties.datasetLimitDefault/max`（见 §3.4 配置绑定），默认 50/200。
+- **limit 缺省 `50`，越界收敛 `≤ 200`；显式传 `<=0` 同样回落 `50`**——复用既有硬编码规则（`listResults`:190 用 `limit<=0||limit>200 ? 50 : limit`，无 `model` 配置前缀），`/results` 的 `@RequestParam(defaultValue="50")`（EvalController:71）同步体现默认 50。取值为 `EvalProperties.datasetLimitDefault/max`（见 §3.4 配置绑定），默认 50/200。
 - **返回体/内存截断口径**：200 条样本各携带检索上下文全文（每条可达数千 token）。默认逐条返回即可；若单租户样本量接近上限且返回体过大，页面可改走分页（本期仅 history 分页）。实现时以 `EvalProperties.datasetLimitMax` 为硬上限，不额外截断字段，避免破坏评测完整性。
 - 输出 `List<LabelledEvalSample>`。
 
@@ -164,7 +166,8 @@ GRANT USAGE, SELECT ON SEQUENCE <schema>.eval_regression_report_id_seq TO compan
 2. **两条执行路径引用同一 DDL**：
    - `TenantServiceImpl.createTenantSchema`（新租户）：在 `buildCreateTableSql` 段内调用该唯一 DDL 方法建表。
    - `SchemaMigrationConfig`：新增 `migrateEvalRegressionReportTable` runner，同 `migrateAnswerEvalResultTable`（:175-186）范式遍历 `information_schema` 中 `tenant_%` schema 逐个幂等建表（**存量租户借此补表**，否则老租户 /regression → relation 不存在）。此时 `current_tenant_id()` 必已由 init.sql（:208）定义，无顺序问题。
-   - **一致性断言（五轮）**：测试断言两条路径产出的**列清单相同**（如反射 DDL 常量或执行 `SELECT ... FROM information_schema.columns WHERE table_name='eval_regression_report'` 对齐），防"改一列只改一处"回归。
+   - **公共 helper（六轮）**：全项目同款"遍历 `tenant_%` schema 幂等建表"的 runner 已有 **5 份**（`migrateRagSessionFeedbackColumn` / `migrateRagSessionUserIdNotNull` / `migrateAnswerEvalResultTable` / `migrateToolApprovalTable` / `migrateDocumentPipelineStateTable`，SchemaMigrationConfig:32/108/175/235/298）。本方案新增的第 6 份建议抽**公共 helper**（如 `forAllTenantSchemas(Consumer<String>)` 统一 schema 查询+白名单+错误吞没），新 runner 只定义 DDL 片段。**不重构既有 5 份**（避免扩大改动），helper 仅供新表使用。
+   - **一致性（五轮修正——改为"DDL 片段相同"断言，防空断言误导）**：既然已收敛为单一常量 `buildEvalRegressionReportSql(schemaName)`，两条路径渲染出的 DDL 片段**必然逐字符相同**——无须再用 `information_schema.columns` 比对（那样只会得到并集、检测不出漂移，属空断言）。仿照 answer_eval_result 若未来某天在 buildCreateTableSql 与 runner 又各自展开同一表，则此条**哨兵断言**（比对两处 DDL 片段需一致）可提前报警；当前单一常量下自动成立,仅作为未来分叉的回归护栏。
 3. `sql/init.sql`：**不以真实 SQL 存档**——该文件挂在 `/docker-entrypoint-initdb.d/init.sql`，首次启动被 psql 执行；若把含 `<schema>` 占位符的 DDL 写进去会在 psql 阶段把无租户表建在 public、且每租户同名 `eval_regression_report_id_seq` 与 :146 的 sequence 授权冲突。故**仅以注释形式**存入 DDL 供参考，不参与执行。
 
 > **说明**：v5.1 曾写"建表一律由 runner 执行"，与「createTenantSchema 也建表」确有表述歧义——两者**都**是执行入口、但共用**同一 DDL 定义**；所谓"唯一"指的是"唯一 DDL 源"，非"唯一执行点"。
@@ -216,13 +219,27 @@ persisted_pass_agree = |{i: re_run_pass_i == persisted_pass_i}| / n（四轮新�
 
 | 方法 | 路径 | 说明 | 并发/校验 |
 |---|---|---|---|
-| POST | `/api/eval/dataset` | 抽样数据集 `List<LabelledEvalSample>`（from/to/limit） | from/to 非空→缺 400；limit 缺省 50、越界≤200 |
-| POST | `/api/eval/regression` | 跑回归 + 落快照（reportId/指纹/rule_version） | Service 按 tenantId 键锁 + tryLock(30s) 失败→409；0 样本 → 明确响应（见下）；limit 缺省 50 透传 |
+| POST | `/api/eval/dataset` | 抽样数据集 `List<LabelledEvalSample>`（from/to/limit） | from/to 非空→缺 400；limit 缺省 50、显式 ≤0 回落 50、越界≤200 |
+| POST | `/api/eval/regression` | 跑回归 + 落快照（reportId/指纹/rule_version） | Service 按 tenantId 键锁 + tryLock(30s) 失败→409；0 样本 → 明确响应（见下）；limit 缺省 50 透传（≤0 回落 50） |
 | GET | `/api/eval/history` | 历史快照**分页**(page/pageSize)，按指纹归因 | 只读；page/pageSize 缺省（对标 /results 50）；**复用 dataset 的 schema 校验（见下）** |
 
-**统一 schema 校验（三个接口共用，五轮）**：`/dataset`、`/regression`、`/history` **共用同一套** schema 解析校验逻辑（封装为公共方法，如 `resolveSchema()`）——`TenantContext.getSchema()` null/blank → **400**，再过白名单 `^[a-zA-Z_][a-zA-Z0-9_]*$`（越权 schema 名 → 400）。理由：`/history` 走 `EvalRegressionReportMapper` 自定义 `@Select`，`eval_regression_report` 表**不在 ignoreTable**，插件会按 `TenantContext` 追加 tenant_id，schema 为空时行为未定义——必须与 dataset 同样前置校验，不能只依赖插件兜底。
+**`/history` 分页响应结构（六轮钉死）**：`data` 为一个分页对象（对齐 MyBatis-Plus `IPage` 约定，字段名映射一致）：
+```
+{
+  "code":200, "msg":"success",
+  "data": {
+    "records": [ { ...EvalRegressionReport 字段 }, ... ],
+    "total": 123,          // 总条数
+    "size": 50,            // 每页条数（= pageSize 缺省 50）
+    "current": 1           // 当前页（= page 缺省 1）
+  }
+}
+```
+`page`/`pageSize` 缺省 `1`/`50`；记录内按 `run_time DESC, id DESC` 二级排序。**复用 dataset 的 schema 校验（见下）**。
 
-**0 样本响应语义（五轮，钉死）**：`/dataset` 0 样本 → `R.ok(emptyList)`（200，空列表，正常语义）；`/regression` 0 样本 → **`R.ok(null)` + 响应字段 `code=0`、`data=null` 外另附明确提示字段（如 `message="无匹配样本，未落快照"`）**，HTTP **200**（非错误），客户端据此区分"空结果"与"未落快照"。后续如需门禁硬切，可在此处单独加业务码。测试断言这一响应结构。
+**统一 schema/tenant 校验（三个接口共用，六轮）**：`/dataset`、`/regression`、`/history` **共用同一套**解析校验逻辑（封装为公共方法，如 `resolveTenant()/resolveSchema()`）——`TenantContext.getTenantId()` null → **400**；`TenantContext.getSchema()` null/blank → **400**，再过白名单 `^[a-zA-Z_][a-zA-Z0-9_]*$`（越权 schema 名 → 400）。理由：`/history` 走 `EvalRegressionReportMapper` 自定义 `@Select`，`eval_regression_report` 表**不在 ignoreTable**，插件会按 `TenantContext` 追加 tenant_id，schema 为空时行为未定义——必须与 dataset 同样前置校验，不能只依赖插件兜底。
+
+**0 样本响应语义（六轮，钉死）**：统一响应体 `R<T>` 仅 `code` / `msg` / `data` 三字段（`R.ok()` 里 `code=200`、`msg="success"`）。`/dataset` 0 样本 → `R.ok(emptyList)`（200 + 空列表，正常语义）。`/regression` 0 样本 → `R<X> r = R.ok(null); r.setMsg("无匹配样本，未落快照")`，响应 `{"code":200,"msg":"无匹配样本，未落快照","data":null}`，**HTTP 200**（非错误）。**`code=200` 是客户端区分"空结果"与"未落快照"的唯一依据**（不能写成 `code=0`/`message=`，R 无这些字段，会误导调用方把正常空跑当失败）。测试断言这一响应结构。
 
 **`/regression` 缺省 limit（五轮）**：与 `/dataset` 相同，缺省 `EvalProperties.datasetLimitDefault(50)`，由 Controller 在缺省时填默认值后**原样透传**给 dataset；`dataset-limit-max` 越界收敛同样适用——直接决定数据集规模与指纹口径，必须收口。
 
@@ -230,7 +247,7 @@ persisted_pass_agree = |{i: re_run_pass_i == persisted_pass_i}| / n（四轮新�
 - 统一 `@PreAuthorize("hasAnyRole('ADMIN','USER')")`（防 viewer 读 context/answer 原文）。
 - `/regression` **POST**；**Service 层按 tenantId 键锁**（`ConcurrentHashMap<tenantId, ReentrantLock>`，不跨租户互阻）。**超时语义（钉死）**：**tryLock(30s) 失败 → 409，不做任何重跑**（附录基线：全流程 600 次毫秒级几乎不超时，30s 仅在抢锁时触发，勿与全流程超时混淆）。
 - **多副本假设（五轮决策）**：**本期假设单实例部署**，进程内 `ConcurrentHashMap` 锁已足够；若后续多副本，进程内锁会各跑一遍、各落一条快照——届时升级为 **Redisson `RLock` 分布式锁**（`redissonClient` 已注入，项目当前无分布式锁使用），并发测试按分布式锁语义重写。
-- **统一 schema 校验**：`/dataset`、`/regression`、`/history` 三接口共用 `resolveSchema()`（`TenantContext.getSchema()` 服务端反查 + null/blank→400 + 白名单），客户端不可控，见本节第一段。
+- **统一 schema/tenant 校验**：`/dataset`、`/regression`、`/history` 三接口共用 `resolveTenant()/resolveSchema()`（`TenantContext.getTenantId()` null→400 + `TenantContext.getSchema()` 服务端反查 + null/blank→400 + 白名单），客户端不可控，见本节第一段。
 
 **配置绑定（五轮补充，消除静默读不到）**：`rag.eval.*` 当前仅 `online-enabled` / `async-enabled` 两个键，用 `@Value` 读（ChatController:56,59），全项目无 `rag.eval` 的 `@ConfigurationProperties` 类。本方案引入 **`EvalProperties`（`@ConfigurationProperties(prefix = "rag.eval")`，对齐项目既有 `ApprovalProperties` / `RerankConfigProperties` 等先例）**，统一承载以下键，避免 `@Value` 逐个散读：
 - `rag.eval.rule-version`（回归快照 rule_version 源；改规则须同步更新，测试断言写入==当前值）
@@ -238,8 +255,8 @@ persisted_pass_agree = |{i: re_run_pass_i == persisted_pass_i}| / n（四轮新�
 - `rag.eval.dataset-limit-default`（默认 `50`）
 - `rag.eval.dataset-limit-max`（默认 `200`）
 - `rag.eval.regression-gate-enabled`（占位，默认 `false`）
-- 复用既有 `online-enabled` / `async-enabled` / `enabled`（服务装配开关，`@ConditionalOnProperty`）；`regression-concurrency-keys` 本期单一取值 `tenant`，可并入占位，不作为独立 `@Value`。
-`EvalProperties` 需纳入 `rag.eval.enabled` 装配条件组件（非 `ChatController` 主链路），避免 `enabled=false` 时构造报错；配置失效场景在 §5 单测防回归。
+- 复用既有 `online-enabled` / `async-enabled` / `enabled`（**`enabled` 装配开关仅在 EvalController:30 / AnswerEvaluationService 的 `@ConditionalOnProperty` 上，不放在 Properties 类**）；`regression-concurrency-keys` 本期单一取值 `tenant`，可并入占位，不作为独立 `@Value`。
+- **`EvalProperties` 不加 `@ConditionalOnProperty`（六轮澄清）**：对齐既有 `ApprovalProperties`（`@Component + @ConfigurationProperties`）与 `RerankConfigProperties`（`@ConfigurationProperties`）先例——两者**均无** `@ConditionalOnProperty`，Properties 只是纯配置绑定的普通 Bean，无副作用、可安全无条件装配。`rag.eval.enabled` 装配门控继续由 `EvalController` / `AnswerEvaluationService` 的既有 `@ConditionalOnProperty` 承担，不重复加在 Properties 上（避免与先例不一致）。配置失效场景在 §5 单测防回归。
 
 ### 3.5 与既有机制边界
 
@@ -278,28 +295,29 @@ GET /api/eval/history（分页, 按指纹归因）
 ## 5. 测试策略（最窄范围）
 
 - **rag `AnswerEvaluationServiceTest`**：
-  - `dataset`：feedback≠0 纳入；DISTINCT ON 内层 + `e.id DESC` 取最新（同轮多行同秒）；**外层 `ORDER BY t.create_time DESC` + `LIMIT` 取最新 n 会话（非最老——防数据集冻结，五轮阻断项）**；显式 `e`/`s` 租户断言；`TenantContext.getSchema()` null/blank→400；schema 白名单；from/to 非空；limit 缺省 50 / 越界≤200；**越权 schema 名被拒**；
+  - `dataset`：feedback≠0 纳入；DISTINCT ON 内层 + `e.id DESC` 取最新（同轮多行同秒）；**外层 `ORDER BY t.create_time DESC` + `LIMIT` 取最新 n 会话（非最老——防数据集冻结，五轮阻断项）**；显式 `e`/`s` 租户断言；`TenantContext.getTenantId()` null→400（六轮 tenantId 单源）、`TenantContext.getSchema()` null/blank→400；schema 白名单；from/to 非空；limit 缺省 50 / **≤0 回落 50** / 越界≤200；**越权 schema 名被拒**；
   - `regression`：TP/TN/FP/FN + 各指标；F1 p=r==0→0（全 FN）；分母 0 退化；**0 样本不落快照且返回明确响应结构**（HTTP 200 + 提示字段，mock 验证不落库）；`evaluateNoCache` 不触发 Redis（R3）；快照显式 tenantId(null 拒绝)+fingerprint+rule_version+persisted_pass_agree 正确写入；**指纹 = Java 侧排序拼接后 md5，与返回集一致**；**rule_version == 配置值**；
   - `doEvaluate`→`EvalDecision`：`evaluate`/`evaluateAndPersist`/`evaluateNoCache` 三路径结果一致；落库侧 dimensionScores 用全名键；**EvalDecision→AnswerEvalResult 还原规则**（pass=三维与、score=均值、dimensionScores 值 1.0/0.0）正确；**直接断言 `EvalDecision.pass == AnswerEvalResult.allPass(passes)`**（改为测试断言而非各自推导等价性，防两处口径漂移）。
   - **`EvalProperties` 配置绑定**：`rule-version`/`dataset-limit-*`/`regression-lock-timeout-ms` 读取生效；缺省值兜底；配置失效场景防回归。
-- **web `EvalControllerTest`**：ADMIN/USER、viewer 拒、租户头缺拒、越权过滤、**三接口共用 schema 校验（`/history` 同样 null/blank→400、越权 schema 名→400）**、/history 分页（page/pageSize 缺省 + `run_time DESC, id DESC` 不漏行）、/regression 并发（**同单实例**同租户串行/异租户并行、进程内锁生效）、tryLock 失败→409、from/to 缺→400、**0 样本响应结构（HTTP 200 + 提示字段）在回归用例断言**。
+- **web `EvalControllerTest`**：ADMIN/USER、viewer 拒、租户头缺拒、越权过滤、**三接口共用 schema/tenant 校验（`/history` 同样 tenantId/schema null→400、越权 schema 名→400）**、/history 分页（page/pageSize 缺省 + `run_time DESC, id DESC` 不漏行 + **分页对象结构 records/total/size/current 断言**）、/regression 并发（**同单实例**同租户串行/异租户并行、进程内锁生效）、tryLock 失败→409、from/to 缺→400、**0 样本响应结构（HTTP 200 + `code=200` + 提示 msg + `data=null`）在回归用例断言**。
 - **跨租户 IT（M1）**：两租户数据互不可见。
-- **schema 建表测试**：`TenantServiceImplSchemaTest` 补新表建表 + 索引 + RLS + 幂等（DROP POLICY 重跑）；**DDL 列清单一致性断言（对比 createTenantSchema 与 runner 产出列清单相同）**。
+- **schema 建表测试**：`TenantServiceImplSchemaTest` 补新表建表 + 索引 + RLS + 幂等（DROP POLICY 重跑）；**DDL 片段一致性哨兵（比对 createTenantSchema 与 runner 两处渲染出的 DDL 片段逐字符相同）**。
 - **迁移 runner 测试**：存量 schema 补表幂等（对齐 migrateAnswerEvalResultTable 用例）。
 - 验证命令：`mvn -pl company-rag-rag -am test -Dtest=AnswerEvaluationServiceTest`、`mvn -pl company-rag-web -am test -Dtest=EvalControllerTest`（**-am 编译依赖模块**，四轮）。
 
 ## 6. 改动清单
 
 - **租户插件**：Modify `TenantMyBatisPlusConfig.java`：`ignoreTable` 追加 `answer_eval_result`、`rag_session`。
-- **数据库**：Create `buildEvalRegressionReportSql(schemaName)` 唯一 DDL 源 / Modify `TenantServiceImpl.createTenantSchema`（新租户建表，调唯一 DDL 源）/ **Modify `SchemaMigrationConfig`（新增 `migrateEvalRegressionReportTable` runner，同 migrateAnswerEvalResultTable 范式，覆盖存量 schema，调同一 DDL 源）** / Modify `sql/init.sql`（新增**注释形式**的 `业务表模板` 式 DDL 参考段，不参与执行）。
+- **数据库**：Create `buildEvalRegressionReportSql(schemaName)` 唯一 DDL 源 / Modify `TenantServiceImpl.createTenantSchema`（新租户建表，调唯一 DDL 源）/ **Modify `SchemaMigrationConfig`（新增第 6 份 runner `migrateEvalRegressionReportTable`：抽公共 `forAllTenantSchemas` helper 遍历存量 schema，调同一 DDL 源；不重构既有 5 份）** / Modify `sql/init.sql`（新增**注释形式**的 `业务表模板` 式 DDL 参考段，不参与执行）。
 - **rag 模块**：
   - Create `LabelledEvalSample.java`（含 tenantId + evalId）
   - Create `EvalRegressionReport.java`（报告 DTO，含地位字段）+ `EvalRegressionReportEntity.java`（快照实体，列对齐）
   - Create `EvalRegressionReportMapper.java`（`@Select` 插入 + 历史分页）
   - **Create `EvalProperties.java`（`@ConfigurationProperties("rag.eval")`，承载 rule-version/lock-timeout/dataset-limit 等）**
   - Modify `AnswerEvalResultMapper.java`：新增 `@Select selectDataset`（含 `s.tenant_id` 断言）
-  - Modify `AnswerEvaluationService.java`：抽 `doEvaluate`→`EvalDecision`（约定位落库映射规则）；新增 `evaluateNoCache`、`dataset`、`regression`（TenantContext schema + 指纹 + rule_version + persisted_pass_agree + 空样本不落 + 显式租户落库）
-- **web 模块**：Modify `EvalController.java`：新增 `POST /dataset`、`POST /regression`、`GET /history`（ADMIN/USER；from/to 校验；limit 缺省 50 越界 200，`/regression` 缺省同 50 原样透传；**三个接口共用 `resolveSchema()` 校验**；单实例 tenant 键锁 + tryLock 30s→409；0 样本 → HTTP 200 + 提示字段；分页 + 二级排序）。
+  - Modify `AnswerEvaluationService.java`：抽 `doEvaluate`→`EvalDecision`（约定位落库映射规则）；新增 `evaluateNoCache`、`dataset`、`regression`（**tenantId 取 `TenantContext.getTenantId()`** + TenantContext schema + 指纹 + rule_version + persisted_pass_agree + 空样本不落 + 显式租户落库）
+- **web 模块**：Modify `EvalController.java`：新增 `POST /dataset`、`POST /regression`、`GET /history`（ADMIN/USER；from/to 校验；limit 缺省 50、≤0 回落 50、越界 200，`/regression` 缺省同 50 原样透传；**三个接口共用 `resolveTenant()/resolveSchema()` 校验**（tenantId null→400 + schema null/blank→400 + 白名单）；单实例 tenant 键锁 + tryLock 30s→409；0 样本 → HTTP 200 + `code=200` + 提示 msg + `data=null`；分页对象 records/total/size/current + 二级排序）。
+- **bootstrap 模块**：Modify `SchemaMigrationConfig`：新增 `migrateEvalRegressionReportTable`（第 6 份 runner，调公共 `forAllTenantSchemas` helper 见 §3.2.3）。
 - **配置**：Modify `application-dev.yml`（`application.yml` 若含 `rag` 段则同步）：
   - 新增 `EvalProperties`，前缀 `rag.eval`，键：`regression-gate-enabled: false`（占位）、`rule-version`（真实版本源，改规则须同步更新）、`regression-lock-timeout-ms: 30000`、`dataset-limit-max: 200`、`dataset-limit-default: 50`
   - 复用既有 `enabled` / `online-enabled` / `async-enabled`
@@ -313,7 +331,7 @@ GET /api/eval/history（分页, 按指纹归因）
 | **schema/IDOR（阻断项1）** | 客户端可传 schema+tenantId 构造他租户 | schema 取 `TenantContext.getSchema()`（JWT 服务端反查，客户端不可控）+ 白名单；X-Tenant-Id 已被 JWT tenantIds 校验 |
 | **回归上下文局限** | 回归测固定历史 toolContext（ChatController:178 快照），不覆盖检索/知识库更新 | 快照带 rule_version；文档明示口径边界 |
 | **存量租户缺表（阻断项3）** | 仅 createTenantSchema 不覆盖存量 | `migrateEvalRegressionReportTable` runner 补存量 schema |
-| **DDL 双份漂移（五轮）** | answer_eval_result 已在 buildCreateTableSql(t:236)与 runner(s:192)各写一份且授权口径漂移(runner 有 DELETE、build 无) | 新表 DDL **单一定义** `buildEvalRegressionReportSql`，两条路径引用同一源；**列清单一致性断言**防"改一列只改一处" |
+| **DDL 双份漂移（五轮）** | answer_eval_result 已在 buildCreateTableSql(t:236)与 runner(s:192)各写一份且授权口径漂移(runner 有 DELETE、build 无) | 新表 DDL **单一定义** `buildEvalRegressionReportSql`，两路径引用同一源；设哨兵断言"两处 DDL 片段须逐字符相同"防未来分叉 |
 | **init.sql 只存档不执行（五轮）** | init.sql 挂 docker-init 首次被 psql 执行；若把含 `<schema>` DDL 写入 public 会撞 sequence 授权(:146)；且业务表模板(:82-181)本就是块注释从不执行 | init.sql 仅注释存档；建表由 Java 侧唯一 DDL 源执行 |
 | join 租户 ambiguous | 插件为两表各追加裸 tenant_id | ignoreTable 豁免 + @Select 手写 `e`/`s` 显式租户断言 |
 | RLS 非兜底（M1） | 主防线 schema 隔离；RLS best-effort | SQL 显式租户断言为主；跨租户 IT 锁死 |
