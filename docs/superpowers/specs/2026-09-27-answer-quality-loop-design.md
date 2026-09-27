@@ -1,101 +1,108 @@
-# 方案A：答案质量闭环（反馈 → 数据集 → 评测回归）设计 v2
+# 方案A：答案质量闭环（反馈 → 数据集 → 评测回归）设计 v3
 
 > 日期：2026-09-27
 > 类型：设计规格（Spec）
-> 状态：待用户审阅（v2 整合审阅修正）
-> 版本变更：v2 按审阅意见 R1-R3 / M1-M7 修正，并采纳决策——R1 处置 b+c，M6 报告快照落库纳入本版 MVP。
-> 前置能力（均已落地）：
-> - `answer_eval_result` 每租户表（query/context/answer/pass/score/三维分/source/session_row_id/create_time）
-> - `AnswerEvaluationService`（evaluate 纯评估+Redis / evaluateAllPersisted 落库 / findByQuery / listResults / stats）
-> - `EvalController`（/api/eval/run|result|results|stats，@PreAuthorize + X-Tenant-Id 隔离）
-> - 用户反馈：`/api/chat/feedback` → `rag_session.feedback`(-1/0/1)，按 tenantId+userId+sessionId+sessionRowId 定位
-> - 多租户插件：`TenantMyBatisPlusConfig`（TenantLineInnerInterceptor + TenantSchemaInterceptor）
+> 状态：待用户审阅（v3 整合二轮审阅修正）
+> 版本变更：
+> - v1→v2：整合首轮审阅 R1-R3 / M1-M7。
+> - v2→v3：整合二轮审阅——①数据集 join 由 XML 改为 **@Select 注解 SQL**（消除 XML 加载歧义）；②移除处置 b（公共插件改动），改为 **ignoreTable 豁免 + @Select 手写租户断言**，b 降为观察项；③快照表补 **dataset_fingerprint**（样本批可复现/归因）；④F1 退化分支修正；⑤快照 INSERT 显式租户；⑥schema/tenantId 同源校验；⑦多组口径与细节补缺。
+> 前置能力（均已落地）见 v1。
 
 ## 1. 目标
 
 把已存在的三块能力（自动评估、落库查看、用户反馈）串成完整闭环，让"答得准"从一次性调参变成**可量化、可持续迭代**的能力：
 
 1. **反馈联动**：把用户 👍/👎 变成评测样本的人工标签，与自动评估结果对齐。
-2. **数据集抽取**：从有标签的问答中动态筛出评测样本，并支持**固定样本快照**以保可复现。
-3. **评测回归**：用当前判定规则对数据集重新评估，产出准确度报告（TP/TN/FP/FN + accuracy/precision/recall/F1 + 分维度一致率），并**落一份报告快照**以便跨版本对比。
+2. **数据集抽取**：从有标签的问答中动态筛出评测样本；回归时对当批样本生成**指纹**以保可复现归因。
+3. **评测回归**：用当前判定规则对数据集重新评估，产出准确度报告（TP/TN/FP/FN + accuracy/precision/recall/F1 + 负类召回 + 分维度一致率），并**落快照**（含样本批指纹）支持跨版本趋势与正确归因。
 
 **约束：**
-- **最小可行（MVP）**：数据集以动态视图为基础 + **新增一份回归报告快照表**（M6 决策）；硬门禁仅留**可选开关占位（默认关）**，本期不实现阻断逻辑。
-- **反馈路径零改动**：`updateFeedback`、`rag_session.feedback` 列不动（避免给主链反馈加耦合）；反馈联动通过读取侧 join 实现。
-- **回归重跑不污染线上缓存**（R3）：为 `evaluate` 增加 `evaluateNoCache` 重载，回归走无缓存路径。
-- **多租户隔离**：新增的 join 数据集查询必须解决租户插件 ambiguous 问题（R1，处置 b+c），并显式断言租户。
+- **最小可行（MVP）**：数据集为动态视图 + 每批回归落一份**含指纹的聚合快照**；硬门禁仅留**可选开关占位（默认关）**，本期不实现阻断逻辑。
+- **反馈路径零改动**：`updateFeedback`、`rag_session.feedback` 列不动；反馈联动通过读取侧 join 实现。
+- **回归重跑不污染线上缓存**（R3）：回归走 `evaluateNoCache`（无 Redis 写）。
+- **最小化全局插件影响**（二轮阻断项2）：不修改租户插件 append；用 **ignoreTable 豁免 + 手写租户断言** 解决 join，避免波及既有单表查询与在线 INSERT 路径。
 
-## 2. 现状回顾（真实机制，M1 修正）
+## 2. 现状回顾（真实机制）
 
-多租户隔离的**真实主次顺序**（依据代码）：
-- **主防线 = Schema 物理隔离**：`TenantSchemaInterceptor.java:96` `SET search_path TO <schema>, public`。每个租户独立 schema，物理隔离，100% 可靠。
-- **辅助防线 = RLS（best-effort）**：`:98` `SET app.tenant_id`；`answer_eval_result`（SchemaMigrationConfig:209-215）与 `rag_session` 的 RLS 策略用 `tenant_id = current_tenant_id()`，其值经 `COALESCE(...,0)` 兜底（init.sql）。`TenantSchemaInterceptor:45` 明示"RLS 隔离：best-effort"；`TenantMyBatisPlusConfig:24-25` 承认连接池跨连接时 search_path 可能不落当前连接。
-- **结论**：应用层 SQL 必须**显式携带租户断言**，不能依赖 RLS 兜底。
+多租户隔离的真实主次顺序：
+- **主防线 = Schema 物理隔离**：`TenantSchemaInterceptor` 每次查询前 `SET search_path TO <schema>, public`（:96）。
+- **辅助防线 = RLS（best-effort）**：`SET app.tenant_id`（:98）；两表 RLS 用 `tenant_id = current_tenant_id()`，`current_tenant_id()` 经 `COALESCE(...,0)` 兜底；`TenantSchemaInterceptor:45` 明示 best-effort，`TenantMyBatisPlusConfig:24-25` 承认连接池跨连接风险。
+- **结论**：应用层 SQL 必须**显式携带租户断言**，不依赖 RLS。
 
-已存在的评估链路：
-- `AnswerEvaluationService.evaluate()`：三维评估 + **无条件写 Redis**（:68 → writeToRedis，key=md5(query)，TTL 24h）。
-- `evaluateAllPersisted()`：写 Redis + 强制落库（tenantId=null 拒绝抛出）。
-- `findByQuery / listResults / stats` 读取能力已具备。
+评估链路现状：
+- `AnswerEvaluationService.evaluate()`：三维评估 + 无条件写 Redis（:68 → writeToRedis, key=md5(query), TTL 24h）。
+- `evaluateAndPersist()`：写 Redis + 强制落库（tenantId=null 拒绝）。
 - 用户反馈只写 `rag_session.feedback`，`answer_eval_result` 不知道用户评价。
+- 租户插件 `TenantLineInnerInterceptor`：`ignoreTable` 豁免 sys_tenant/sys_user/sys_user_tenant_rel/audit_log；`getTenantIdColumn()`返回裸 `tenant_id`（join 会 ambiguous）。
+
+**MyBatis XML 加载事实（二轮核实）**：项目用 `mybatis-plus-spring-boot3-starter`，无显式 `mapper-locations`；MyBatis-Plus 的 `MybatisPlusProperties.mapperLocations` 字段默认值为 `classpath*:/mapper/**/*.xml`，未覆盖即生效（现有 `RagSessionMetaMapper.xml` 的 `selectSessionList` 被 `RagSessionServiceImpl` 调用即证明默认扫描生效）。因此**新增 XML 需要 namespace 与接口全限定名严格一致 + 置于 `classpath*:/mapper/**/`**，否则静默匹配失败。**为彻底消除该歧义，本方案数据集 join 改用 `@Select` 注解 SQL（见 3.2），不新增 XML。**
 
 ## 3. 架构设计
 
 ### 3.1 反馈联动（原则：反馈路径零改动）
 
-**不**在 `updateFeedback` 里同步写 `answer_eval_result`。反馈联动通过**读取侧 join**实现：按 `answer_eval_result.session_row_id = rag_session.id` 关联回 `rag_session.feedback` 得到人工标签（M2 注意：须按 sessionRowId 取最新一条，避免同轮多行重复计入）。
+**不**在 `updateFeedback` 里同步写 `answer_eval_result`。反馈联动通过**读取侧 join**实现：按 `answer_eval_result.session_row_id = rag_session.id` 关联回 `rag_session.feedback` 得到人工标签。
 
-- `feedback = 1` → 人工正样本（humanLabel = 1）
-- `feedback = -1` → 人工负样本（humanLabel = -1）
-- `feedback = 0` 或无关联行 → **无标签，不纳入**
+- `feedback = 1` → humanLabel = 1；`feedback = -1` → humanLabel = -1；`feedback = 0` 或无关联 → **不纳入**。
 
-### 3.2 数据集抽取（动态视图 + 快照）
+### 3.2 数据集抽取（@Select 注解 SQL + 租户断言）
 
-#### 3.2.1 动态数据集抽取（实时查询）
+#### 3.2.1 租户隔离方案（二轮阻断项2，替代处置 b）
 
-在 `AnswerEvaluationService` 新增 `dataset(Long tenantId, LocalDateTime from, LocalDateTime to, int limit)`，输出 `List<LabelledEvalSample>`（按 sessionRowId 去重取最新，M2）。
+**否决 v2 的处置 b（改租户插件 append）** —— 会波及所有无别名的既有单表查询（missing FROM-clause entry 风险）与在线评估 INSERT 路径（ChatController:190-192）。改为更轻的两条：
+- **ignoreTable 豁免**：在 `TenantMyBatisPlusConfig.ignoreTable` 追加 `answer_eval_result` 与 `rag_session`——同属租户 schema，豁免后靠 schema 隔离 + SQL 手写租户断言，**零全局影响**（对齐既有 sys_tenant/audit_log 豁免先例）。
+- **@Select 手写租户断言**：数据集查询在注解 SQL 里显式写 `e.tenant_id = ?`（带别名），schema 前缀字符串拼接（标识符不可参数化）。
 
-抽取 SQL **必须规避租户插件 ambiguous（R1）**——采用处置 b+c：
-- **处置 c（落地）**：数据集 join 查询写在**自定义 XML**（新增 `AnswerEvalResultMapper.xml` 或独立 Mapper），SQL 中**写死 schema 前缀**（schema 由 service 层传入，经白名单 `^[a-zA-Z_][a-zA-Z0-9_]*$` 校验），并对两张表使用**显式别名 + 带别名的 `tenant_id` 断言**。
-- **处置 b（插件层）**：`TenantMyBatisPlusConfig` 的 `TenantLineHandler` 增加**自定义 append 逻辑**：当 SQL 含 join 到本插件需隔离的表时，按表别名拼接带前缀的 `tenant_id`（而非裸列名），解决 `column reference "tenant_id" is ambiguous`。落地时以 b 为通用方案、c 为数据集查询的双保险。
+> **处置 b 降级为观察项**：仅当未来出现跨表别名需要插件级 join 租户自动追加时再评估，不属本方案范围。
 
-**动态抽取 SQL（示意）：**
-```sql
-SELECT DISTINCT ON (e.session_row_id)
-       e.query, e.context, e.answer,
-       e.pass              AS auto_pass,
-       e.score             AS auto_score,
-       s.feedback          AS human_label,
-       e.tenant_id         AS tenant_id,
-       e.session_row_id, e.create_time
-FROM <schema>.answer_eval_result e
-JOIN <schema>.rag_session s ON s.id = e.session_row_id
-WHERE e.tenant_id = ?           -- 显式租户断言（M1：主防线，不依赖 RLS）
-  AND e.session_row_id IS NOT NULL
-  AND s.feedback <> 0           -- 只取人工标签
-  AND e.create_time BETWEEN ? AND ?
-ORDER BY e.session_row_id, e.create_time DESC   -- DISTINCT ON 取最新一条（M2）
-LIMIT n
+#### 3.2.2 数据集抽取方法
+
+在 `AnswerEvaluationService` 新增 `dataset(Long tenantId, String schema, LocalDateTime from, LocalDateTime to, int limit)`，输出 `List<LabelledEvalSample>`。
+
+- **schema 与 tenantId 同源校验（二轮口径）**：`schema` 由调用方显式传入，`tenantId` 显式传入；方法入口校验二者同源（schema 对应的租户与 tenantId 一致，如 schema 名含租户标识或由 `TenantContext` 同一来源取得），**不一致即拒绝**，防止断言失效与越权。
+- **schema 白名单**：`^[a-zA-Z_][a-zA-Z0-9_]*$`（复用 `TenantServiceImpl` 既有校验），防 SQL 注入。
+- **@Select 注解 SQL**（写在 `AnswerEvalResultMapper` 上，二者 id 绑定，无 XML 加载歧义）：
+
+```java
+@Select(
+  "SELECT DISTINCT ON (e.session_row_id) " +
+  " e.query, e.context, e.answer, e.pass AS auto_pass, e.score AS auto_score, " +
+  " s.feedback AS human_label, e.tenant_id AS tenant_id, " +
+  " e.session_row_id, e.id AS eval_id, e.create_time " +
+  "FROM ${schema}.answer_eval_result e " +
+  "JOIN ${schema}.rag_session s ON s.id = e.session_row_id " +
+  "WHERE e.tenant_id = #{tenantId} " +
+  "  AND e.session_row_id IS NOT NULL " +
+  "  AND s.feedback <> 0 " +
+  "  AND e.create_time BETWEEN #{from} AND #{to} " +
+  "ORDER BY e.session_row_id, e.id DESC " +
+  "LIMIT #{limit}")
+List<LabelledEvalSample> selectDataset(@Param("schema") String schema,
+    @Param("tenantId") Long tenantId, @Param("from") LocalDateTime from,
+    @Param("to") LocalDateTime to, @Param("limit") int limit);
 ```
-> `<schema>` 使用参数绑定前的静态校验 + 字符串拼接（非 SQL 参数位，因 PG 不可参数化标识符），schema 名经白名单防注入。
+- `schema` 用 `${}`（标识符），**必须**经白名单校验后传入；其余值用 `#{}` 参数绑定。
+- `ORDER BY e.session_row_id, e.id DESC`：**二级排序用 `e.id`**（二轮细节——create_time 为 DEFAULT CURRENT_TIMESTAMP，同轮多行可能同秒同值，DISTINCT ON 结果不确定，加 `e.id DESC` 保证取最新稳定）。
 
-**DTO `LabelledEvalSample`（补 tenantId，R2）：**
+**DTO `LabelledEvalSample`（含 tenantId，R2）：**
 ```
 query, context, answer,
-tenantId(Long),      -- 来自 e.tenant_id 显式带出（R2：回归建 AnswerCase 必需）
-autoPass(Boolean),  autoScore(double),
-humanLabel(Short: 1/-1),
-sessionRowId(Long), createTime(LocalDateTime)
+tenantId(Long), autoPass(Boolean), autoScore(double),
+humanLabel(Short: 1/-1), sessionRowId(Long), createTime(LocalDateTime)
 ```
 
-#### 3.2.2 回归报告快照表（MVP，M6）
+#### 3.2.3 回归报告快照表（含样本批指纹）
 
-新增每租户表 `eval_regression_report`，供跨版本趋势对比与可复现（M6/M7）：
+新增每租户表 `eval_regression_report`（`GRANT` 列清单补全，二轮细节）：
 
 ```sql
 CREATE TABLE IF NOT EXISTS <schema>.eval_regression_report (
     id BIGSERIAL PRIMARY KEY,
     tenant_id BIGINT NOT NULL,
-    run_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,   -- 本次回归时刻（样本快照）
+    run_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    dataset_fingerprint VARCHAR(64) NOT NULL,   -- md5(string_agg(session_row_id::text,','))：样本批指纹（二轮阻断项3）
+    dataset_from TIMESTAMP,                     -- 数据集时间窗（样本可复现归因）
+    dataset_to TIMESTAMP,
     sample_count INT NOT NULL,
     pass_rate DOUBLE PRECISION NOT NULL,
     avg_score DOUBLE PRECISION NOT NULL,
@@ -109,7 +116,11 @@ CREATE TABLE IF NOT EXISTS <schema>.eval_regression_report (
     accuracy DOUBLE PRECISION NOT NULL DEFAULT 0,
     precision DOUBLE PRECISION NOT NULL DEFAULT 0,
     recall DOUBLE PRECISION NOT NULL DEFAULT 0,
-    f1 DOUBLE PRECISION NOT NULL DEFAULT 0
+    f1 DOUBLE PRECISION NOT NULL DEFAULT 0,
+    negative_recall DOUBLE PRECISION NOT NULL DEFAULT 0,
+    relevancy_agree DOUBLE PRECISION NOT NULL DEFAULT 0,
+    correctness_agree DOUBLE PRECISION NOT NULL DEFAULT 0,
+    faithfulness_agree DOUBLE PRECISION NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_<schema>_eval_rep_tenant_time
     ON <schema>.eval_regression_report (tenant_id, run_time DESC);
@@ -119,128 +130,141 @@ CREATE POLICY tenant_isolation_eval_rep ON <schema>.eval_regression_report
     FOR ALL TO company_rag_app
     USING (tenant_id = current_tenant_id())
     WITH CHECK (tenant_id = current_tenant_id());
-GRANT SELECT, INSERT ... ON <schema>.eval_regression_report TO company_rag_app;
+GRANT SELECT, INSERT ON <schema>.eval_regression_report TO company_rag_app;
 GRANT USAGE, SELECT ON SEQUENCE <schema>.eval_regression_report_id_seq TO company_rag_app;
 ```
-> 快照存**聚合指标**（非逐样本原文），兼顾可复现趋势与体积。逐样本样本集快照（M7 完整复现）留作后续 `evalset` 演进。新增此表需同步三处：`SchemaMigrationConfig`(存量迁移)、`TenantServiceImpl.createTenantSchema`(新租户)、`sql/init.sql`(存档) —— 遵循项目 D2 同步规范。
+
+**快照 INSERT 显式租户（二轮口径）**：`EvalRegressionReportMapper.insert()` 仍走租户插件，会按 `TenantContext.getTenantId()` 追加 `tenant_id` 列；本方案在写入前**显式 `setTenantId(tenantId)` 且 null 拒绝**，对齐 `evaluateAndPersist`（AnswerEvaluationService:149-155）铁律，避免隐式落 0 被新表 RLS `WITH CHECK` 拒绝抛错。
+
+> 该表三处同步：`SchemaMigrationConfig`（存量）/ `TenantServiceImpl.createTenantSchema`（新租户）/ `sql/init.sql`（存档）。
+
+**指纹计算**（三则阻断项3）：
+```
+fingerprint = md5(string_agg(session_row_id::text, ','))  -- 由回归内部对当批样本 sessionRowId 排序后聚合计算；样本集识别号。
+```
+> 口径说明（M3 / 二轮）：
+> - `pass = allPass(三维)` 是**硬与门机制判定**，`humanLabel` 是**用户主观评价**，二者**非同一语义**；accuracy 天然偏低属预期。该说明置于**文档**，不放入 API 数据字段。
+> - 报告字段含 `f1 / negativeRecall / relevancyAgree / correctnessAgree / faithfulnessAgree`，供调参者定位维度不一致。
+> - **F1 退化修正（二轮口径）**：precision/recall 分母为 0 取 1.0（该类样本缺失的惯例）；但 **f1=2pr/(p+r) 在 p=r=0 时是 0/0，恰为"所有正样本被误判为负"的灾难场景，必须取 f1=0**，与 precision/recall 分开处理。
 
 ### 3.3 回归重跑报告
 
-新增 `regression(Long tenantId, LocalDateTime from, LocalDateTime to, int limit)`，语义：
-1. 取数据集样本 `dataset(...)`；
-2. 逐个用**当前三维评估器**经 `evaluateNoCache()` 重跑（R3：不写 Redis、不落库），得新 `autoPass/autoScore`；
-3. 与人工标签比对，生成 `EvalRegressionReport`；
-4. **落一份快照**到 `eval_regression_report`（M6），返回含 `reportId` 的结果。
+新增 `regression(Long tenantId, String schema, LocalDateTime from, LocalDateTime to, int limit)`：
+1. `dataset(...)` 取当批样本；
+2. 计算样本批 `dataset_fingerprint`；
+3. 逐个用 `evaluateNoCache()` 重跑（R3：不写 Redis、不落库），得新 autoPass/autoScore；
+4. 与 humanLabel 比对，生成 `EvalRegressionReport`；
+5. **落一份快照**（含指纹 + run_time + from/to）到 `eval_regression_report`，返回含 `reportId` 的报告。
 
-**四格判定**（autoPass vs humanLabel）：TP 一致正 / TN 一致负 / FP 误报 / FN 漏报（同 v1 定义，以 human=1 为正类）。
+**四格**（autoPass vs humanLabel，human=1 为正类）：TP/TN/FP/FN（同 v2）。
 
-**`EvalRegressionReport` 字段（补强 M3）：**
+**指标公式：**
 ```
-sampleCount, runTime,
-passRate, avgScore,
-avgRelevancyScore, avgCorrectnessScore, avgFaithfulnessScore,
-tp, tn, fp, fn,
-accuracy  (tp+tn)/n
-precision tp/(tp+fp)
-recall    tp/(tp+fn)
-f1        2*precision*recall/(precision+recall)      -- 新增（M3）
-negativeRecall  tn/(tn+fp)                           -- 新增：负类召回（M3）
-relevancyAgree  relevancy 侧与 humanLabel 的一致率   -- 新增（M3）
-correctnessAgree 同理
-faithfulnessAgree 同理
-note      报告语义说明（M3：pass=三维硬与门 vs humanLabel=主观评价，二者非同一语义）
+sampleCount=n; passRate=autoPass 占比; avgScore=均分
+accuracy=(tp+tn)/n
+precision=tp/(tp+fp), 分母0→1.0
+recall=tp/(tp+fn),    分母0→1.0
+f1=2pr/(p+r),         p=r=0→0.0（修正）
+negativeRecall=tn/(tn+fp), 分母0→1.0
+relevancyAgree/correctnessAgree/faithfulnessAgree = 各维度判定与 humanLabel 的一致率
 ```
-> 分母为 0 时 precision/recall/f1 取 1.0（无该类样本则视为无性能问题）。
-> **快照落库是本版 MVP 一部分**（M6 决策）：`regression` 每次调用将聚合指标写入 `eval_regression_report`，供趋势查询；后续可加历史对比接口。
 
-**`evaluateNoCache` 重载（R3 落地）：**
+**`evaluateNoCache` 重载（R3）**：
 - 在 `AnswerEvaluationService` 增加 `evaluateNoCache(AnswerCase)`：与 `evaluate()` 相同的三维判定，但**跳过 writeToRedis**。
-- `regression` 用 `evaluateNoCache`；既有 `evaluate()`/`evaluateAll()` 契约不变。
+- **避免第三份重复代码**（二轮细节）：抽取**私有 `doEvaluate(query, context, answer)`** 返回共享判定（pass/scores），`evaluate()`、`evaluateAndPersist()`、`evaluateNoCache()` 三处统一走它，仅缓存写与落库行为不同。
 
 ### 3.4 新增接口（EvalController 扩展）
 
-| 方法 | 路径 | 说明 |
-|---|---|---|
-| POST | `/api/eval/dataset` | 抽样有标签数据集（`List<LabelledEvalSample>`），参数 `from/to/limit`；**限 ADMIN/USER**（M5） |
-| POST | `/api/eval/regression` | 跑回归报告 + 落快照（返回含 reportId），参数 `from/to/limit`；**限 ADMIN/USER**（M5）；**改用 POST**（M4） |
-| GET | `/api/eval/history` | 查询历史回归报告快照列表/单条（用于趋势对比，M6）；`ADMIN/USER` |
+| 方法 | 路径 | 说明 | 并发 |
+|---|---|---|---|
+| POST | `/api/eval/dataset` | 抽样有标签数据集 `List<LabelledEvalSample>`（from/to/limit） | 只读级 |
+| POST | `/api/eval/regression` | 跑回归 + 落快照（含 reportId 与指纹） | **Service 层按 tenantId 键锁** |
+| GET | `/api/eval/history` | 查询历史快照（**page/pageSize 分页**，二轮细节），按指纹可分组 | 只读级 |
 
-口径（M5 修正）：
-- `/dataset`、`/regression`、`/history` 统一 `@PreAuthorize("hasAnyRole('ADMIN','USER')")`，与既有 `/run` 对齐；
-- `/dataset` 返回 `context/answer`（企业知识库原文），仅对 `ADMIN/USER` 可见；如需进一步收敛可增加脱敏或按角色字段过滤（观察项）。
-
-超时/并发语义（M4）：
-- `regression` 为同步重计算 + 落快照，声明**超时上限**（如 30s）与**并发限制**（复用受限 thread pool 或串行化，拒绝则返回 429/繁忙提示，不静默丢弃）。
+口径与边界（M4/M5 + 二轮）：
+- 统一 `@PreAuthorize("hasAnyRole('ADMIN','USER')")`（M5，防 viewer 读知识库原文 context/answer）。
+- `/regression` 用 **POST**（M4：重计算 + 副作用，避免 GET 缓存/预取）；**Service 层按 tenantId 键锁**（`ConcurrentHashMap<tenantId, ReentrantLock>`，二轮：避免全局串行跨租户互阻），声明**超时上限 30s**，超时/繁忙返回明确提示而非静默丢弃。
+- schema 与 tenantId 由调用方经请求头 `X-Tenant-Id` + 会话/上下文显式传入并**同源校验**（见 3.2.2）。
 
 ### 3.5 与既有机制边界
 
 - **不触碰**：`updateFeedback`、`rag_session.feedback` 列、`evaluateAllPersisted`、既有 `/api/eval/run|result|results|stats`。
-- `evaluateNoCache` 仅新增；`evaluate()`/`evaluateAll()` 契约与既有测试保持兼容。
-- 新增 `eval_regression_report` 表遵循三处同步规范（D2）。
+- `evaluateNoCache`/`doEvaluate`/`dataset`/`regression` 为新增；`evaluate()`/`evaluateAll()` 契约不变。
+- 租户插件仅**追加 ignoreTable 豁免**两条表（零行为变更于既有查询）；不改 append。
+- 新增 `eval_regression_report` 表遵循三处同步（D2）。
 
 ## 4. 数据流
 
 ```
-用户交互 → /api/chat/feedback → rag_session.feedback（已有，不变）
+用户反馈 → rag_session.feedback（已有，不变）
    ↓
-POST /api/eval/dataset → 租户内 join（别名+显式 tenant 断言，去重取最新）抽有标签样本
+POST /api/eval/dataset → @Select join（ignoreTable 豁免 + 手写租户断言 + DISTINCT ON 取最新）
    ↓
-POST /api/eval/regression → dataset(...) → 逐样本 evaluateNoCache() 重跑
-   → 四格 + accuracy/precision/recall/F1 + 负类召回 + 分维度一致率
-   → 落快照 eval_regression_report → 返回含 reportId 的报告
+POST /api/eval/regression → dataset → 指纹 → evaluateNoCache 逐个重跑
+   → 四格 + accuracy/precision/recall/F1/负类召回/维一致率
+   → 显式租户落快照(eval_regression_report 含 fingerprint) → 返回含 reportId
    ↓
-GET /api/eval/history → 查询历史快照（趋势对比）
+GET /api/eval/history → 分页查历史快照（按指纹归因）
 ```
 
 ## 5. 测试策略（最窄范围）
 
 - **rag 模块 `AnswerEvaluationServiceTest`**：
-  - `dataset`：仅纳入 feedback=1/-1；按 sessionRowId 去重取最新（M2 构造同轮多行用例）；显式租户过滤；时间范围；limit 上限 200；**打印最终 SQL 断言无 ambiguous（R1）**；
-  - `regression`：已知样本构造 TP/TN/FP/FN 与 accuracy/precision/recall/F1/负类召回/三维一致率数值；分母为 0 退化分支；空数据（sampleCount=0）；`evaluateNoCache` **不触发 Redis 写**（mock 验证 writeToRedis 未调用，R3）；快照落库成功（M6）。
-- **web 模块 `EvalControllerTest`**：新端点 `ADMIN/USER` 鉴权、`viewer` 拒绝（M5）、租户头缺失拒绝、越权（跨租户）过滤、`regression` 并发限制。
-- **跨租户集成测试（M1 决策）**：同库两租户 schema，验证回归/数据集结果互不可见——锁死"主防线=显式租户断言 + RLS best-effort"行为。
-- 验证命令：`mvn test -Dtest=AnswerEvaluationServiceTest -pl company-rag-rag`、`mvn test -Dtest=EvalControllerTest -pl company-rag-web`（根 reactor 联合编译避免读到本地仓库旧 common 快照）。
+  - `dataset`：仅纳入 feedback≠0；DISTINCT ON + `e.id DESC` 取最新（构造同轮多行同秒用例）；显式租户过滤；schema 白名单校验（非法 schema 拒绝）；schema/tenantId 不同源拒绝；limit 上限 200；
+  - `regression`：已知样本构造 TP/TN/FP/FN 与 accuracy/precision/recall/F1/负类召回/维一致率；**F1 在 p=r=0 → 0.0**（构造全 FN 用例）；分母为 0 退化分支；空数据；`evaluateNoCache` **不触发 Redis 写**（mock 验证，R3）；快照落库显式 tenantId（null 拒绝）+ 指纹正确写入；
+  - `doEvaluate` 抽取后三路径结果一致。
+- **web 模块 `EvalControllerTest`**：`ADMIN/USER` 鉴权、viewer 拒绝（M5）、租户头缺失拒绝、越权过滤、`/history` 分页参数校验、`/regression` 并发锁（同 tenant 串行、异 tenant 并行）。
+- **跨租户集成测试（M1）**：两租户 schema 数据互不可见，锁死"主防线=显式租户断言 + RLS best-effort"。
+- **schema 建表测试**：`TenantServiceImplSchemaTest` 补 `eval_regression_report` 建表 + RLS 断言（二轮细节）。
+- 验证命令：`mvn test -Dtest=AnswerEvaluationServiceTest -pl company-rag-rag`、`mvn test -Dtest=EvalControllerTest -pl company-rag-web`（根 reactor 联合编译避免旧 common 快照）。
 
 ## 6. 改动清单
 
-- **租户插件（R1 处置 b）**
-  - Modify `TenantMyBatisPlusConfig.java`：TenantLineHandler 自定义 append 逻辑——join 场景按表别名拼接带前缀的 `tenant_id`（解决 ambiguous）。
-- **数据库（R1 处置 c + M6，三处同步）**
+- **租户插件**
+  - Modify `TenantMyBatisPlusConfig.java`：`ignoreTable` 追加 `answer_eval_result`、`rag_session`（豁免，无行为变更于既有查询；替代 v2 处置 b）。
+- **数据库（三处同步）**
   - Modify `TenantServiceImpl.createTenantSchema`：新增 `eval_regression_report` 建表 + 索引 + RLS（新租户）。
-  - Modify `SchemaMigrationConfig`：为存量 `tenant_%` schema 幂等建 `eval_regression_report` + 索引 + RLS。
-  - Modify `sql/init.sql`：同步存档新表。
+  - Modify `SchemaMigrationConfig`：存量 `tenant_%` 幂等建表 + 索引 + RLS。
+  - Modify `sql/init.sql`：同步存档。
 - **rag 模块**
-  - Create `.../rag/eval/answer/LabelledEvalSample.java`（含 tenantId，R2）
-  - Create `.../rag/eval/answer/EvalRegressionReport.java`（补 F1/负类召回/三维一致率/note，M3）
-  - Create `.../rag/eval/answer/EvalRegressionReportEntity.java` + `EvalRegressionReportMapper.java`（快照落库，M6）
-  - Modify `AnswerEvalResultMapper.java` + 新增 XML：带 schema 前缀 + 别名的 join 数据集查询（R1 处置 c，R2 带出 tenant_id，M2 去重）
-  - Modify `AnswerEvaluationService.java`：新增 `evaluateNoCache`（R3）、`dataset`、`regression`（含快照落库）
+  - Create `LabelledEvalSample.java`（含 tenantId）
+  - Create `EvalRegressionReport.java`、`EvalRegressionReportEntity.java`、`EvalRegressionReportMapper.java`（含 fingerprint/from/to/负类召回/维一致率字段）
+  - Modify `AnswerEvalResultMapper.java`：新增 `selectDataset`（@Select，schema 白名单 + 租户断言 + DISTINCT ON 取最新）
+  - Modify `AnswerEvaluationService.java`：抽 `doEvaluate`；新增 `evaluateNoCache`、`dataset`、`regression`（含指纹计算 + 显式租户快照落库）
 - **web 模块**
-  - Modify `EvalController.java`：新增 `POST /dataset`、`POST /regression`、`GET /history`（统一 ADMIN/USER，M5；regression 改 POST + 并发/超时语义，M4）
+  - Modify `EvalController.java`：新增 `POST /dataset`、`POST /regression`、`GET /history`（统一 ADMIN/USER；tenantId 键锁 + 超时 30s；分页）
 - **配置**
-  - Modify `application-dev.yml`（`application.yml` 若含 `rag` 段则同步）：`rag.eval.regression-gate-enabled: false`、回归并发/超时参数
+  - Modify `application-dev.yml`（`application.yml` 若含 `rag` 段则同步）：
+    - `rag.eval.regression-gate-enabled: false`（占位）
+    - `rag.eval.regression-timeout-ms: 30000`
+    - `rag.eval.dataset-limit-max: 200`
+    - `rag.eval.regression-concurrency-keys: tenant`（按租户键锁）
 - **测试**
-  - Modify `AnswerEvaluationServiceTest`、`EvalControllerTest`；新增跨租户隔离 IT（M1）
+  - Modify `AnswerEvaluationServiceTest`、`EvalControllerTest`、`TenantServiceImplSchemaTest`；新增跨租户隔离 IT。
 
-## 7. 风险与观察项（M1 修正后的正确口径）
+## 7. 风险与观察项（正确口径）
 
 | 风险 | 说明 | 缓解 |
 |---|---|---|
-| **join 跨表隔离（R1）** | TenantLineInnerInterceptor 在 join 两表各追加裸 `tenant_id` 导致 PG ambiguous | 处置 b（插件 append 按别名）+ 处置 c（XML 写死 schema + 显式带别名 tenant 断言）；单测断言最终 SQL |
-| **RLS 非兜底（M1）** | 主防线是 schema 隔离；RLS 依赖连接级 `app.tenant_id`，有连接池跨连接风险，仅 best-effort | SQL 显式 `tenant_id` 断言为主；补跨租户 IT 锁死行为 |
-| **同轮多行重复计入（M2）** | 在线同轮可被多入口评估成多行，INNER JOIN 使一行 feedback 复制成 N 行 | `DISTINCT ON (session_row_id)` 取最新一条 |
-| **回归污染在线缓存（R3）** | `evaluate()` 无条件写 Redis，key=md5(query) | 新增 `evaluateNoCache`，回归走无缓存路径 |
-| **租户丢失（R2）** | `LabelledEvalSample` 无 tenantId 时回归建 AnswerCase 会落入 `tenant_id=0` 永久不可见 | DTO 补 `tenantId` 显式带出；null 拒绝 |
-| **数据外泄（M5）** | `/dataset` 返回 `context/answer` 知识库原文，viewer 可读 | `/dataset`、`/regression`、`/history` 统一 ADMIN/USER；观察项：脱敏 |
-| **GET 重计算副作用（M4）** | 同步重计算 + 写 Redis + 落库，GET 有缓存/预取风险 | 改 POST；声明超时(30s)与并发限制 |
-| **指标语义错位（M3）** | pass=三维硬与门 vs humanLabel=主观评价，二者语义不同 | 报告补 F1/负类召回/分维度一致率 + note 说明 |
-| **可复现性（M7）** | 纯动态视图下反馈变动改变历史回归结果 | 本期落聚合快照支持趋势对比；逐样本 evalset 快照留后续演进 |
-| **SQL 注入** | schema 名 / from / to / limit | schema 经白名单 `^[a-zA-Z_][a-zA-Z0-9_]*$`；其余参数绑定 |
-| **快照表膨胀** | 只增不删 | 观察项；后续可加清理/保留策略 |
+| join 租户插件 ambiguous | TenantLineInnerInterceptor 会为 join 两表各追加裸 `tenant_id` | 两表加入 `ignoreTable`（零全局影响）+ @Select 手写带别名 `e.tenant_id` 断言 |
+| RLS 非兜底（M1） | 主防线是 schema 隔离；RLS 依赖连接级 app.tenant_id，有连接池跨连接风险 | SQL 显式租户断言为主；跨租户 IT 锁死 |
+| 样本批不可复现（二轮阻断项3） | 纯动态视图下下次样本集变化，趋势落差归因错误 | 快照带 `dataset_fingerprint` + from/to；/history 按指纹归因 |
+| 同轮多行重复计入（M2） | 在线同轮多入口可成多行 | `DISTINCT ON (session_row_id)` + `e.id DESC` 取最新稳定 |
+| 回归污染在线缓存（R3） | evaluate() 无条件写 Redis | 回归走 `evaluateNoCache`（跳过 writeToRedis） |
+| 租户丢失（R2） | 样式集 DTO 无 tenantId 会落 tenant_id=0 | DTO 带 tenantId；快照 insert 显式 setTenantId + null 拒绝 |
+| schema/tenantId 不同源 | 断言失效、越权 | 方法入口同源校验，不一致即拒绝 |
+| 数据外泄（M5） | dataset 返回 context/answer 原文 | /dataset、/regression、/history 统一 ADMIN/USER |
+| GET 重计算副作用（M4） | 重计算 + 落库 + 缓存风险 | /regression 改 POST；Service 层 tenantId 键锁 + 超时 30s |
+| 指标语义错位（M3） | pass 硬与门 vs humanLabel 主观评价 | 报告补 F1/负类召回/维一致率；语义说明入文档 |
+| F1 退化误报（二轮） | p=r=0 时 f1 是 0/0，取 1.0 会把灾难场景显示成满分 | 修正为 p=r==0 → f1=0，与 precision/recall 分开处理 |
+| 快照 INSERT 隐式租户 | MP 插件追加 tenant 列，隐式落 0 被 RLS 拒 | insert 前显式 setTenantId + null 拒绝 |
+| 快照表膨胀 | 只增不删 | 观察项；后续加清理/保留策略 |
+| config 潜在误配 | 新增 @MapperScan 不含新 Mapper 包时扫描不到 | 新 Mapper 已落在既有 `com.company.rag.rag.eval.answer` 包（已扫描）；建单测断言 |
 
 ## 8. 后续演进（本期不做）
 
-- 固化**逐样本**数据集快照（`evalset` 表 + 版本）实现完整可复现评测。
-- 硬门禁真正接入关键路径（发布/上线），按指标阈值阻断或告警。
-- 冷启动种子样本、反馈量不足时的采样降级。
+- 固化**逐样本**数据集快照（`evalset` 表 + 版本）实现完整可复现评测（当前以指纹 + 时间窗近似识别样本批）。
+- 硬门禁真正接入关键路径（发布/上线），按指标阈值阻断或告警（`regression-gate-enabled` 占位）。
+- 冷启动种子样本、反馈量不足时采样降级。
 - 将回归报告/历史趋势接入可观测看板。
+- 观察项：如未来出现跨表别名需插件级 join 租户自动追加，再评估处置 b（append）。
