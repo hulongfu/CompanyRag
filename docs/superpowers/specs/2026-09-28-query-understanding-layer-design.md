@@ -2,7 +2,7 @@
 
 > 日期：2026-09-28
 > 类型：设计方案（Design Spec）
-> 状态：待审阅（本次仅设计，不实现；HARD-GATE 未解除）
+> 状态：已冻结（两份用户裁决已按助手推荐定案：①模糊路 C9 本期不修、只记为观察项 R7；②**缓做 B**，理由见 R10 收益边界 —— 完成 A 实现计划后再视流量/基线数据决定是否落地 B。本文件冻结存档，不再为实现依据；HARD-GATE 未解除时整体不实现）
 > 范围：在 RAG 检索链路「入口 → 多路召回」之间插入一个可关闭的 Query 理解层，把"原样进检索的用户问题"升级为"规范化 + 关键词化 + （后续）改写/消解后的检索输入"，并为其提供统一承载位与可观测产物。
 > 前置澄清：本层不改变现有检索器/融合/重排/落库的对外语义；`enabled=false`（默认）时全链路行为与现状逐字节等价。
 > v1.1 重要更正：v1.0 主张的"中文 2-gram 构造 tsquery（OR）兜底全文路"经真机实测**不成立**（§2.1 E1/E2），已撤销并改为 ILIKE 子串召回；同时发现**模糊路对中文同样恒不命中**（E3/E3b/E4），故本层真正的召回收益论证需按 §3.4 重新界定。
@@ -231,3 +231,4 @@ RagSearchServiceImpl.search / retrieve / streamAnswer
 |---|---|
 | v1.0 | 初版：单点插入 `RagSearchServiceImpl`、`RagQuery` 新增承载位、M1 能力② 采用"中文 2-gram + `\|` OR tsquery"、缓存 key 改用 `rewrittenQuery`。 |
 | v1.1 | **依真机实测（§2.1 E1–E7）撤销能力②的 tsquery 方案**，改为"2-gram + `content ILIKE '%term%'` 子串匹配 + 命中词数排序"（E2 证明 2-gram 喂 tsquery 恒不命中，E5 证明 ILIKE 有效）；新增 C9（模糊路中文 `similarity` 恒 0，E3/E3b/E4）；**修正 v1.0 遗漏的承重矛盾**：默认 HYBRID 路径经 workflow 节点、节点只读 `query.getQuery()` 不读新字段 → 规范化改为**直接覆盖 `query` 字段**，取消 `rewrittenQuery` 作为下游读取源，新增 `originalQuery` 存原文；`FullTextRetrieveNode` 需透传 `searchTerms`（进 §6 改动清单）；R1 更正为"缓存 key 无需改读取源、仅需版本失效机制"并钉死 bump 责任；新增 R7（模糊路观察）、R8（ILIKE 不走索引）、R9（覆盖 `query` 污染 `ChatController:269` 落库原话）；配置键 `term-extract-enabled` 替换为 `max-terms`；§5 补"中文召回必须真机验证、mock 不能证明命中"；新增 R10（收益边界：`/api/chat` 进本层的是 LLM 转述文本，能力② 直接受益方是 query 直连入口，上线前应先测流量占比与全文路命中基线）。 |
+| v1.2 | **用户裁决定案（按助手推荐）**：①模糊路 C9 本期**不修**、只记观察项 R7（维持 §3.4）；②**缓做 B** —— R10 收益边界成立，进入方案A实现计划，完成后再视流量占比/全文路命中基线决定是否落地。本条 spec 已在头部标注"状态：已冻结"（fileModified 时用户确认），不再作为当前实现依据。 |
