@@ -180,6 +180,16 @@ CREATE POLICY tenant_isolation_session ON rag_session
 
 业务表模板结束 */
 
+-- ========== 回答评估 / 回归快照表（仅注释存档，不在此执行） ==========
+-- 本段为归档参考，实际 DDL 由代码驱动：
+--  - rag_session.feedback 列 + idx_session_feedback 索引：
+--      * 新建租户：TenantServiceImpl.buildCreateTableSql / buildCreateIndexSql
+--      * 存量租户：SchemaMigrationConfig.migrateRagSessionFeedbackColumn（启动迁移 runner）
+--  - eval_regression_report 表 + 索引 + RLS：
+--      * 新建租户：TenantServiceImpl.createTenantSchema（EvalRegressionReportDdl.build）
+--      * 存量租户：SchemaMigrationConfig.migrateEvalRegressionReportTable（启动迁移 runner）
+--    单一 DDL 源：company-rag-common 模块 constant.EvalRegressionReportDdl
+
 -- ========== 默认数据 ==========
 INSERT INTO public.sys_tenant (tenant_code, tenant_name, status)
 VALUES ('default', '默认租户', 1)

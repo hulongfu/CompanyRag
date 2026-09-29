@@ -2,6 +2,8 @@ package com.company.rag.rag.eval.answer;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.company.rag.common.constant.RagConstant;
+import com.company.rag.rag.eval.config.EvalProperties;
+import com.company.rag.tenant.context.TenantContext;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -34,6 +36,7 @@ public class AnswerEvaluationService {
     private final AnswerCorrectnessEvaluator correctnessEvaluator;
     private final AnswerFaithfulnessEvaluator faithfulnessEvaluator;
     private final AnswerEvalResultMapper evalResultMapper;
+    private final EvalProperties evalProperties;
 
     private static final String EVAL_PREFIX = RagConstant.CACHE_NAMESPACE + "eval:";
     private static final long EVAL_TTL_SECONDS = 60 * 60 * 24; // 24h
@@ -209,6 +212,63 @@ public class AnswerEvaluationService {
         stats.put("avgFaithfulnessScore", rows.isEmpty() ? 0.0
                 : rows.stream().mapToDouble(AnswerEvalResultEntity::getFaithfulnessScore).average().orElse(0.0));
         return stats;
+    }
+
+    /**
+     * 抽取带人工标签（feedback≠0）的评估样本集（spec §3.2.2 dataset 口径）。
+     *
+     * 【租户单源钉死】：方法签名保留 tenantId 形参仅为对齐 spec 签名，真实取值始终以
+     * TenantContext 为准（与 schema 同源），调用方传入的 raw tenantId 不直通 Mapper。
+     *
+     * @param tenantId 死参（以 TenantContext.getTenantId() 为准），调用方须传 context 解析值
+     */
+    public List<LabelledEvalSample> dataset(Long tenantId, LocalDateTime from, LocalDateTime to, int limit) {
+        // 【铁律】校验全部以 TenantContext 为唯一来源，不信任参数       （防 schema 与 tenant 指向不一致）
+        if (from == null || to == null) {
+            throw new IllegalArgumentException("from/to 不能为空，均须提供时间范围");
+        }
+        String schema = resolveSchema();
+        Long resolvedTenantId = resolveTenantId();
+        int effectiveLimit = clampLimit(limit);
+        return evalResultMapper.selectDataset(schema, resolvedTenantId, from, to, effectiveLimit);
+    }
+
+    /**
+     * 校验并解析当前租户 schema（取自 TenantContext.getSchema()，白名单防 SQL 注入）。
+     */
+    String resolveSchema() {
+        String schema = TenantContext.getSchema();
+        if (schema == null || schema.isBlank()) {
+            throw new IllegalArgumentException("无法解析租户 schema，请确认请求已携带租户上下文");
+        }
+        if (!schema.matches("^[a-zA-Z_][a-zA-Z0-9_]*$")) {
+            throw new IllegalArgumentException("非法 schema 名: " + schema);
+        }
+        return schema;
+    }
+
+    /**
+     * 校验并解析当前租户 ID（单源自 TenantContext.getTenantId()，不走请求头）。
+     */
+    Long resolveTenantId() {
+        Long tenantId = TenantContext.getTenantId();
+        if (tenantId == null) {
+            throw new IllegalArgumentException("无法解析租户 ID，请确认请求已携带租户上下文");
+        }
+        return tenantId;
+    }
+
+    /**
+     * limit 上限收敛：0<limit<=200 透传；limit<=0 回落 datasetLimitDefault；limit>200 收敛 datasetLimitMax。
+     */
+    int clampLimit(int limit) {
+        if (limit <= 0) {
+            return evalProperties.getDatasetLimitDefault();
+        }
+        if (limit > evalProperties.getDatasetLimitMax()) {
+            return evalProperties.getDatasetLimitMax();
+        }
+        return limit;
     }
 
     private void writeToRedis(AnswerCase answerCase, AnswerEvalResult result) {

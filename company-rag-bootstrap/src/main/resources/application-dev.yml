@@ -78,6 +78,7 @@ rag:
   # 回答评估配置
   eval:
     enabled: true              # 评估组件总开关：@ConditionalOnProperty 决定评估器/Service/EvalController 是否装配
+    rule-version: v1.0        # 回归快照 rule_version 列来源（基段已含，此处显式以收口）
     online-enabled: true      # 是否接入 chat 在线自动评估（默认关，先手动验证）
     async-enabled: true        # 在线评估是否异步（true=有界线程池；false=当前线程同步，仅调试用）
 
@@ -86,18 +87,18 @@ mcp:
   enabled: true
   clients:
     # 本地测试 MCP Server（端口 9001）
-#    - id: custom
-#      name: 本地测试 MCP Server
-#      url: http://localhost:9001/mcp
-#      enabled: true
-#      timeout: 30000
+    - id: custom
+      name: 本地测试 MCP Server
+      url: http://localhost:9001/mcp
+      enabled: true
+      timeout: 30000
 #
 #    # 文件系统 MCP Server（可选）
-#    - id: filesystem
-#      name: 文件系统 MCP Server
-#      url: http://localhost:3000/mcp
-#      enabled: false
-#      timeout: 30000
+    - id: filesystem
+      name: 文件系统 MCP Server
+      url: http://localhost:3000/mcp
+      enabled: false
+      timeout: 30000
     
     # Parallel MCP Server（官方免费服务，无需 API Key）
     # 提供 parallel_search 和 parallel_fetch 两个工具

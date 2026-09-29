@@ -64,6 +64,27 @@ class TenantServiceImplSchemaTest {
     }
 
     @Test
+    void createTableSql_ragSessionContainsFeedbackColumn() {
+        // 回归：跑分需要按 feedback 排序取样，rag_session 必须内置 feedback 列（新建租户不跑迁移 runner）
+        String sql = service.buildCreateTableSql("tenant_abc");
+        assertTrue(sql.contains("feedback SMALLINT NOT NULL DEFAULT 0"));
+    }
+
+    @Test
+    void createIndexSql_containsSessionFeedbackIndex() {
+        // 回归：feedback 索引必须建在 buildCreateIndexSql（新租户建 schema 时随之创建），不落 buildCreateTableSql
+        String sql = service.buildCreateIndexSql("tenant_abc");
+        assertTrue(sql.contains("idx_tenant_abc_session_feedback"));
+        assertTrue(sql.contains("feedback"));
+    }
+
+    @Test
+    void createIndexSql_feedbackIndexNotInsideCreateTableSql() {
+        String tableSql = service.buildCreateTableSql("tenant_abc");
+        assertTrue(!tableSql.contains("idx_tenant_abc_session_feedback"));
+    }
+
+    @Test
     void createIndexSql_completesFormattingWithoutMissingArgs() {
         String sql = service.buildCreateIndexSql("tenant_abc");
         assertTrue(sql.contains("tenant_abc"));

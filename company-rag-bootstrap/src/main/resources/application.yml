@@ -137,6 +137,27 @@ rag:
   memory:
     window-size: 50
 
+  # 回答评估配置（spec §3.4；enabled 为端点装配总开关，基段必须有，prod/test 忽略未书写键则 /api/eval/** 全 404）
+  eval:
+    enabled: ${RAG_EVAL_ENABLED:true}
+    # 规则版本号：回归快照 rule_version 落库列的来源；enabled=true 时 EvalProperties @PostConstruct 断言非空。
+    # 修改评级规则须同步增大版本号（v1.0→v1.1…），否则快照 rule_version 停留旧值误标同批；
+    # prod 需不同版本时在 prod 配置覆盖本键。
+    rule-version: v1.0
+    # 回归并发锁单租户最长等待（毫秒），超时返回 409
+    regression-lock-timeout-ms: ${RAG_EVAL_LOCK_TIMEOUT_MS:30000}
+    # 回归样本集默认/上限条数（/dataset 与 /regression 缺省回落 50、越界收敛 200）
+    dataset-limit-default: 50
+    dataset-limit-max: ${RAG_EVAL_DATASET_LIMIT_MAX:200}
+    # 回归门控总开关（占位默认关，先手动验证报表正确性）
+    regression-gate-enabled: ${RAG_EVAL_GATE_ENABLED:false}
+    # /history 每页上限（独立于 dataset-limit-max："单次评测样本上限"不应连带放大历史分页）
+    history-page-max: ${RAG_EVAL_HISTORY_PAGE_MAX:200}
+    # 在线评估（company-rag-web ChatController 抽样，与端点装配无关）
+    online-enabled: ${RAG_EVAL_ONLINE_ENABLED:false}
+    # 在线评估是否异步
+    async-enabled: true
+
 # MyBatis-Plus
 mybatis-plus:
   # 自动注册自定义 TypeHandler（含 UuidTypeHandler），解决 UUID 主键 insert 报 "Type handler was null"

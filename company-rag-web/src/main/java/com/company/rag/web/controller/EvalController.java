@@ -4,6 +4,7 @@ import com.company.rag.common.model.R;
 import com.company.rag.rag.eval.answer.AnswerCase;
 import com.company.rag.rag.eval.answer.AnswerEvalResultEntity;
 import com.company.rag.rag.eval.answer.AnswerEvaluationService;
+import com.company.rag.rag.eval.answer.LabelledEvalSample;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -86,5 +87,20 @@ public class EvalController {
             throw new IllegalArgumentException("租户 ID 不能为空，请确认请求头 X-Tenant-Id 已设置");
         }
         return R.ok(answerEvaluationService.stats(headerTenantId, from, to));
+    }
+
+    /**
+     * 抽取带人工标签的评估样本集（spec §3.2.2 dataset）。
+     * 【租户单源】走 TenantContext（由 JWT 过滤器双写），不读 X-Tenant-Id 头：
+     * 防调用方传入 schema 与 tenant 指向不一致；tenantId 参数由 Service 以 context 解析。
+     * 不加锁（锁仅在回归 Service 内）；limit>200 收敛、<=0 回落默认 50。
+     */
+    @PostMapping("/dataset")
+    @PreAuthorize("hasAnyRole('ADMIN', 'USER')")
+    public R<List<LabelledEvalSample>> dataset(@RequestParam(required = false) LocalDateTime from,
+                                               @RequestParam(required = false) LocalDateTime to,
+                                               @RequestParam(defaultValue = "50") int limit) {
+        // tenantId 形参传 null：dead param，仅占位对齐签名，真实值由 Service 以 TenantContext 解析
+        return R.ok(answerEvaluationService.dataset(null, from, to, limit));
     }
 }

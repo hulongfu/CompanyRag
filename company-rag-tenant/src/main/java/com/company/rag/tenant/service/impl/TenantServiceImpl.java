@@ -1,6 +1,7 @@
 package com.company.rag.tenant.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.company.rag.common.constant.EvalRegressionReportDdl;
 import com.company.rag.common.exception.BizException;
 import com.company.rag.common.security.SecurityUser;
 import com.company.rag.common.service.AuditLogService;
@@ -70,6 +71,11 @@ public class TenantServiceImpl implements TenantService {
         // 2. 在Schema中创建业务表
         String createTableSql = buildCreateTableSql(schemaName);
         jdbcTemplate.execute(createTableSql);
+
+        // 2.5 回归评估快照表（spec §3.2.3）：独立 DDL 源（common 模块 EvalRegressionReportDdl.build），
+        //     以单参渲染 schema，避免与 buildCreateTableSql 的 23 个 %s 占位纠缠；
+        //     建表 + 2 索引 + RLS + policy + grant 一并落地（回归功能依赖该表，缺表会静默零回归）。
+        jdbcTemplate.execute(EvalRegressionReportDdl.build(schemaName));
 
         // 3. 创建索引
         String createIndexSql = buildCreateIndexSql(schemaName);
@@ -217,6 +223,7 @@ public class TenantServiceImpl implements TenantService {
                 tokens_input INTEGER DEFAULT 0,
                 tokens_output INTEGER DEFAULT 0,
                 latency_ms INTEGER DEFAULT 0,
+                feedback SMALLINT NOT NULL DEFAULT 0,
                 create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
             CREATE TABLE IF NOT EXISTS %s.rag_session_meta (
@@ -321,6 +328,7 @@ public class TenantServiceImpl implements TenantService {
             CREATE INDEX IF NOT EXISTS idx_%s_chunk_content_trgm ON %s.doc_chunk USING gin (content gin_trgm_ops);
             CREATE INDEX IF NOT EXISTS idx_%s_document_title_trgm ON %s.rag_document USING gin (title gin_trgm_ops);
             CREATE INDEX IF NOT EXISTS idx_%s_session_tenant ON %s.rag_session(tenant_id, session_id);
+            CREATE INDEX IF NOT EXISTS idx_%s_session_feedback ON %s.rag_session(tenant_id, feedback);
             CREATE INDEX IF NOT EXISTS idx_%s_vector_store_embedding ON %s.vector_store
                 USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64);
             CREATE INDEX IF NOT EXISTS idx_%s_answer_eval_tenant_time
@@ -339,7 +347,7 @@ public class TenantServiceImpl implements TenantService {
                 schemaName, schemaName, schemaName, schemaName,
                 schemaName, schemaName, schemaName, schemaName,
                 schemaName, schemaName, schemaName, schemaName,
-                schemaName, schemaName
+                schemaName, schemaName, schemaName, schemaName
             );
     }
 

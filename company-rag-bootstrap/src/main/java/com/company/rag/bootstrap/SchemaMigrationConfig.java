@@ -1,5 +1,6 @@
 package com.company.rag.bootstrap;
 
+import com.company.rag.common.constant.EvalRegressionReportDdl;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.ApplicationRunner;
@@ -62,26 +63,26 @@ public class SchemaMigrationConfig {
                         if (columnExists != null && columnExists) {
                             log.debug("Schema [{}] 的 rag_session 表已存在 feedback 列，跳过", schemaName);
                             skippedCount++;
-                            continue;
+                        } else {
+                            // 添加 feedback 列（NOT NULL + DEFAULT 0，避免影响现有数据）
+                            String alterSql = String.format(
+                                    "ALTER TABLE %s.rag_session ADD COLUMN feedback SMALLINT NOT NULL DEFAULT 0",
+                                    schemaName
+                            );
+                            jdbcTemplate.execute(alterSql);
+
+                            log.info("Schema [{}] 的 rag_session 表成功添加 feedback 列", schemaName);
+                            migratedCount++;
                         }
-                        
-                        // 添加 feedback 列（NOT NULL + DEFAULT 0，避免影响现有数据）
-                        String alterSql = String.format(
-                                "ALTER TABLE %s.rag_session ADD COLUMN feedback SMALLINT NOT NULL DEFAULT 0",
-                                schemaName
-                        );
-                        jdbcTemplate.execute(alterSql);
-                        
-                        // 添加索引（如果不存在）
+
+                        // 索引位于 if/else 之后、两分支共用：存量 schema（列已存在）重跑时
+                        // 同样要建上 feedback 索引，不能因列已存在而跳过（否则该索引永远建不上）
                         String createIndexSql = String.format(
                                 "CREATE INDEX IF NOT EXISTS idx_%s_session_feedback ON %s.rag_session(feedback)",
                                 schemaName, schemaName
                         );
                         jdbcTemplate.execute(createIndexSql);
-                        
-                        log.info("Schema [{}] 的 rag_session 表成功添加 feedback 列", schemaName);
-                        migratedCount++;
-                        
+
                     } catch (Exception e) {
                         log.error("Schema [{}] 的 feedback 列迁移失败：{}", schemaName, e.getMessage());
                         // 继续处理下一个 schema，不中断整体迁移
@@ -346,5 +347,50 @@ public class SchemaMigrationConfig {
                 log.error("document_pipeline_state 表迁移失败：{}", e.getMessage(), e);
             }
         };
+    }
+
+    /**
+     * 为所有租户 schema 幂等创建 eval_regression_report 表、索引并启用 RLS。
+     *
+     * 回归评估快照表（与 answer_eval_result 同类机制，spec §3.2.3）：对存量租户兜底补建，
+     * 新建租户则由 TenantServiceImpl.createTenantSchema 直接渲染同一 DDL（单一来源 EvalRegressionReportDdl）。
+     */
+    @Bean
+    public ApplicationRunner migrateEvalRegressionReportTable() {
+        return args -> {
+            log.info("开始执行 eval_regression_report 表迁移...");
+            int[] processed = {0};
+            forAllTenantSchemas(schemaName -> {
+                try {
+                    jdbcTemplate.execute(EvalRegressionReportDdl.build(schemaName));
+                    processed[0]++;
+                } catch (Exception e) {
+                    // 继续处理下一个 schema，不中断整体迁移
+                    log.error("Schema [{}] 的 eval_regression_report 表迁移失败：{}", schemaName, e.getMessage());
+                }
+            });
+            log.info("eval_regression_report 表迁移完成：处理 {} 个 schema", processed[0]);
+        };
+    }
+
+    /**
+     * 遍历所有租户 schema，对每个合法 schema 执行指定操作。
+     *
+     * <p>统一收敛「查询 tenant_% schema + 正则白名单校验收 + per-schema 防御」样板，
+     * 供新增迁移 runner 复用。回调内抛出的异常由调用方（runner）自行 try/catch 决定是否中断。
+     */
+    private void forAllTenantSchemas(java.util.function.Consumer<String> action) {
+        List<String> tenantSchemas = jdbcTemplate.queryForList(
+                "SELECT schema_name FROM information_schema.schemata WHERE schema_name LIKE 'tenant_%'",
+                String.class
+        );
+        for (String schemaName : tenantSchemas) {
+            // schemaName 白名单校验，防 SQL 注入
+            if (schemaName == null || !schemaName.matches("^[a-zA-Z_][a-zA-Z0-9_]*$")) {
+                log.warn("跳过非法 schema 名：{}", schemaName);
+                continue;
+            }
+            action.accept(schemaName);
+        }
     }
 }

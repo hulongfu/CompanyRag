@@ -14,6 +14,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -26,6 +27,7 @@ class AnswerEvaluationServiceTest {
     private AnswerFaithfulnessEvaluator faithfulness;
     private AnswerEvalResultMapper evalResultMapper;
     private AnswerEvaluationService service;
+    private com.company.rag.rag.eval.config.EvalProperties evalProperties;
 
     @BeforeEach
     void setUp() {
@@ -34,7 +36,14 @@ class AnswerEvaluationServiceTest {
         faithfulness = mock(AnswerFaithfulnessEvaluator.class);
         RedissonClient redisson = mock(RedissonClient.class);
         evalResultMapper = mock(AnswerEvalResultMapper.class);
-        service = new AnswerEvaluationService(redisson, relevancy, correctness, faithfulness, evalResultMapper);
+        evalProperties = new com.company.rag.rag.eval.config.EvalProperties();
+        // 使用默认值（datasetLimitDefault=50 / datasetLimitMax=200），测试内再按需覆盖
+        service = new AnswerEvaluationService(redisson, relevancy, correctness, faithfulness, evalResultMapper, evalProperties);
+    }
+
+    @AfterEach
+    void tearDown() {
+        com.company.rag.tenant.context.TenantContext.clear();
     }
 
     @Test
@@ -129,5 +138,79 @@ class AnswerEvaluationServiceTest {
         e.setPass(true);
         e.setScore(1.0);
         return e;
+    }
+
+    // ============ P1 数据集抽取（spec §3.2.2 dataset） ============
+
+    /** 便捷：模拟已鉴权请求的用户租户上下文 */
+    private static void setTenantContext(Long tenantId, String schema) {
+        com.company.rag.tenant.context.TenantContext.setTenantId(tenantId);
+        com.company.rag.tenant.context.TenantContext.setSchema(schema);
+    }
+
+    @Test
+    void dataset_resolvesTenantFromContext_andPassesThrough() {
+        setTenantContext(42L, "tenant_abc");
+        java.time.LocalDateTime from = java.time.LocalDateTime.now().minusDays(1);
+        java.time.LocalDateTime to = java.time.LocalDateTime.now();
+
+        when(evalResultMapper.selectDataset("tenant_abc", 42L, from, to, 10))
+                .thenReturn(List.of(new LabelledEvalSample("q", "ctx", "ans", 42L, true, 0.8,
+                        (short) 1, 1001L, 1L, to)));
+
+        List<LabelledEvalSample> samples = service.dataset(null, from, to, 10);
+        assertEquals(1, samples.size());
+        assertEquals(42L, samples.get(0).tenantId());
+        assertEquals((short) 1, samples.get(0).humanLabel());
+        // limit=10 属 0<10<=200，透传（不回落、不收敛）
+        verify(evalResultMapper).selectDataset("tenant_abc", 42L, from, to, 10);
+    }
+
+    @Test
+    void dataset_fallsBackAndConvergesLimit() {
+        setTenantContext(42L, "tenant_abc");
+        java.time.LocalDateTime from = java.time.LocalDateTime.now().minusDays(1);
+        java.time.LocalDateTime to = java.time.LocalDateTime.now();
+
+        // limit<=0 → 回落 datasetLimitDefault(50)
+        service.dataset(null, from, to, 0);
+        verify(evalResultMapper).selectDataset("tenant_abc", 42L, from, to, 50);
+        // limit>200 → 收敛 datasetLimitMax(200)
+        service.dataset(null, from, to, 500);
+        verify(evalResultMapper).selectDataset("tenant_abc", 42L, from, to, 200);
+    }
+
+    @Test
+    void dataset_rejects_missingFromOrTo() {
+        setTenantContext(42L, "tenant_abc");
+        java.time.LocalDateTime now = java.time.LocalDateTime.now();
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+                () -> service.dataset(null, null, now, 50));
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+                () -> service.dataset(null, now, null, 50));
+    }
+
+    @Test
+    void dataset_rejects_missingTenantContext() {
+        // 未验证用户上下文（tenantId=null）→ 400
+        java.time.LocalDateTime now = java.time.LocalDateTime.now();
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+                () -> service.dataset(null, now.minusDays(1), now, 50));
+    }
+
+    @Test
+    void dataset_rejects_illegalSchema() {
+        setTenantContext(42L, "tenant_abc; DROP TABLE x;");
+        java.time.LocalDateTime now = java.time.LocalDateTime.now();
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+                () -> service.dataset(null, now.minusDays(1), now, 50));
+    }
+
+    @Test
+    void dataset_rejects_blankSchema() {
+        setTenantContext(42L, "   ");
+        java.time.LocalDateTime now = java.time.LocalDateTime.now();
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+                () -> service.dataset(null, now.minusDays(1), now, 50));
     }
 }

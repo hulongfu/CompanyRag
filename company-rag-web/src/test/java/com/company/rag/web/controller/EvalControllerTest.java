@@ -14,6 +14,8 @@ import com.company.rag.common.model.R;
 import com.company.rag.rag.eval.answer.AnswerCase;
 import com.company.rag.rag.eval.answer.AnswerEvalResultEntity;
 import com.company.rag.rag.eval.answer.AnswerEvaluationService;
+import com.company.rag.rag.eval.answer.LabelledEvalSample;
+import java.time.LocalDateTime;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -84,5 +86,46 @@ class EvalControllerTest {
     @Test
     void stats_rejectsWithoutTenantHeader() {
         assertThrows(IllegalArgumentException.class, () -> controller.stats(null, null, null));
+    }
+
+    // ============ P1 /api/eval/dataset（spec §3.2.2，走 TenantContext，不读 X-Tenant-Id 头） ============
+
+    @Test
+    void dataset_defaultsLimit50_andForwardWhenContextSet() {
+        setTenantContext();
+        LocalDateTime from = LocalDateTime.now().minusDays(1);
+        LocalDateTime to = LocalDateTime.now();
+        when(service.dataset(org.mockito.ArgumentMatchers.isNull(), org.mockito.ArgumentMatchers.eq(from),
+                org.mockito.ArgumentMatchers.eq(to), org.mockito.ArgumentMatchers.eq(50)))
+                .thenReturn(List.of(new LabelledEvalSample("q", "ctx", "ans", 7L, true, 0.9, (short) 1, 1L, 1L, to)));
+
+        R<List<LabelledEvalSample>> r = controller.dataset(from, to, 50);
+        // 缺省 limit 由 @RequestParam defaultValue=50 赋值
+        assertNotNull(r.getData());
+        assertEquals(1, r.getData().size());
+    }
+
+    @Test
+    void dataset_forwardsRawLimitAndTenantFromContext() {
+        setTenantContext();
+        LocalDateTime from = LocalDateTime.now().minusDays(7);
+        LocalDateTime to = LocalDateTime.now();
+        // 控制器只透传原始 limit，上/下限收敛由 Service.clampLimit 负责（已在 Service 单测覆盖）
+        when(service.dataset(org.mockito.ArgumentMatchers.isNull(), org.mockito.ArgumentMatchers.eq(from),
+                org.mockito.ArgumentMatchers.eq(to), org.mockito.ArgumentMatchers.eq(999)))
+                .thenReturn(List.of());
+
+        R<List<LabelledEvalSample>> r = controller.dataset(from, to, 999);
+        assertNotNull(r);
+        verify(service).dataset(null, from, to, 999);
+    }
+
+    private static void setTenantContext() {
+        setTenantContext("tenant_abc");
+    }
+
+    private static void setTenantContext(String schema) {
+        com.company.rag.tenant.context.TenantContext.setTenantId(7L);
+        com.company.rag.tenant.context.TenantContext.setSchema(schema);
     }
 }
