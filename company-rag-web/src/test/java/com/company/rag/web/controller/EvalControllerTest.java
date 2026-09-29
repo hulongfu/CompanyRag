@@ -14,6 +14,7 @@ import com.company.rag.common.model.R;
 import com.company.rag.rag.eval.answer.AnswerCase;
 import com.company.rag.rag.eval.answer.AnswerEvalResultEntity;
 import com.company.rag.rag.eval.answer.AnswerEvaluationService;
+import com.company.rag.rag.eval.answer.EvalRegressionReportEntity;
 import com.company.rag.rag.eval.answer.LabelledEvalSample;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -118,6 +119,77 @@ class EvalControllerTest {
         R<List<LabelledEvalSample>> r = controller.dataset(from, to, 999);
         assertNotNull(r);
         verify(service).dataset(null, from, to, 999);
+    }
+
+    // ============ P3 /api/eval/regression（锁在 Service，本层只转发） ============
+
+    @Test
+    void regression_zeroSamples_returnsCode200WithNullData() {
+        LocalDateTime from = LocalDateTime.now().minusDays(1);
+        LocalDateTime to = LocalDateTime.now();
+        when(service.regression(null, from, to, 50)).thenReturn(null);
+
+        R<EvalRegressionReportEntity> r = controller.regression(from, to, 50);
+        // 显式约定：code=200 + data=null + msg 文案，前端据此判定「未落快照」
+        assertEquals(200, r.getCode());
+        assertNull(r.getData());
+        assertEquals("无匹配样本，未落快照", r.getMsg());
+    }
+
+    @Test
+    void regression_forwardsRawLimitAndReturnsReport() {
+        LocalDateTime from = LocalDateTime.now().minusDays(7);
+        LocalDateTime to = LocalDateTime.now();
+        EvalRegressionReportEntity report = new EvalRegressionReportEntity();
+        report.setId(9L);
+        report.setTenantId(7L);
+        when(service.regression(null, from, to, 999)).thenReturn(report);
+
+        R<EvalRegressionReportEntity> r = controller.regression(from, to, 999);
+        verify(service).regression(null, from, to, 999);
+        assertNotNull(r.getData());
+        assertEquals(Long.valueOf(9L), r.getData().getId());
+    }
+
+    /** Service 抛 409 BizException 时 Controller 不吞异常、不自行加锁，原样上抛交全局处理 */
+    @Test
+    void regression_propagates409FromService() {
+        LocalDateTime from = LocalDateTime.now().minusDays(1);
+        LocalDateTime to = LocalDateTime.now();
+        when(service.regression(null, from, to, 50))
+                .thenThrow(new com.company.rag.common.exception.BizException(409, "该租户回归评估正在进行中，请稍后重试"));
+
+        com.company.rag.common.exception.BizException ex = assertThrows(
+                com.company.rag.common.exception.BizException.class, () -> controller.regression(from, to, 50));
+        assertEquals(409, ex.getCode());
+    }
+
+    // ============ P4 /api/eval/history（分页只透传，收敛在 Service） ============
+
+    @Test
+    void history_forwardsRawPageAndReturnsIPageShape() {
+        java.util.Map<String, Object> page = new java.util.LinkedHashMap<>();
+        page.put("records", List.of());
+        page.put("total", 0L);
+        page.put("size", 50);
+        page.put("current", 1);
+        // 原始 page/pageSize 直通，边界收敛由 Service clampPage/clampPageSize 负责
+        when(service.history(null, 1, 999)).thenReturn(page);
+
+        R<java.util.Map<String, Object>> r = controller.history(1, 999);
+        verify(service).history(null, 1, 999);
+        assertNotNull(r.getData());
+        assertEquals(0L, r.getData().get("total"));
+        assertEquals(50, r.getData().get("size"));
+    }
+
+    @Test
+    void history_defaultsArePage1Size50() {
+        // @RequestParam(defaultValue) 由 Spring 注入；此处直接以 1/50 调用验证签名缺省语义
+        when(service.history(null, 1, 50)).thenReturn(java.util.Map.of(
+                "records", List.of(), "total", 0L, "size", 50, "current", 1));
+        R<java.util.Map<String, Object>> r = controller.history(1, 50);
+        assertEquals(1, r.getData().get("current"));
     }
 
     private static void setTenantContext() {
