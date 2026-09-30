@@ -126,6 +126,19 @@
 - **落库铁律**：跨线程落库强制校验 `AnswerCase.tenantId` 非空，杜绝异步线程 ThreadLocal 丢失租户导致 `tenant_id=0` 永久不可见
 - **实现路径**：Superpowers 工作流，代码见 `company-rag-rag/.../eval/answer/`，评估页见 `eval.html`
 
+#### 🎯 答案质量闭环（反馈联动 + 数据集 + 回归 + 历史）
+- **概述**：在三维评估之上闭环「人工反馈 → 指标回归」链路——把带人工标签（`rag_session.feedback`：1=`+1` 好评、`-1` 差评、0=无反馈）的会话抽取成可评估样本集，对抽到的样本按当时的评估口径**重跑一遍**生成离线质量快照（`eval_regression_report`），并支持分页回看回归历史，回答质量是否随算法演进而提升由此可量化追踪。
+- **反馈联动（样本来源）**：`rag_session` 增 `feedback SMALLINT NOT NULL DEFAULT 0` 列 + `idx_<schema>_session_feedback` 索引；人工在会话尾打正/负反馈即成为回归样本的候选池
+- **数据集抽取** `POST /api/eval/dataset`：取 `feedback<>0` 的会话，`DISTINCT ON (session_row_id)` 每个会话仅取最新一条已评估记录，JOIN `answer_eval_result` + `rag_session`，时间范围 `from/to` 过滤，外层按 `create_time DESC LIMIT`；返回 `LabelledEvalSample[]`（query/context/answer/tenantId/persistedPass/persistedScore/humanLabel/sessionRowId/evalId/createTime）
+- **回归重跑** `POST /api/eval/regression`：对抽到的样本按一致性、`evaluateNoCache`（不写 Redis、不落 `answer_eval_result`，避免污染主链路）重算三维判定，落一份含 `datasetFingerprint`（样本 sessionRowId 排序拼接的 MD5）+ `ruleVersion` + TP/TN/FP/FN 四格与 accuracy/precision/recall/F1/negativeRecall/passRate/avgScore/三维一致率/persistedPassAgree 的快照
+- **一致性关键点**：重跑路径与手动/在线评估收敛到同一私有入口 `doEvaluate`（顺序 relevancy→correctness→faithfulness，score=三维布尔均值 0~1），保证「当时怎么判的、回归就当怎么判」
+- **回归并发安全**：Service 内按租户 `ConcurrentHashMap<Long,ReentrantLock>` 串行化（先判空、0 样本不建锁不落快照），`tryLock(30s)` 失败抛 409 `BizException`；多副本部署可将进程内锁升级为 Redisson RLock
+- **历史查询** `GET /api/eval/history`：手写 `LIMIT/OFFSET` + 独立 count 分页（`page<=0→1`、`pageSize<=0→50`、超 `historyPageMax` 收敛 200），返回 `{records, total, size, current}`
+- **表**：每租户 Schema 的 `eval_regression_report`（HNSW 无关，RLS 租户隔离 + `idx_..._eval_rep_tenant_time` 索引），迁移由 `SchemaMigrationConfig` 第 6 份 runner `migrateEvalRegressionReportTable` 对所有存量租户 Schema 执行
+- **配置**（`rag.eval.*`，见 `EvalProperties`）：`dataset-limit-default=50`/`dataset-limit-max=200`/`history-page-max=200`/`regression-lock-timeout-ms=30000`/`rule-version`（`enabled=true` 时必填）
+- **权限与租户**：三接口均 `@PreAuthorize(hasAnyRole('ADMIN','USER'))`（viewer 只读不可评），租户经 `TenantContext`（JWT 过滤器解析，不读 `X-Tenant-Id`），`dataset`/`regression` 0 样本返回 `R.fail(200,"无匹配样本")`（data=null 语义）
+- **实现路径**：Superpowers 工作流（spec `2026-09-27-answer-quality-loop-design.md` v5.15 + plan），代码见 `company-rag-rag/.../eval/answer/`（`AnswerEvaluationService` 的 `dataset/regression/history`、`EvalRegressionReportEntity/Mapper`），页面入口见 `eval.html`「回归闭环」卡片
+
 ### 🛂 工具审批门（Agent 高危工具人工确认）
 - **能力**：Agent 强制调用某些高危工具前，落一条 PENDING 审批单并同步阻塞等待，人工 approve 才继续执行、deny 则返回拒绝文案给 LLM
 - **判定规则**：总开关关闭时全部工具直接执行（向后兼容、主链路零变化）；开启后 = **高危兜底集** 或 工具自身的 `requiresApproval()`
