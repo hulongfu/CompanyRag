@@ -88,7 +88,7 @@ Flux<NodeOutput> streamFromInitialNode(OverAllState, RunnableConfig)
 | 组件 | 职责 | 依赖 |
 |---|---|---|
 | `AgentStreamEventType`（枚举） | `THINKING_DELTA` / `TOOL_START` / `TOOL_END` / `ANSWER_DELTA` / `DONE` / `ERROR` | 无 |
-| `AgentStreamEvent`（record） | 单条事件：`type` + `text` + `toolName` + `durationMs` + `status`。`DONE` 事件额外携带 `AgentResult`（answer / toolContext / ragUsed） | 无 |
+| `AgentStreamEvent`（record） | 单条事件：`type` + `text` + `toolName` + `durationMs` + `status`。`DONE` 事件额外携带 `AgentResult`（answer / toolContext / ragUsed）供 controller 落库使用；**写出 SSE 帧时 `DONE` 不重复携带 `answer` 全文**（前端已逐帧收到 `ANSWER_DELTA`），避免流量翻倍 | 无 |
 | `NodeOutputMapper` | **唯一一处**把 `NodeOutput` 翻译成 `AgentStreamEvent`；识别 `OutputType` 与节点名常量 | graph-core |
 | `StreamingAgentExecutor.executeStream(...)` | 新增方法，走 `getCompiledGraph().stream(inputs, cfg)`，返回 `Flux<AgentStreamEvent>`。原 `execute()` 保持不动 | ReactAgent |
 
@@ -117,17 +117,41 @@ POST /api/chat/stream  (ChatController)
         ├─ map(NodeOutputMapper) → Flux<AgentStreamEvent>
         ├─ .timeout(整体上限) / idle timeout
         ├─ .onErrorResume(e → Flux.just(ERROR(e)))
-        └─ doFinally: 同一池线程内 recorder.captureToolContext() / usedTool("searchKnowledgeBase")
-                        → 组装 DONE 事件；recorder.clearRecords()；TenantContext.clear()
+        ├─ .concatWith(Flux.defer: 同线程内 recorder.captureToolContext() / usedTool("searchKnowledgeBase")
+        │                → 组装 DONE 事件)                       ← 取值必须在终止信号之前（§2.4）
+        └─ .doFinally: recorder.clearRecords()；TenantContext.clear()   ← 只做清理，不发事件
   → SSE 逐帧推给前端
   → ChatController 收到 DONE：
         ├─ ragSessionService.saveConversation(...)   ← 落库 Owner 不变（I3）
         └─ evalExecutor 异步 evaluateAllPersisted(...)  ← 触发口径不变（I3）
 ```
 
-### 2.4 `toolContext` / `ragUsed` 必须在 `doFinally` 的池线程内取值
+### 2.4 `toolContext` / `ragUsed` 必须在 graph 执行的同一线程内取值
 
-`ToolCallRecorder` 用 `ThreadLocal<List<ToolCallRecord>>` 存记录，工具在 graph 节点线程执行。阻塞链路里 `RagAgentService.processWithHistory:152` 在 **controller 线程**调 `recorder.getAndClearRecords()`，取到的实际是空列表 —— 这是 §3.7 记录的既有缺陷。流式实现不得重复，故把取值时机绑定在记录产生的那个线程上（`doFinally` 与 graph 执行同线程）。若实测发现 graph 内部切线程导致取不到，回退方案见 §5-R2。
+`ToolCallRecorder` 用 `ThreadLocal<List<ToolCallRecord>>` 存记录，工具在 graph 节点线程执行。阻塞链路里 `RagAgentService.processWithHistory:152` 在 **controller 线程**调 `recorder.getAndClearRecords()`，取到的实际是空列表 —— 这是 §3.7 记录的既有缺陷。流式实现不得重复，故把取值时机绑定在记录产生的那个线程上。
+
+**实现约束（重要，易踩坑）**：**不能用 `doFinally` 组装 `DONE` 事件**。`doFinally` 在上游终止信号**之后**执行，Reactor 此时已向下游发完 `onComplete`，任何后续 `onNext` 会被丢弃 —— `DONE` 将永远到不了 controller，落库与在线评估随之全部失效（I3 被静默破坏）。
+
+正确写法是用 `concatWith` + `Flux.defer`：上游正常完成后才订阅它，defer 的 supplier 在**上游终止的那个线程**上同步执行，此时 ThreadLocal 记录仍在，可安全取值：
+
+```java
+Flux.defer(() -> { restoreContext(); return graphStream(inputs, cfg); })
+    .subscribeOn(Schedulers.fromExecutor(agentStreamExecutor))
+    .map(nodeOutputMapper::map)                       // NodeOutput → AgentStreamEvent
+    .timeout(...)
+    .onErrorResume(e -> Flux.just(AgentStreamEvent.error(e)))
+    .concatWith(Flux.defer(() ->                      // ← 同线程、终止前发 DONE
+        Flux.just(buildDoneEvent(recorder)) ))        // 读 captureToolContext()/usedTool()
+    .doFinally(sig -> { recorder.clearRecords(); TenantContext.clear(); });  // 只做清理
+```
+
+即：**取值用 `concatWith(defer)`，清理用 `doFinally`**，两者不可互换。
+
+**错误路径不得发 `DONE`**：`onErrorResume` 把异常转成 `ERROR` 事件后流会正常 `complete`，`concatWith` 随之触发 —— 若不判断，会出现 `ERROR` 后紧跟 `DONE`，controller 据 `DONE` 落库即写入空/半截答案，直接违反 §3.5「宁缺不残」。因此 `concatWith` 内的 `defer` 必须依据一个流内标志位（如 `AtomicBoolean errored`，由 `onErrorResume` 置位）决定：已出错则返回 `Flux.empty()`，不发 `DONE`。§4.2 的异常用例须同时断言「有 `ERROR` 且**无** `DONE`」。
+
+**`answer` 全文的来源**：流式链路没有现成的完整答案字符串（阻塞链路靠 `reactAgent.call()` 返回值）。做法是在管道内用一个 `AtomicReference<StringBuilder>` 累加 `ANSWER_DELTA` 的 `text`，`concatWith` 组装 `DONE` 时取其结果 —— 与阻塞链路「末轮模型输出全文」语义等价。注意只累加 `ANSWER_DELTA`，**不得**累加 `THINKING_DELTA`，否则思考过程会污染入库答案与后续会话记忆。若 R1 的判据最终退化为不区分思考/答案的单一 `DELTA`，则 `answer` 只能取 graph 末态 state 中的最后一条 `AssistantMessage`（由 mapper 在 `AGENT_MODEL_FINISHED` 时记录），此路径同样需在 R1 验证时一并确定。
+
+若实测发现 graph 内部切换调度器导致 `concatWith` 所在线程与工具执行线程不同（取到空记录），回退方案见 §5-R2。
 
 ---
 
@@ -222,6 +246,7 @@ Flux.defer(() -> { /* 恢复上下文 → getCompiledGraph().stream() */ })
 
 - 正常：mock `reactAgent.getCompiledGraph()` 返回固定 `Flux<NodeOutput>`，用 `StepVerifier` 验证事件序列与顺序。
 - 异常：源 `Flux.error(...)` → 产出单个 `ERROR` 事件且流正常 `complete`，**不得**向下游发 error-signal。
+- **回归（针对 §2.4 的 `doFinally` 陷阱）**：`StepVerifier` 断言 `DONE` 事件**确实被下游收到**且位于序列末位、其后紧跟 `onComplete`。若误用 `doFinally` 组装 `DONE`，此用例必然失败（收到 0 个 `DONE`）。
 - 边界：取消订阅后 `recorder.clearRecords()` 被调用。
 
 ### 4.3 `RagAgentServiceStreamTest`（新建）
@@ -249,7 +274,7 @@ Flux.defer(() -> { /* 恢复上下文 → getCompiledGraph().stream() */ })
 | 编号 | 风险 | 等级 | 处置 |
 |---|---|---|---|
 | R1 | `THINKING_DELTA` 与 `ANSWER_DELTA` 的区分判据不确定（同为 `AGENT_MODEL_STREAMING`） | 中 | 实现阶段先打全量 `OutputType` + `node()` + `agent()` 日志实测一轮再定；候选判据：节点名是否等于 `AGENT_MODEL_NAME`、state 中是否仍有未消费的 tool call、是否为流中最后一个 model 段。最保守回退：合并为单一 `DELTA` 类型，前端不区分思考与答案（功能降级但不阻塞）。 |
-| R2 | graph 内部切换调度器导致 `TenantContext` 在节点中途丢失 → 工具访问错误 schema（跨租户风险） | **高** | 实现第一步即验证：在工具内打印 `TenantContext.getSchema()` 与线程名。若丢失，改用 `RunnableConfig.context()`（实测存在，`Map<String,Object>` 且随调用传递）承载租户信息，由 `AgentTool` 侧从 config 取而非从 ThreadLocal 取。**验证未通过前不得合并。** |
+| R2 | graph 内部切换调度器导致 `TenantContext` 在节点中途丢失 → 工具访问错误 schema（跨租户风险） | **高** | 实现第一步即验证：在工具内打印 `TenantContext.getSchema()` 与线程名。若丢失，改用 `RunnableConfig.context()`（实测存在，返回可变 `Map<String,Object>`，另有 `clearContext()`）承载租户信息 —— 但**需先验证 graph 是否把该 context 传递到工具的 `ToolContext`**，若不传递则需改为在工具装饰层（`AggregatedToolCallbackProvider`）包装时注入。此路径未验证前，**验证未通过不得合并**。 |
 | R3 | `getCompiledGraph()` 非 ReactAgent 对外宣称的稳定 API，升级可能变更 | 中 | 版本已在 `company-rag-agent/pom.xml` 锁死 `1.1.2.0`；`NodeOutputMapper` 为唯一耦合点，升级时改动面可控。 |
 | R4 | 审批阻塞长时间占用流式池线程，池被占满 | 中 | 池独立（§3.1）+ `AbortPolicy` 降级 429；`ApprovalProperties.timeoutSeconds` 已有上限，等待会自行终止。 |
 | R5 | 前端未适配，端点上线即无人使用 | 低 | 开关默认关闭，端点存在本身无副作用；本次交付范围明确不含前端。 |
