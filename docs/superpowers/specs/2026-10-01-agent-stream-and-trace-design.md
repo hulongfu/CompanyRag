@@ -3,7 +3,7 @@
 > 日期：2026-10-01
 > 类型：设计方案（Design Spec）
 > 状态：设计已获用户逐段批准（§1 范围、§2 组件与数据流、§3 错误处理与边界、§4 测试策略 四段分别确认通过）；v1.1 为自查修订，未改变已批准的范围与非目标，仅纠正实现机制与事实错误（见下）
-> v1.1 修订要点：①纠正致命实现错误 —— `DONE` 不能用 `doFinally` 组装；②发现直接 `return Flux` + `subscribeOn` 会使统一响应降级（I5）失效，改用 `Sinks` + 方法体内提交；③连带记录该模型的取消副作用及处置；④`rag_session` 落库列名更正为 `context`；⑤明确 `DONE.answer` 来源与污染红线；⑥订阅前失败沿用项目 HTTP 200 + `R.code` 约定，不自行改 HTTP 语义
+> v1.1 修订要点：①纠正致命实现错误 —— `DONE` 不能用 `doFinally` 组装；②发现直接 `return Flux` + `subscribeOn` 会使统一响应降级（I5）失效，改用 `Sinks` + 方法体内提交；③连带记录该模型的取消副作用及处置；④`rag_session` 落库列名更正为 `context`；⑤明确 `DONE.answer` 来源与污染红线；⑥订阅前失败沿用项目 HTTP 200 + `R.code` 约定，不自行改 HTTP 语义；⑦经字节码核查（§3.3.1）确认 `stream()` 在当前配置下全程同步同线程，R2 由「高风险、合并前须验证」降为「低风险、仅需防回归断言」
 > 范围：为 Agent 主链路补上「边生成边推送」的流式能力与「推理段/工具段/技能段」分层执行轨迹，以 SSE 端点对外暴露；不引入新框架，不改动现有阻塞端点。
 > 前置结论：本方案**不引入 AgentScope**。选型评估见 §0，结论是所需能力底层已具备，缺的只是上层消费。
 
@@ -152,6 +152,7 @@ void runStream(Sinks.Many<AgentStreamEvent> sink, ...) {
         graphStream(inputs, cfg)
             .map(nodeOutputMapper::map)                     // NodeOutput → AgentStreamEvent
             .doOnNext(ev -> {
+                if (cancelled.get()) throw new CancellationException("client disconnected");  // §3.4
                 if (ev.type() == ANSWER_DELTA) answer.append(ev.text());
                 sink.tryEmitNext(ev);
             })
@@ -163,6 +164,8 @@ void runStream(Sinks.Many<AgentStreamEvent> sink, ...) {
                     recorder.captureToolContext(),
                     recorder.usedTool("searchKnowledgeBase")));
         }
+        sink.tryEmitComplete();
+    } catch (CancellationException e) {                     // §3.4 客户端断开：不发 ERROR/DONE
         sink.tryEmitComplete();
     } catch (Exception e) {                                 // 含 blockLast 包装出的运行时异常
         sink.tryEmitNext(AgentStreamEvent.error(e));
@@ -180,7 +183,7 @@ void runStream(Sinks.Many<AgentStreamEvent> sink, ...) {
 
 **`answer` 全文的来源**：流式链路没有现成的完整答案字符串（阻塞链路靠 `reactAgent.call()` 返回值）。做法是管道内累加 `ANSWER_DELTA` 的 `text`（见上 `answer` 累加器）—— 与阻塞链路「末轮模型输出全文」语义等价。**不得**累加 `THINKING_DELTA`，否则思考过程会污染入库答案与后续会话记忆（`RagChatMemory` 会把它当历史读回）。若 R1 判据最终退化为不区分思考/答案的单一 `DELTA`，则 `answer` 改取 graph 末态 state 中最后一条 `AssistantMessage`（由 mapper 在 `AGENT_MODEL_FINISHED` 时记录），此路径在 R1 验证时一并确定。
 
-若实测发现 graph 内部切换调度器导致工具不在池任务线程上执行（`captureToolContext()` 取到空），回退方案见 §5-R2。
+若上述防回归断言（§4.3）将来失败，回退方案：改用 `RunnableConfig.context()`（实测存在，返回可变 `Map<String,Object>`，另有 `clearContext()`）承载租户信息；但需先确认 graph 是否把该 context 传到工具的 `ToolContext`，若不传则在 `AggregatedToolCallbackProvider` 包装工具时注入。
 
 ---
 
@@ -233,7 +236,24 @@ return sink.asFlux();                                           // WebMVC 异步
 - 在池任务体开头（`runStream` 的 `try` 首行）恢复；
 - 在池任务的 `finally` 内 `TenantContext.clear()`。
 
-绝不依赖 controller 线程 ThreadLocal 的跨线程可见性。**风险点**：若 graph 在节点间自行切换调度器，`TenantContext` 会在节点中途丢失，导致工具访问错误 schema —— 这是本方案最高风险项，处置见 §5-R2。
+绝不依赖 controller 线程 ThreadLocal 的跨线程可见性。
+
+#### 3.3.1 线程归属核查（字节码证据，已定论）
+
+流式链路的租户安全完全取决于「工具在哪个线程执行」。对锁定的 `1.1.2.0` 版本做字节码核查，四项结论：
+
+| 核查对象 | 命令要点 | 结论 |
+|---|---|---|
+| `CompiledGraph` | `javap -c` 找 `Schedulers` / `subscribeOn` / `supplyAsync` / `runAsync` | **无任何线程切换**，仅 `Flux.just/empty/error/flatMap/last`；6 处 `CompletableFuture` 常量引用但无任何异步/阻塞调用 |
+| `AgentLlmNode`（模型节点） | 同上 | **零**线程/调度器引用 |
+| `AgentToolNode`（工具节点） | 存在 `CompletableFuture.runAsync`，但全部位于 `executeToolCallsParallel`，受字段 `parallelToolExecution` 控制 | Builder 构造器中 `iconst_0 → putfield parallelToolExecution`，**默认 false**；全项目检索 `parallelToolExecution\|wrapSyncToolsAsAsync\|maxParallelTools\|toolExecutor` **零命中** |
+| `NodeExecutor` | 存在 `Schedulers.parallel()` / `Schedulers.fromExecutor()` / `Flux.subscribeOn` | 三者**只出现在 `handleParallelGraphFlux`**（处理 `ParallelGraphFlux`），即仅当图内存在并行分支节点时生效；线性 ReAct 图不命中 |
+
+`ParallelNode` / `ConditionalParallelNode` 的 `supplyAsync` 同理，需图内显式并行节点，本项目 `AgentConfig` 未使用。
+
+**结论**：当前配置下 `getCompiledGraph().stream()` 是纯同步 pull，整条链在订阅者线程上顺序执行。本方案的订阅者即 `agentStreamExecutor` 的池线程（§3.1），故 `TenantContext` 与 `ToolCallRecorder` 的 ThreadLocal 全程有效，§2.4 的顺序取值成立。
+
+**残留风险（配置漂移）**：一旦将来开启 `parallelToolExecution(true)` 或加入并行节点，工具会被投递到 `getToolExecutor(config)` 返回的线程池，ThreadLocal 丢失且**不会报错** —— 表现为工具静默读到错误的 schema 或空记录，属跨租户事故。因此必须配 §4.3 的防回归断言，并在 `AgentConfig` 的 `ReactAgent.builder()` 处留注释说明该约束。
 
 ### 3.4 客户端断线与取消
 
@@ -313,6 +333,7 @@ sink.asFlux().doOnCancel(() -> cancelled.set(true))   // controller 侧置标志
 - 异常：池满（mock `executor.execute` 抛 `RejectedExecutionException`）→ 断言异常从 `processWithHistoryStream(...)` **方法调用本身**抛出，而非从返回的 `Flux` 订阅时抛出。这是 I5 成立的直接证据，也是 §3.1「不用 `subscribeOn`」约束的回归防线。
 - 边界：整体超时命中 → 末事件为 `ERROR` 且含提示语，流正常结束，无 `DONE`。
 - 边界（I1）：池任务内 `TenantContext.getSchema()` 等于快照值；任务结束后再次读取为空（防线程池串扰）。
+- **防回归（守 §3.3.1 的线程归属前提）**：用一个测试工具回调断言「工具执行线程名 == 池任务线程名」。该断言一旦失败，说明 graph 开始切线程（例如有人打开了 `parallelToolExecution` 或加了并行节点），此时 ThreadLocal 方案静默失效、有跨租户风险，必须改走显式传递而非直接合并。
 
 ### 4.4 不做的测试（YAGNI）
 
@@ -333,7 +354,7 @@ sink.asFlux().doOnCancel(() -> cancelled.set(true))   // controller 侧置标志
 | 编号 | 风险 | 等级 | 处置 |
 |---|---|---|---|
 | R1 | `THINKING_DELTA` 与 `ANSWER_DELTA` 的区分判据不确定（同为 `AGENT_MODEL_STREAMING`） | 中 | 实现阶段先打全量 `OutputType` + `node()` + `agent()` 日志实测一轮再定；候选判据：节点名是否等于 `AGENT_MODEL_NAME`、state 中是否仍有未消费的 tool call、是否为流中最后一个 model 段。最保守回退：合并为单一 `DELTA` 类型，前端不区分思考与答案（功能降级但不阻塞）。 |
-| R2 | graph 内部切换调度器导致 `TenantContext` 在节点中途丢失 → 工具访问错误 schema（跨租户风险） | **高** | 实现第一步即验证：在工具内打印 `TenantContext.getSchema()` 与线程名。若丢失，改用 `RunnableConfig.context()`（实测存在，返回可变 `Map<String,Object>`，另有 `clearContext()`）承载租户信息 —— 但**需先验证 graph 是否把该 context 传递到工具的 `ToolContext`**，若不传递则需改为在工具装饰层（`AggregatedToolCallbackProvider`）包装时注入。此路径未验证前，**验证未通过不得合并**。 |
+| R2 | graph 内部切换调度器导致 `TenantContext` / `ToolCallRecorder` 的 ThreadLocal 丢失 | ~~高~~ → **低（已静态定论）** | 见 §3.3.1 的四项字节码核查：项目当前配置下 `stream()` 全程同步、在订阅者线程（即本方案池线程）上执行，ThreadLocal 不丢。**残留风险是配置漂移**：若将来开启 `parallelToolExecution(true)` 或图内加入并行节点，结论立即失效且表现为**静默跨租户**。处置：§4.3 增加一条防回归断言（工具执行线程 == 池任务线程），并在 `AgentConfig` 的 `ReactAgent.builder()` 处加注释说明该约束。 |
 | R3 | `getCompiledGraph()` 非 ReactAgent 对外宣称的稳定 API，升级可能变更 | 中 | 版本已在 `company-rag-agent/pom.xml` 锁死 `1.1.2.0`；`NodeOutputMapper` 为唯一耦合点，升级时改动面可控。 |
 | R4 | 审批阻塞长时间占用流式池线程，池被占满 | 中 | 池独立（§3.1）+ `AbortPolicy` → `R.fail` 业务码降级；`ApprovalProperties.timeoutSeconds` 已有上限，等待会自行终止。 |
 | R5 | 前端未适配，端点上线即无人使用 | 低 | 开关默认关闭，端点存在本身无副作用；本次交付范围明确不含前端。 |
