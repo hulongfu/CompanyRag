@@ -141,6 +141,8 @@ log.info("[STREAM-PROBE] class={} node={} agent={} outputType={} hasToolCalls={}
 
 > 为什么不复用现有超时池：流式任务含审批等待会长时间占线程，混池会与阻塞链路互相饿死（spec §3.1）。
 
+> **配置项建议拆独立**：两池若共用 `rag.agent.executor.*`，则任务 7.5 触发熔断时把容量压到最小，会**同时压小阻塞池**，污染任务 7.2（验证两池隔离）的验收环境。故建议本项直接拆为 `rag.agent.stream.core-pool-size` / `max-pool-size` / `queue-capacity`，默认值与 `executor.*` 相同（4/8/100），代码内回退读取 `executor.*` 以兼容既有部署。spec §6 已把该项列为「实现阶段可决定」，此处据验收需要取「拆」。
+
 ---
 
 ### 任务 2：事件模型 + `NodeOutputMapper`（先写测试）
@@ -237,31 +239,37 @@ public Flux<AgentStreamEvent> processWithHistoryStream(List<Message> history, St
         // 熔断打开：建流前同步抛出，controller 转 R.fail（满足 I5）
         throw CallNotPermittedException.createCallNotPermittedException(cb);
     }
-    boolean submitted = false;
+    long start = System.nanoTime();
     try {
         Flux<AgentStreamEvent> flux = streamingAgentExecutor.executeStream(...);
-        submitted = true;
+        // 建流成功即记账并归还许可，不等流结束（否则许可被挂占整条流时长）
+        cb.onSuccess(System.nanoTime() - start, TimeUnit.NANOSECONDS);
         return flux;
-    } finally {
-        if (!submitted) {
-            // 建流阶段就失败（含池满 RejectedExecutionException）：
-            // 许可必须在抛出前释放，否则熔断器许可被永久占用 → 后续请求全部拒绝
-            cb.releasePermission();
-        }
+    } catch (RuntimeException e) {
+        // 建流阶段失败（含池满 RejectedExecutionException）：计入失败率，同时归还许可。
+        // 必须用 onError 而非 releasePermission —— 后者只归还许可、不记失败，
+        // 若此处只 release，本熔断器将永远收不到失败样本 → 失败率恒 0 → 永不打开。
+        cb.onError(System.nanoTime() - start, ChronoUnit.NANOS, e);
+        throw e;
     }
 }
 ```
 
-> **许可配对是本方案最容易出错的地方**，三条硬约束：
-> 1. `tryAcquirePermission()` 成功但**建流未完成**（池满等）→ 必须 `releasePermission()`。这是 `releasePermission()` 这个 API 存在的唯一理由，漏掉即许可泄漏。
-> 2. 建流成功 → 许可**不在这里**释放，改由流终止时的一次性 `onSuccess` / `onError` 消费（二者内部等价于释放许可，**不得**再额外调 `releasePermission()`，否则双放）。
-> 3. `onSuccess` / `onError` **恰好调用一次**：挂在 `doOnComplete` / `doOnError` / `doOnCancel` 三条终止路径上，用 `AtomicBoolean` 保证幂等（取消路径计为成功，不计入失败率 —— 客户端主动断开不是服务故障）。
+> **许可配对与统计口径是本方案最容易出错的地方**，四条硬约束：
+> 1. **建流成功 → `onSuccess` 在方法体内立即调用**，不等流结束。许可占用时长 = `tryAcquirePermission()` 到记账点之间；若挂在流终止回调上，一条流会挂占许可长达 `timeout-minutes`（默认 5min），HALF_OPEN 的探测名额（默认 10）会被几条长挂的流占满，熔断器卡在 HALF_OPEN 无法收敛。
+> 2. **建流失败 → 必须 `onError`，不能只 `releasePermission()`**。二者都归还许可，但**只有 `onError` 计入失败率**。只 `releasePermission()` 的后果是熔断器永远收不到失败样本、失败率恒 0、永不打开 —— 整套门控与任务 7.5 的验收同时失效，且现象与「熔断正常工作」难以区分。
+> 3. **`onSuccess` / `onError` 各至多一次**（同一请求内互斥，由上面的 try/catch 结构天然保证，无需 `AtomicBoolean`）。**不得**在记账后再额外调 `releasePermission()`，两者内部都会释放许可，叠加即双放。
+> 4. **流内失败不进熔断统计**（见下）。
+
+**熔断统计口径 = 建流阶段成败率，不含流内失败**（spec §3.6 有完整理由，此处记实现要点）：
+
+- **机制上做不到**：任务 3.2 的 `onErrorResume` 把异常转成 `ERROR` 后返回 `Flux.empty()`，流以 `onComplete` 正常终止。若把记账挂在 `doOnComplete`/`doOnError`/`doOnCancel` 上，流内失败会**恒走 `doOnComplete` → 记成 `onSuccess`**，失败率被静默美化 —— 比不统计更危险。
+- **语义上不应该**：流内失败已降级为 `ERROR` 事件供前端展示，且单次模型超时不该放大成 30s 全链路拒绝。此处熔断器的职责是**保护池资源**，不是统计答案质量。
+- **可观测性不丢**：流内失败由 `rag.agent.stream.error` 计数器独立覆盖（任务 3.2 第 5 步），与熔断解耦。
 
 **为什么不用 `@CircuitBreaker` 注解**（字节码核查，见 spec §3.6）：切面有两条分派路径，走哪条取决于 `resilience4j-reactor` 是否在 classpath（`ReactorOnClasspathCondition` 是 AND 判定）。当前没有该依赖 → 走 `defaultHandling` 的同步路径；但**一旦配 `fallbackMethod`，同步抛出的 `CallNotPermittedException` 会被 fallback 吃掉并返回 `Flux.just(error)`，controller 拿到 Flux → 响应仍是 SSE，I5 直接破**。而将来任何人引入 `resilience4j-reactor`，分派路径会静默切换成订阅时判定，同样破 I5。手动门控不依赖 classpath 状态。
 
 **也不用「注解 + 手动检查并用」**：注解的 `executeCheckedSupplier` 内部已 `tryAcquirePermission()`，再加手动检查会一次调用扣两票，HALF_OPEN 下实际探测数减半、失败统计翻倍失真。
-
-**熔断统计口径**：手动方案顺带修掉了注解的天然盲区 —— 注解只能观测「建流是否成功」，流内失败一概看不见；手动 `onError` 挂在流终止路径上，熔断率反映**真实的流式失败率**。
 
 **4.2 方法体**：与 `processWithHistory:126-146` 同构构造 `messages`（history + `UserMessage`），捕获 `TenantStreamContext`，委托 `streamingAgentExecutor.executeStream(messages, sessionId, cancelled, ctx)`。
 
@@ -330,15 +338,14 @@ return flux.doOnCancel(() -> cancelled.set(true))
 
 **6.3 `RagAgentServiceStreamTest`**（新建）：
 
-- `processWithHistoryStream_poolSaturated_throwsFromMethodCallNotOnSubscribe` —— mock `streamExecutor.execute` 抛 `RejectedExecutionException`，断言异常从**方法调用本身**抛出。这是 I5 成立的直接证据，也是「不用 `subscribeOn`」的回归防线。
+- `processWithHistoryStream_poolSaturated_recordsErrorAndThrowsFromMethodCall` —— mock `streamExecutor.execute` 抛 `RejectedExecutionException`，一次断言三件事：① 异常从**方法调用本身**抛出（I5 的直接证据，也是「不用 `subscribeOn`」的回归防线）；② `verify(cb).onError(anyLong(), any(), eq(rejected))` —— **这条守的是「熔断器永不打开」这个静默故障**：若误写成只 `releasePermission()`，许可照样归还、请求照样成功，唯一后果是失败率恒 0、熔断器永不打开，任务 7.5 无法验收；③ `verify(cb, never()).releasePermission()`（`onError` 内部已释放，双放会让许可数虚增、限流形同虚设）。
 - `processWithHistoryStream_idleTimeout_emitsErrorWithoutDone`。
 - `processWithHistoryStream_restoresTenantContext_inPoolThreadOnly` —— 池任务内 `TenantContext.getSchema()` == 快照值；任务结束后再读为空（I1 + 防线程池串扰）。
 - `processWithHistoryStream_toolExecutesOnSameThreadAsPoolTask` —— **防回归断言（守 spec §3.3.1 的线程归属前提）**：用测试工具回调记录执行线程名，断言与池任务线程名相同。一旦有人开启 `parallelToolExecution` 或加并行节点，本用例立刻红 → 此时 ThreadLocal 方案静默失效、有跨租户风险，必须改走显式传递，不得直接合并。
-- `processWithHistoryStream_circuitOpen_throwsCallNotPermittedFromMethodCall` —— mock `CircuitBreaker.tryAcquirePermission()` 返回 false，断言 `CallNotPermittedException` 从**方法调用本身**抛出（不是订阅时）。这是熔断路径满足 I5 的直接证据。
-- `processWithHistoryStream_submitRejected_releasesPermission` —— mock `streamExecutor.execute` 抛 `RejectedExecutionException`，用 `verify(cb).releasePermission()` 断言许可被释放。**这条守的是许可泄漏**：漏掉 `releasePermission()` 会让熔断器许可被永久占用，后续所有流式请求静默拒绝，且现象与「熔断生效」几乎一样难查。
-- `processWithHistoryStream_streamCompletes_recordsSuccessExactlyOnce` —— 断言 `onSuccess` 调用 1 次且 `releasePermission()` **不再**额外调用。
-- `processWithHistoryStream_streamFails_recordsErrorExactlyOnce` —— 断言 `onError` 1 次。
-- `processWithHistoryStream_clientCancelled_countsAsSuccess` —— 取消路径计成功不计失败（客户端断开不是服务故障），断言走 `onSuccess`。
+- `processWithHistoryStream_circuitOpen_throwsCallNotPermittedFromMethodCall` —— mock `CircuitBreaker.tryAcquirePermission()` 返回 false，断言 `CallNotPermittedException` 从**方法调用本身**抛出（不是订阅时），且 `verifyNoInteractions` 之外的 `executeStream` 未被调用。这是熔断路径满足 I5 的直接证据。
+- `processWithHistoryStream_submitSuccess_recordsSuccessBeforeReturn` —— 建流成功时 `verify(cb).onSuccess(...)`，且断言发生在**方法返回之前**（未订阅即已记账）。这条守「许可不被长期挂占」：若实现把 `onSuccess` 挪到 `doOnComplete`，一条流会挂占许可至多 5 分钟，HALF_OPEN 探测名额被长流占满、熔断器无法收敛。
+- `processWithHistoryStream_inFlightError_doesNotRecordCircuitError` —— **反向防回归（守统计口径）**：让流内抛错，断言 `verify(cb, never()).onError(...)`。因为 `onErrorResume` 会把流变成 `onComplete`，任何挂在流终止回调上的记账都会把流内失败**记成成功**，静默美化失败率。此用例锁定「流内失败不进熔断」这一口径，将来若有人想改回挂回调记账，必须先推翻 spec §3.6 的口径论证。
+- `processWithHistoryStream_inFlightError_incrementsStreamErrorCounter` —— 流内失败时 `rag.agent.stream.error` 计数 +1（守 R10 可观测性不因「不计熔断」而丢失）。
 
 **6.4 不做**（YAGNI）：不引入 MockChatModel 做全链路集成测试；不为 `AgentStreamEvent`/`AgentStreamEventType` 纯数据 record 写测试；不写前端 SSE 契约测试；不为 `ChatController` 新增 `@WebMvcTest`（SSE 端点自动化收益低于成本，改由 6.5 手工验收覆盖）。
 
@@ -350,7 +357,7 @@ return flux.doOnCancel(() -> cancelled.set(true))
 2. 触发需审批的工具（`execute`），审批等待期间并发打普通 `/api/chat` —— 确认阻塞端点正常响应（验证 §3.1 未拖死 HTTP 线程、两池隔离）。
 3. 中途 `Ctrl+C` 断开 curl —— 查 `rag_session` **未新增行**、无评估记录（验证 §3.5「宁缺不残」）。
 4. 开关置 `false` 重打 —— 返回 `R.fail(503,...)`，**不是 404**（验证 spec §3.8 配置落地要求）。注意：这条走的是方法体内显式 `return R.fail`，不经异常处理器，故 HTTP 200；与鉴权失败走 `GlobalExceptionHandler` 返回 400 是两条不同路径，勿混淆。
-5. 触发一次熔断（连续制造失败直至熔断打开）—— 日志出现 `rag-agent` 熔断记录，且端点返回 **`R.fail` 而非 SSE 流**（验证 spec §3.6 手动门控真的在建流前拦截；若收到的是 SSE `ERROR` 事件，说明熔断判定被推迟到了订阅时，I5 已破，必须停下排查）。
+5. 触发一次熔断 —— 按当前口径（建流阶段成败率），**最可行的触发方式是把流式池容量压到最小**（`core-pool-size`/`max-pool-size` 设 1、`queue-capacity` 设 0）后并发打 `/api/chat/stream`，让 `executeStream` 连续抛 `RejectedExecutionException` 累计到 `minimum-number-of-calls: 5` + 失败率 50% → 熔断打开。随后单次请求应：日志出现 `rag-agent` 熔断记录，且端点返回 **`R.fail` 而非 SSE 流**（验证 spec §3.6 手动门控真的在建流前拦截；若收到的是 SSE `ERROR` 事件，说明熔断判定被推迟到了订阅时，I5 已破，必须停下排查）。注意**不要**试图用"流内报错"触发熔断 —— 按口径流内失败不计熔断，那样永远触发不了。
 6. **租户落库正例（守复制方案的红线）**：用租户 A 的 JWT + `X-Tenant-Id: A` 完整跑一次成功流，结束后查 `rag_session` 最新行，断言 `tenant_id == A` 且 `user_id` 正确。任务 5.3 采用「复制不抽取」，`saveConversation` 实参顺序一旦与 `chat()` 漂移，会**静默把数据写进错误租户**且无任何报错 —— 这是隔离红线级风险，必须有正例兜底，仅靠「断开不落库」的反例不足以防住。
 
 ---

@@ -282,7 +282,7 @@ sink.asFlux().doOnCancel(() -> cancelled.set(true))   // controller 侧置标志
 
 本方案的处理：
 1. 流式入口用**手动 `CircuitBreaker` 门控**（`circuitBreakerRegistry.circuitBreaker("rag-agent")` + `tryAcquirePermission()`），在返回 Flux 之前同步判定，熔断打开即抛 `CallNotPermittedException` → controller 转 `R.fail`，满足 I5。**不用 `@CircuitBreaker` 注解**，理由见本节末「为什么不能用 `@CircuitBreaker` 注解」。
-2. 流内失败在 `onErrorResume` 中显式 `registry.counter("rag.agent.stream.error")` 计数（与现有 `metricsRecorder` 共用 Micrometer `MeterRegistry`），保证可观测（R10）；同时把该失败记入熔断统计（见下）。
+2. 流内失败在 `onErrorResume` 中显式 `registry.counter("rag.agent.stream.error")` 计数（与现有 `metricsRecorder` 共用 Micrometer `MeterRegistry`），保证可观测（R10）。**流内失败不计入熔断统计**，口径边界见本节末「熔断统计口径」。
 3. 把「Agent 链路 LLM 调用缺熔断」写入 §7 已知限制，不静默掩盖、不在本方案内顺手扩大改动面。
 
 **为什么不在此处顺手补全 Agent 链路的熔断**：`ReactAgent` 的 LLM 调用发生在 graph 节点内部，无法用注解式 AOP 包装；要真正满足 R3 需改 `AgentLlmNode` 层或包一层 `ChatModel` 装饰器，属独立议题。
@@ -304,9 +304,35 @@ if (!cb.tryAcquirePermission()) {
 }
 ```
 
-池任务结束时**恰好一次**调用 `cb.onSuccess(duration, SUCCESS)` 或 `cb.onError(...)` 记录结果（含取消路径不计入失败的判断）。
+**记账点：`onSuccess` 在方法体内、`return flux` 之前立即调用**，不等流结束。`onError` 只在**建流阶段抛异常**时调用（即 `executeStream` 同步抛出、尚未返回 Flux）：
 
-相比注解的两个优势：① 只扣一次许可，不会像「注解 + 手动检查并用」那样在 HALF_OPEN 下双扣挤占探测名额；② 熔断统计反映**真实的流式失败率**（注解方案只能观测到「建流是否成功」，流内失败一概看不见）。代价是要手写 `onSuccess/onError` 配对，由 §4 的单测覆盖「恰好调用一次」。
+```java
+CircuitBreaker cb = circuitBreakerRegistry.circuitBreaker("rag-agent");
+if (!cb.tryAcquirePermission()) {
+    throw CallNotPermittedException.createCallNotPermittedException(cb); // 熔断打开 → controller 转 R.fail
+}
+    long start = System.nanoTime();
+    try {
+        Flux<AgentStreamEvent> flux = streamingAgentExecutor.executeStream(...);
+        cb.onSuccess(System.nanoTime() - start, TimeUnit.NANOSECONDS); // 建流成功即记账，立即归还许可
+        return flux;
+    } catch (RuntimeException e) {
+        cb.onError(System.nanoTime() - start, TimeUnit.NANOSECONDS, e); // 建流失败计入失败率
+        throw e;
+    }
+```
+
+**熔断统计口径（明确边界，勿夸大）**：本熔断器衡量的是 **「建流阶段成败率」** —— 分母是流式请求的建流尝试，分子是建流阶段的同步失败（池满 `RejectedExecutionException`、`executeStream` 内的同步异常等）。**不衡量流内失败率**，理由三条：
+
+1. **机制上做不到**（这是本条口径的硬约束，不是取舍）：§2.4 / 任务 3.2 的 `onErrorResume` 把异常转成 `ERROR` 事件后返回 `Flux.empty()`，流以 `onComplete` **正常终止**。若把 cb 记账挂在 `doOnComplete`/`doOnError`/`doOnCancel` 上，流内失败会**恒走 `doOnComplete` → 被记成 `onSuccess`**，失败率被静默美化，比不统计更糟。
+2. **语义上不应该**：流内失败已经优雅降级为 `ERROR` 事件推给前端，用户拿到了可读反馈；且单次模型超时之类的抖动不该放大成 30s 全链路拒绝（`wait-duration-in-open-state: 30s`）。熔断器在这里的职责是**保护资源（池）**，不是统计答案质量。
+3. **可观测性已由计数器覆盖**：流内失败走 `rag.agent.stream.error` 独立计数器（R10），与熔断解耦。
+
+> **反过来说，建流阶段必须记 `onError`，否则熔断器形同虚设**：若池满只调 `releasePermission()`（归还许可、不记结果）而不记 `onError`，则该熔断器将**永远收不到任何失败样本 → 失败率恒为 0 → 永不打开**，本节整套门控与实现计划任务 7.5 的熔断开手工验收都无意义。`releasePermission()` 与 `onError()` 都会归还许可，但**只有后者计入失败率**，二者不可互相替代。
+
+**为什么 `onSuccess` 不等流结束**：许可的占用时长 = `tryAcquirePermission()` 到 `onSuccess/onError/releasePermission()` 之间。若挂在流终止时，一条流会挂占许可长达 `timeout-minutes`（默认 5 分钟），HALF_OPEN 的探测名额（`DEFAULT_PERMITTED_CALLS_IN_HALF_OPEN_STATE = 10`）会被几条长挂的流占满，熔断器卡在 HALF_OPEN 无法收敛。建流成功即归还，许可语义与「保护建流资源」一致。
+
+相比注解方案的优势：**只扣一次许可**（「注解 + 手动检查并用」会双扣，HALF_OPEN 下探测数减半、失败统计翻倍失真），且统计口径由我们自己写死、不随 classpath 变化。
 
 ### 3.7 既有缺陷记录（本次不修）
 
@@ -351,7 +377,10 @@ if (!cb.tryAcquirePermission()) {
 
 ### 4.3 `RagAgentServiceStreamTest`（新建）
 
-- 异常：池满（mock `executor.execute` 抛 `RejectedExecutionException`）→ 断言异常从 `processWithHistoryStream(...)` **方法调用本身**抛出，而非从返回的 `Flux` 订阅时抛出。这是 I5 成立的直接证据，也是 §3.1「不用 `subscribeOn`」约束的回归防线。
+- 异常：池满（mock `executor.execute` 抛 `RejectedExecutionException`）→ 断言异常从 `processWithHistoryStream(...)` **方法调用本身**抛出，而非从返回的 `Flux` 订阅时抛出。这是 I5 成立的直接证据，也是 §3.1「不用 `subscribeOn`」约束的回归防线。**同时断言 `cb.onError(...)` 被调用且 `cb.releasePermission()` 未被调用** —— 若实现误用 `releasePermission()` 替代 `onError`，许可照样归还、请求照样成功，唯一后果是失败率恒 0、熔断器永不打开，属静默故障（§3.6）。
+- 异常：熔断打开（mock `tryAcquirePermission()` 返回 false）→ 断言 `CallNotPermittedException` 从方法调用本身抛出，且 `executeStream` 未被调用。
+- 边界：建流成功时 `cb.onSuccess(...)` 在**方法返回之前**已调用（未订阅即记账）。守「许可不被挂占整条流时长」，否则 HALF_OPEN 探测名额会被长流占满、熔断器无法收敛（§3.6）。
+- 边界（守 §3.6 统计口径，反向断言）：流内失败时 `cb.onError(...)` **从未被调用**，而 `rag.agent.stream.error` 计数器 +1。因为 `onErrorResume` 会把流变成 `onComplete`，任何挂在流终止回调上的记账都会把流内失败**记成成功**、静默美化失败率。将来若要改回挂回调记账，必须先推翻 §3.6 的口径论证。
 - 边界：整体超时命中 → 末事件为 `ERROR` 且含提示语，流正常结束，无 `DONE`。
 - 边界（I1）：池任务内 `TenantContext.getSchema()` 等于快照值；任务结束后再次读取为空（防线程池串扰）。
 - **防回归（守 §3.3.1 的线程归属前提）**：用一个测试工具回调断言「工具执行线程名 == 池任务线程名」。该断言一旦失败，说明 graph 开始切线程（例如有人打开了 `parallelToolExecution` 或加了并行节点），此时 ThreadLocal 方案静默失效、有跨租户风险，必须改走显式传递而非直接合并。
@@ -390,13 +419,13 @@ if (!cb.tryAcquirePermission()) {
 | `rag.agent.stream.idle-timeout-seconds` | `60` | 相邻事件最大间隔，超时推 `ERROR` 并正常结束 |
 | `rag.agent.executor.timeout-minutes` | `5`（复用） | 整体上限，复用现有项，不新增 |
 | `rag.agent.executor.core-pool-size` / `max-pool-size` / `queue-capacity` | `4` / `8` / `100`（复用） | 流式专用池沿用同一组语义，实现阶段可决定是否拆为 `rag.agent.stream.*` 独立项 |
-| `resilience4j.circuitbreaker.instances.rag-agent.*` | **无需新增** | 手动门控 `circuitBreakerRegistry.circuitBreaker("rag-agent")` 会继承项目 `application.yml:179-186` 已有的 `configs.default`：`sliding-window-size: 10`、`minimum-number-of-calls: 5`、`failure-rate-threshold: 50`、`wait-duration-in-open-state: 30s` —— 窗口足够小，低频端点也能正常触发，故**不需要为本方案新增实例配置**。（若照 resilience4j 出厂默认 100/50%，低频端点几乎永不熔断；项目已覆写过，无此问题）<br>注意 `permitted-number-of-calls-in-half-open-state` 未显式配置，走 resilience4j 出厂默认 `DEFAULT_PERMITTED_CALLS_IN_HALF_OPEN_STATE = 10`。双扣许可虽不至于把探测挤死，但仍会让 HALF_OPEN 的实际探测数减半、且失败统计翻倍失真 —— 这是本方案坚持「只扣一次许可」的理由之一（另一理由是流内失败注解根本观测不到）。 |
+| `resilience4j.circuitbreaker.instances.rag-agent.*` | **无需新增** | 手动门控 `circuitBreakerRegistry.circuitBreaker("rag-agent")` 会继承项目 `application.yml:179-186` 已有的 `configs.default`：`sliding-window-size: 10`、`minimum-number-of-calls: 5`、`failure-rate-threshold: 50`、`wait-duration-in-open-state: 30s` —— 窗口足够小，低频端点也能正常触发，故**不需要为本方案新增实例配置**。（若照 resilience4j 出厂默认 100/50%，低频端点几乎永不熔断；项目已覆写过，无此问题）<br>注意 `permitted-number-of-calls-in-half-open-state` 未显式配置，走 resilience4j 出厂默认 `DEFAULT_PERMITTED_CALLS_IN_HALF_OPEN_STATE = 10`。双扣许可虽不至于把探测挤死（默认 10 个名额），但仍会让 HALF_OPEN 的实际探测数减半、且失败统计翻倍失真 —— 这是本方案坚持「只扣一次许可」的理由。 |
 
 ---
 
 ## 7. 已知限制（本方案不解决，明确记录）
 
-1. **Agent 链路 LLM 调用缺熔断包装**，与铁律 R3 不符（既有缺口，非本次引入）。本方案在**流式入口层**加了手动熔断门控（含流内失败计入统计），但 `ReactAgent` 内部 `AgentLlmNode` 的 LLM 调用仍无保护，阻塞链路同样没有，见 §3.6。
+1. **Agent 链路 LLM 调用缺熔断包装**，与铁律 R3 不符（既有缺口，非本次引入）。本方案在**流式入口层**加了手动熔断门控，但**统计口径仅为「建流阶段成败率」**，流内失败不进入熔断（口径理由见 §3.6），`ReactAgent` 内部 `AgentLlmNode` 的 LLM 调用仍无保护，阻塞链路同样没有。
 2. **阻塞链路 `toolContext` 恒为 traceId** 的既有缺陷不修，见 §3.7。流式链路不受影响。
 3. 不提供多智能体编排、跨副本会话恢复、技能自进化 —— 即 AgentScope 的其余卖点，按当前项目定位判定为不需要（§0）。
 4. 不改造前端；SSE 端点上线后需另行安排前端接入。
