@@ -359,7 +359,7 @@ return flux.doOnCancel(() -> cancelled.set(true))
 - `processWithHistoryStream_poolSaturated_recordsErrorAndThrowsFromMethodCall` —— mock `streamExecutor.execute` 抛 `RejectedExecutionException`，一次断言三件事：① 异常从**方法调用本身**抛出（I5 的直接证据，也是「不用 `subscribeOn`」的回归防线）；② `verify(cb).onError(anyLong(), any(), eq(rejected))` —— **这条守的是「熔断器永不打开」这个静默故障**：若误写成只 `releasePermission()`，许可照样归还、请求照样成功，唯一后果是失败率恒 0、熔断器永不打开，任务 7.5 无法验收；③ `verify(cb, never()).releasePermission()`（`onError` 内部已释放，双放会让许可数虚增、限流形同虚设）。
 - `processWithHistoryStream_idleTimeout_emitsErrorWithoutDone`。
 - `processWithHistoryStream_restoresTenantContext_inPoolThreadOnly` —— 池任务内 `TenantContext.getSchema()` == 快照值；任务结束后再读为空（I1 + 防线程池串扰）。
-- `processWithHistoryStream_toolExecutesOnSameThreadAsPoolTask` —— **防回归断言（守 spec §3.3.1 的线程归属前提）**：用测试工具回调记录执行线程名，断言与池任务线程名相同。一旦有人开启 `parallelToolExecution` 或加并行节点，本用例立刻红 → 此时 ThreadLocal 方案静默失效、有跨租户风险，必须改走显式传递，不得直接合并。
+- ~~`processWithHistoryStream_toolExecutesOnSameThreadAsPoolTask`~~ —— **不采纳（用户裁决删除）**：该用例需真实触发工具回调并捕获执行线程名，依赖真实 LLM 工具轮次，单测层无法稳定构造，成本高于收益。线程归属前提改由 `AgentConfig` 注释（任务 5.4）+ `AgentConfig` 未开启 `parallelToolExecution` 的静态事实守护；跨租户隔离红线改由任务 6 的「流式与阻塞链路 `saveConversation` 实参逐位一致」自动化用例兜底（见 `ChatControllerStreamTest`）。
 - `processWithHistoryStream_circuitOpen_throwsCallNotPermittedFromMethodCall` —— mock `CircuitBreaker.tryAcquirePermission()` 返回 false，断言 `CallNotPermittedException` 从**方法调用本身**抛出（不是订阅时），且 `verifyNoInteractions` 之外的 `executeStream` 未被调用。这是熔断路径满足 I5 的直接证据。
 - `processWithHistoryStream_submitSuccess_recordsSuccessBeforeReturn` —— 建流成功时 `verify(cb).onSuccess(...)`，且断言发生在**方法返回之前**（未订阅即已记账）。这条守「许可不被长期挂占」：若实现把 `onSuccess` 挪到 `doOnComplete`，一条流会挂占许可至多 5 分钟，HALF_OPEN 探测名额被长流占满、熔断器无法收敛。
 - `processWithHistoryStream_inFlightError_doesNotRecordCircuitError` —— **反向防回归（守统计口径）**：让流内抛错，断言 `verify(cb, never()).onError(...)`。因为 `onErrorResume` 会把流变成 `onComplete`，任何挂在流终止回调上的记账都会把流内失败**记成成功**，静默美化失败率。此用例锁定「流内失败不进熔断」这一口径，将来若有人想改回挂回调记账，必须先推翻 spec §3.6 的口径论证。
@@ -377,6 +377,23 @@ return flux.doOnCancel(() -> cancelled.set(true))
 4. 开关置 `false` 重打 —— 返回 `R.fail(503,...)`，**不是 404**（验证 spec §3.8 配置落地要求）。注意：这条走的是方法体内显式 `return R.fail`，不经异常处理器，故 HTTP 200；与鉴权失败走 `GlobalExceptionHandler` 返回 400 是两条不同路径，勿混淆。
 5. 触发一次熔断 —— 按当前口径（建流阶段成败率），**最可行的触发方式是把流式池容量压到最小**（`core-pool-size`/`max-pool-size` 设 1、`queue-capacity` 设 0）后并发打 `/api/chat/stream`，让 `executeStream` 连续抛 `RejectedExecutionException` 累计到 `minimum-number-of-calls: 5` + 失败率 50% → 熔断打开。随后单次请求应：日志出现 `rag-agent` 熔断记录，且端点返回 **`R.fail` 而非 SSE 流**（验证 spec §3.6 手动门控真的在建流前拦截；若收到的是 SSE `ERROR` 事件，说明熔断判定被推迟到了订阅时，I5 已破，必须停下排查）。注意**不要**试图用"流内报错"触发熔断 —— 按口径流内失败不计熔断，那样永远触发不了。
 6. **租户落库正例（守复制方案的红线）**：用租户 A 的 JWT + `X-Tenant-Id: A` 完整跑一次成功流，结束后查 `rag_session` 最新行，断言 `tenant_id == A` 且 `user_id` 正确。任务 5.3 采用「复制不抽取」，`saveConversation` 实参顺序一旦与 `chat()` 漂移，会**静默把数据写进错误租户**且无任何报错 —— 这是隔离红线级风险，必须有正例兜底，仅靠「断开不落库」的反例不足以防住。
+   > **已改为自动化测试（用户裁决）**：由 `ChatControllerStreamTest` 逐位比对流式与阻塞链路 `saveConversation` 实参，任一位漂移即红；实参隔离语义（租户来自请求头、用户来自 JWT）同用例钉住。
+
+**任务 7 实测结论（2026-10-02，本地 8081 + 真实 DashScope）**：
+
+| 项 | 结果 | 证据要点 |
+|----|------|----------|
+| 1 token 逐帧 | ✅ | `ANSWER_DELTA` 多帧逐字到达，末尾 `DONE` |
+| 3 中途断开不落库 | ✅ | 收到 17 帧后断开，`rag_session` 无对应行 |
+| 4 开关关闭 | ✅（修复后） | 三种 Accept（含 `text/event-stream`）均返回 `{"code":503,"msg":"流式接口未启用"}`，HTTP 200/JSON |
+| 5 池满/熔断走统一响应体 | ✅ | 池压到 1+队列 1，第 3 个请求返回 `{"code":503,...}` JSON 而非 SSE 流；熔断开路走同一 controller catch 分支，由 `circuitOpen_returnsFail503` 单测覆盖 |
+| 6 租户落库 | ✅ | 流式成功落库，`user_id=1`；实参顺序由自动化用例逐位钉死 |
+
+**实测暴露并修复的缺陷**：`@PostMapping(produces=text/event-stream)` 锁死响应类型，建流前返回 `R` 时抛 `HttpMessageNotWritableException` → HTTP 500（违反 I5）。修复：移除 `produces`（SSE 由返回类型 `Flux` 自动识别），建流前失败改走 `ResponseEntity` 显式钉 `Content-Type: application/json`（绕过 Accept 协商，防 406）。见提交 `2750ed2`。
+
+**实测暴露的既有缺口（本期不改，另行处理）**：
+1. **`ReactAgent.getCompiledGraph()` 懒加载**：新进程首个流式请求早于阻塞链路时拿到 `null`，流式直接降级为 `ERROR` 事件。需在 `RagAgentService` 启动或首调用时预热图编译，否则流式端点不能独立冷启动。
+2. **`queue-capacity=0` 启动即崩**：`new ArrayBlockingQueue<>(0)` 抛 `IllegalArgumentException` 导致 `ragAgentService` 构造失败、应用无法启动。plan 任务 7.5 的熔断触发配置（队列设 0）踩中此坑；应改用队列容量 1 触发，并对 `queue-capacity<=0` 做参数校验或改用 `SynchronousQueue`。
 
 ---
 
