@@ -33,7 +33,7 @@
 | 多智能体编排 | 单 Agent + 工具/技能路由 | 当前定位不需要（YAGNI） |
 | 分布式会话恢复 | 单副本部署，无此需求 | 当前定位不需要 |
 
-**决定性发现（推翻"需要换引擎"的前提）**：`ReactAgent` 1.1.2.0 本身确实只有 6 个 `call()` 重载、无 `stream()`，但它暴露 `getCompiledGraph()`，而 `CompiledGraph` 提供：
+**决定性发现（推翻"需要换引擎"的前提）**：`ReactAgent` 1.1.2.0 本身确实只有 8 个 `call()` 重载（`String`/`UserMessage`/`List<Message>`/`Map` × 带不带 `RunnableConfig`）、无 `stream()`，但它暴露 `getCompiledGraph()`，而 `CompiledGraph` 提供：
 
 ```java
 Flux<NodeOutput> stream(Map<String,Object>, RunnableConfig)
@@ -78,7 +78,7 @@ Flux<NodeOutput> streamFromInitialNode(OverAllState, RunnableConfig)
 | I2 | 审批门继续生效，高危工具不因走流式而绕过 | `AggregatedToolCallbackProvider` 拦截点 |
 | I3 | 在线评估 `ragUsed` 判定与落库 Owner（`ChatController`）不变 | `2026-09-14-orchestration.md` §4 |
 | I4 | SSE 已开始写出后不得抛异常到 `GlobalExceptionHandler` | 铁律 R4 的例外情形，见 §3.2 |
-| I5 | 池拒绝/鉴权失败等**建流前**错误仍返回标准 `R<T>`（HTTP 200 + 业务码，见 §3.1） | 铁律 R4 |
+| I5 | 池拒绝/熔断打开/鉴权失败等**建流前**错误仍返回标准 `R<T>`（不建 SSE；HTTP 语义见 §3.1 的边界说明） | 铁律 R4 |
 
 ---
 
@@ -200,7 +200,7 @@ agentStreamExecutor.execute(() -> runStream(sink, ...));   // 见 §2.4
 
 - 新增 `agentStreamExecutor`，参数语义复用 `rag.agent.executor.*`（core/max/queue），拒绝策略 `AbortPolicy`。
 - 与现有 `RagAgentService` 超时池**分离**：流式会长时间占用线程（含审批等待），与阻塞调用混池会互相饿死。
-- 池拒绝发生在 SSE 头写出之前 → 可正常返回 `R.fail`，满足 I5。**注意**：项目 `GlobalExceptionHandler` 各方法返回 `R<Void>` 且无 `@ResponseStatus`，即 HTTP 状态恒为 200、错误码走 `R.code` 业务码。流式端点的订阅前失败沿用同一约定（业务码表达「系统繁忙」），不自行改用 `ResponseEntity` 改变 HTTP 状态语义。
+- 池拒绝发生在 SSE 头写出之前 → 可正常返回 `R.fail`，满足 I5。**HTTP 状态码的准确边界**：项目 `GlobalExceptionHandler` 的 7 个 handler 中，除 `handleBizException` 外**均带 `@ResponseStatus`**（`IllegalArgumentException`→400、`AuthenticationException`→401、`AccessDeniedException`→403、`RuntimeException`/`Exception`/`MethodArgumentNotValid`/`MaxUploadSizeExceeded`→400 或 500），响应体是 `R<T>` 但 HTTP 状态**不是**恒 200。因此「HTTP 200 + 业务码」这条约定**只适用于方法体内显式 `return R.fail(...)` 的路径**（池拒绝、开关关闭），这类路径不经过异常处理器。而鉴权失败沿用 `chat()` 现有的抛异常语义，实际返回 **HTTP 400**（与阻塞端点行为一致）。流式端点不得自行用 `ResponseEntity` 干预 HTTP 状态。
 
 **实现约束（I5 能否成立的前提）**：项目是 WebMVC 栈（各模块均 `spring-boot-starter-web`，`RagController.java:24` 已有返回 `Flux` 的先例，走 Spring MVC 的 `ReactiveTypeHandler` 异步适配）。若 controller 直接 `return flux` 而流用 `subscribeOn` 延迟到订阅时才提交任务，池拒绝异常发生在 Spring 开始订阅之后，此时响应已确定为 SSE，异常无法再转成 `R.fail` —— I5 落空。
 
@@ -281,11 +281,32 @@ sink.asFlux().doOnCancel(() -> cancelled.set(true))   // controller 侧置标志
 **现状核查**：`@CircuitBreaker` 仅出现在 rag 模块的 `search` / `streamAnswer` / `retrieve` / `rerank`；**Agent 链路的 LLM 调用当前零熔断包装**，与 R3「所有通过 Spring AI 发起的 LLM 调用必须使用 CircuitBreaker 包装」不符。这是既有缺口，不由本方案引入。
 
 本方案的处理：
-1. 流式入口方法加 `@CircuitBreaker(name = "rag-agent", fallbackMethod = ...)`。因 §3.1 已改为「方法体内即提交」，池拒绝等失败在方法调用时同步抛出，注解式 AOP 可正常捕获（`fallbackMethod` 返回类型须与被测方法一致，返回 `Flux`）。
-2. 流内失败在 `onErrorResume` 中显式 `registry.counter("rag.agent.stream.error")` 计数（与现有 `metricsRecorder` 共用 Micrometer `MeterRegistry`），保证可观测（R10）。
+1. 流式入口用**手动 `CircuitBreaker` 门控**（`circuitBreakerRegistry.circuitBreaker("rag-agent")` + `tryAcquirePermission()`），在返回 Flux 之前同步判定，熔断打开即抛 `CallNotPermittedException` → controller 转 `R.fail`，满足 I5。**不用 `@CircuitBreaker` 注解**，理由见本节末「为什么不能用 `@CircuitBreaker` 注解」。
+2. 流内失败在 `onErrorResume` 中显式 `registry.counter("rag.agent.stream.error")` 计数（与现有 `metricsRecorder` 共用 Micrometer `MeterRegistry`），保证可观测（R10）；同时把该失败记入熔断统计（见下）。
 3. 把「Agent 链路 LLM 调用缺熔断」写入 §7 已知限制，不静默掩盖、不在本方案内顺手扩大改动面。
 
 **为什么不在此处顺手补全 Agent 链路的熔断**：`ReactAgent` 的 LLM 调用发生在 graph 节点内部，无法用注解式 AOP 包装；要真正满足 R3 需改 `AgentLlmNode` 层或包一层 `ChatModel` 装饰器，属独立议题。
+
+**为什么不能用 `@CircuitBreaker` 注解（字节码核查结论）**：`CircuitBreakerAspect.proceed()` 有两条分派路径 —— 若 `CircuitBreakerAspectExt` 能处理返回类型（Reactor），走 `ReactorCircuitBreakerAspectExt.handle()` → `Flux.transformDeferred(CircuitBreakerOperator.of(cb))`，熔断判定**延迟到订阅时**；否则走 `defaultHandling()` → `cb.executeCheckedSupplier(pjp::proceed)`，判定在**方法调用时**。选哪条由 `ReactorOnClasspathCondition.matches()` 决定，其字节码是 **AND** 判定：`reactor.core.publisher.Flux` **且** `io.github.resilience4j.reactor.AbstractSubscriber` 都要在 classpath。
+
+本项目当前**没有** `resilience4j-reactor` 依赖（`resilience4j-spring-boot3` 不传递它），所以走 `defaultHandling` 的同步路径。但这带来两个不可接受的问题：
+
+1. **配 `fallbackMethod` 会破 I5**：同步抛出的 `CallNotPermittedException` 会被 fallback 捕获并返回 `Flux.just(error)`，controller 拿到的是一个 Flux → 响应仍是 SSE，不是 `R.fail`。
+2. **classpath 脆弱**：将来任何人引入 `resilience4j-reactor`（哪怕只为别的目的），分派路径静默切换到订阅时判定 → 熔断打开时变成流内 `ERROR` 事件，I5 无声失效。
+
+**采用方案：手动 `CircuitBreaker` 门控**（不用注解）。在流式入口方法体内、返回 Flux **之前**：
+
+```java
+CircuitBreaker cb = circuitBreakerRegistry.circuitBreaker("rag-agent");
+if (!cb.tryAcquirePermission()) {
+    // 熔断打开：建流前同步抛出，controller 转 R.fail（满足 I5）
+    throw CallNotPermittedException.createCallNotPermittedException(cb);
+}
+```
+
+池任务结束时**恰好一次**调用 `cb.onSuccess(duration, SUCCESS)` 或 `cb.onError(...)` 记录结果（含取消路径不计入失败的判断）。
+
+相比注解的两个优势：① 只扣一次许可，不会像「注解 + 手动检查并用」那样在 HALF_OPEN 下双扣挤占探测名额；② 熔断统计反映**真实的流式失败率**（注解方案只能观测到「建流是否成功」，流内失败一概看不见）。代价是要手写 `onSuccess/onError` 配对，由 §4 的单测覆盖「恰好调用一次」。
 
 ### 3.7 既有缺陷记录（本次不修）
 
@@ -355,7 +376,7 @@ sink.asFlux().doOnCancel(() -> cancelled.set(true))   // controller 侧置标志
 |---|---|---|---|
 | R1 | `THINKING_DELTA` 与 `ANSWER_DELTA` 的区分判据不确定（同为 `AGENT_MODEL_STREAMING`） | 中 | 实现阶段先打全量 `OutputType` + `node()` + `agent()` 日志实测一轮再定（实现计划任务 0）。**已实测可得的判据**：`RunnableConfig` 提供 `AGENT_MODEL_NAME="_AGENT_MODEL_"` / `AGENT_TOOL_NAME="_AGENT_TOOL_"` / `AGENT_HOOK_NAME_PREFIX="_AGENT_HOOK_"` 常量，节点类型可直接判定；`StreamingOutput.message()` 在增量帧上返回 `AssistantMessage`，其 `hasToolCalls()` 若能在工具轮提前为真，即可边流边区分（首选分支）。回退：合并为单一 `ANSWER_DELTA`（枚举保留 `THINKING_DELTA` 但本期不产出），`DONE.answer` 改取 `AGENT_MODEL_FINISHED` 时 `message()` 的全文。 |
 | R2 | graph 内部切换调度器导致 `TenantContext` / `ToolCallRecorder` 的 ThreadLocal 丢失 | ~~高~~ → **低（已静态定论）** | 见 §3.3.1 的四项字节码核查：项目当前配置下 `stream()` 全程同步、在订阅者线程（即本方案池线程）上执行，ThreadLocal 不丢。**残留风险是配置漂移**：若将来开启 `parallelToolExecution(true)` 或图内加入并行节点，结论立即失效且表现为**静默跨租户**。处置：§4.3 增加一条防回归断言（工具执行线程 == 池任务线程），并在 `AgentConfig` 的 `ReactAgent.builder()` 处加注释说明该约束。 |
-| R3 | `getCompiledGraph()` 非 ReactAgent 对外宣称的稳定 API，升级可能变更 | 中 | 版本已在 `company-rag-agent/pom.xml` 锁死 `1.1.2.0`；`NodeOutputMapper` 为唯一耦合点，升级时改动面可控。 |
+| R3 | `getCompiledGraph()` 非 ReactAgent 对外宣称的稳定 API，升级可能变更 | 中 | 版本已在 `company-rag-agent/pom.xml` 锁死 `1.1.2.0`；graph-core 原为纯 BOM 传递（项目 pom 零直接声明），已在父 pom `dependencyManagement` 显式锁定 `${spring-ai-alibaba.version}`，防止将来依赖仲裁变化导致线程模型结论静默失效（spec §3.3.1 依赖 1.1.2.0 的字节码事实）；`NodeOutputMapper` 为唯一耦合点，升级时改动面可控。 |
 | R4 | 审批阻塞长时间占用流式池线程，池被占满 | 中 | 池独立（§3.1）+ `AbortPolicy` → `R.fail` 业务码降级；`ApprovalProperties.timeoutSeconds` 已有上限，等待会自行终止。 |
 | R5 | 前端未适配，端点上线即无人使用 | 低 | 开关默认关闭，端点存在本身无副作用；本次交付范围明确不含前端。 |
 
@@ -369,12 +390,13 @@ sink.asFlux().doOnCancel(() -> cancelled.set(true))   // controller 侧置标志
 | `rag.agent.stream.idle-timeout-seconds` | `60` | 相邻事件最大间隔，超时推 `ERROR` 并正常结束 |
 | `rag.agent.executor.timeout-minutes` | `5`（复用） | 整体上限，复用现有项，不新增 |
 | `rag.agent.executor.core-pool-size` / `max-pool-size` / `queue-capacity` | `4` / `8` / `100`（复用） | 流式专用池沿用同一组语义，实现阶段可决定是否拆为 `rag.agent.stream.*` 独立项 |
+| `resilience4j.circuitbreaker.instances.rag-agent.*` | **无需新增** | 手动门控 `circuitBreakerRegistry.circuitBreaker("rag-agent")` 会继承项目 `application.yml:179-186` 已有的 `configs.default`：`sliding-window-size: 10`、`minimum-number-of-calls: 5`、`failure-rate-threshold: 50`、`wait-duration-in-open-state: 30s` —— 窗口足够小，低频端点也能正常触发，故**不需要为本方案新增实例配置**。（若照 resilience4j 出厂默认 100/50%，低频端点几乎永不熔断；项目已覆写过，无此问题）<br>注意 `permitted-number-of-calls-in-half-open-state` 未显式配置，走 resilience4j 出厂默认 `DEFAULT_PERMITTED_CALLS_IN_HALF_OPEN_STATE = 10`。双扣许可虽不至于把探测挤死，但仍会让 HALF_OPEN 的实际探测数减半、且失败统计翻倍失真 —— 这是本方案坚持「只扣一次许可」的理由之一（另一理由是流内失败注解根本观测不到）。 |
 
 ---
 
 ## 7. 已知限制（本方案不解决，明确记录）
 
-1. **Agent 链路 LLM 调用缺熔断包装**，与铁律 R3 不符（既有缺口，非本次引入）。本方案仅覆盖订阅前失败 + 流内错误计数，见 §3.6。
+1. **Agent 链路 LLM 调用缺熔断包装**，与铁律 R3 不符（既有缺口，非本次引入）。本方案在**流式入口层**加了手动熔断门控（含流内失败计入统计），但 `ReactAgent` 内部 `AgentLlmNode` 的 LLM 调用仍无保护，阻塞链路同样没有，见 §3.6。
 2. **阻塞链路 `toolContext` 恒为 traceId** 的既有缺陷不修，见 §3.7。流式链路不受影响。
 3. 不提供多智能体编排、跨副本会话恢复、技能自进化 —— 即 AgentScope 的其余卖点，按当前项目定位判定为不需要（§0）。
 4. 不改造前端；SSE 端点上线后需另行安排前端接入。

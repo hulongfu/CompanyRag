@@ -39,12 +39,12 @@
 | `StreamingAgentExecutor`（75 行） | 仅 `execute(List<Message>)`；`:23` 注释「当前 ReactAgent 不支持流式 API」已过时 | 新增 `executeStream(...)`，`execute()` 零改动；顺带更正该注释 |
 | `RagAgentService:183-243` `callAgentWithTimeout` | `ContextSnapshot.captureAll()` + `TenantContext` 五字段手动快照（schema/tenantId/userId/tenantCode/sessionId），子线程 `setThreadLocals()` 恢复 + `finally TenantContext.clear()` | 流式任务的上下文恢复**照抄这段语义**，不另创写法 |
 | `RagAgentService:69-101` 池构造 | `ThreadPoolExecutor(core, max, 60s, ArrayBlockingQueue(queueCapacity), AbortPolicy)`，字段 `corePoolSize/maxPoolSize/queueCapacity` 来自 `rag.agent.executor.*` | 流式池复用同一组字段与同款构造，仅新建独立实例 |
-| `ChatController:84-124` 安全段 | `X-Tenant-Id` 头 → `verifiedTenantId`（null 则抛 `IllegalArgumentException`）；`SecurityUser` → `verifiedUserId`（null 则抛 `IllegalStateException`） | 流式端点**逐行照搬**该段语义，含异常类型（由 `GlobalExceptionHandler` 转 `R`，HTTP 200） |
+| `ChatController:84-124` 安全段 | `X-Tenant-Id` 头 → `verifiedTenantId`（null 则抛 `IllegalArgumentException`）；`SecurityUser` → `verifiedUserId`（null 则抛 `IllegalStateException`） | 流式端点**逐行照搬**该段语义，含异常类型（由 `GlobalExceptionHandler` 转 `R`，HTTP 400/500，见下行） |
 | `ChatController:147-156` 落库 | `saveConversation(tenantId, sessionId, userId, query, answer, toolContext, null, null, null)` —— 全部用方法内局部变量，不读 ThreadLocal | 流式落库沿用同一调用形态，租户参数取 controller 局部变量（spec §2.3 约束 1） |
 | `ChatController:173-196` 评估触发 | `evalOnlineEnabled && savedRowId != null && answerEvaluationService != null && result.isRagUsed()` → `TenantContextSnapshot.captureNow()` + `evalExecutor.submit`，拒绝时仅告警且**不调 clear** | 流式端点复制该段，条件与拒绝处理语义不变（I3） |
 | `RagController:24` | `@PostMapping(produces = MediaType.TEXT_EVENT_STREAM_VALUE)` + `return Flux<String>` | WebMVC 栈 SSE 已有先例，新端点同构 |
-| `GlobalExceptionHandler` | 全部 handler 返回 `R<Void>`，**无 `@ResponseStatus`** → HTTP 恒 200 | 建流前失败一律 `R.fail(code, msg)`，不得自行用 `ResponseEntity` 改 HTTP 状态 |
-| `company-rag-agent/pom.xml` | 依赖仅 common / tenant / web / jdbc / spring-ai-\* / agent-framework(1.1.2.0 硬编码) / jsqlparser / lombok。**无 resilience4j、无 reactor-core、无 micrometer 显式声明、无 reactor-test** | 见任务 1；`@CircuitBreaker` 与 `StepVerifier` 都需要补依赖 |
+| `GlobalExceptionHandler` | 8 个 handler 中**除 `handleBizException`（`:29`）外均带 `@ResponseStatus`**：`handleValidationException:40`/`handleMaxUploadSize:53`/`handleIllegalArgumentException:63` → 400，`handleAuthenticationException:73` → 401，`handleAccessDeniedException:82` → 403，`handleRuntimeException:91`/`handleException:101` → 500 | **HTTP 并非恒 200**。「HTTP 200 + 业务码」只适用于方法体内**显式 `return R.fail(...)`** 的路径（池拒绝、开关关闭），这类路径不经异常处理器。鉴权失败沿用 `chat()` 抛异常语义 → 实际 HTTP 400（与阻塞端点一致）。流式端点不得用 `ResponseEntity` 自行干预状态码 |
+| `company-rag-agent/pom.xml` | 依赖仅 common / tenant / web / jdbc / spring-ai-\* / agent-framework(1.1.2.0 硬编码) / jsqlparser / lombok。**无 resilience4j、无 reactor-core、无 micrometer 显式声明、无 reactor-test** | 见任务 1；`CircuitBreakerRegistry` 与 `StepVerifier` 都需要补依赖 |
 | `company-rag-agent/src` | 全模块 `reactor.core` 引用数 = 0 | 流式是本模块首次引入 Reactor，`Flux` 类型只允许出现在 `stream` 包与 `executeStream` 签名上 |
 
 ### 3.1 graph / agent-framework API 事实（`javap` 实测，版本锁 `1.1.2.0`）
@@ -52,7 +52,7 @@
 | 事实 | 结论 |
 | --- | --- |
 | 流式入口 | `CompiledGraph.stream(Map<String,Object> inputs, RunnableConfig)` → `Flux<NodeOutput>`；另有 `graphResponseStream(...)` → `Flux<GraphResponse<NodeOutput>>`。**本次用前者** |
-| `ReactAgent` | 无 `stream()`；有 `getCompiledGraph()`（public）。`call()` 6 个重载保持不动 |
+| `ReactAgent` | 无 `stream()`；有 `getCompiledGraph()`（public）。`call()` **8 个**重载（`String`/`UserMessage`/`List<Message>`/`Map` × 带不带 `RunnableConfig`）保持不动 |
 | inputs 结构 | `Agent.buildMessageInput(Object)` 为 **protected**（在父类 `Agent`），内部构造 `{"messages": List<Message>, "input": 末条 UserMessage.getText()}`。故流式侧**自行构造该 Map**，key 字面量 `"messages"` / `OverAllState.DEFAULT_INPUT_KEY`（值 `"input"`） |
 | `RunnableConfig` 常量 | `AGENT_MODEL_NAME="_AGENT_MODEL_"`、`AGENT_TOOL_NAME="_AGENT_TOOL_"`、`AGENT_HOOK_NAME_PREFIX="_AGENT_HOOK_"`、`AGENT_NAME_KEY="_AGENT_"`。**R1 判据可直接引用，不必硬编码字符串** |
 | `RunnableConfig.Builder` | `threadId(String)`、`streamMode(StreamMode)`、`addParallelNodeExecutor(...)`、`defaultParallelExecutor(...)` 等。本次仅用 `threadId(sessionId)` |
@@ -104,8 +104,20 @@ log.info("[STREAM-PROBE] class={} node={} agent={} outputType={} hasToolCalls={}
 | 依赖 | 用途 | scope |
 | --- | --- | --- |
 | `io.projectreactor:reactor-core` | `Flux` / `Sinks`。当前靠 agent-framework 传递引入，本模块要直接使用必须显式声明 | compile |
-| `io.github.resilience4j:resilience4j-spring-boot3` | 流式入口 `@CircuitBreaker`（spec §3.6） | compile |
+| `io.github.resilience4j:resilience4j-spring-boot3` | 提供 `CircuitBreakerRegistry`，供流式入口**手动**门控（spec §3.6）。**不使用 `@CircuitBreaker` 注解**，理由见任务 4.1 | compile |
 | `io.projectreactor:reactor-test` | `StepVerifier` | test |
+
+**1.1.1 显式锁定 graph-core 版本**（防御性，用户已确认）：`spring-ai-alibaba-graph-core` 目前**完全靠 BOM 传递**（项目 pom 零直接声明）。实际解析版本为 `1.1.2.0`（BOM `1.1.2.0` 与 agent-framework `1.1.2.0` 的 pom 均声明 graph-core=`1.1.2.0`，二者一致），故 R2 的字节码证据链版本有效。但本地 m2 同时存在 `1.1.0.0`，一旦将来有人改动 BOM 或新增依赖引入仲裁变化，spec §3.3.1 的线程模型结论可能失效**且无测试报警**。故在父 pom `dependencyManagement` 显式加一条：
+
+```xml
+<dependency>
+    <groupId>com.alibaba.cloud.ai</groupId>
+    <artifactId>spring-ai-alibaba-graph-core</artifactId>
+    <version>${spring-ai-alibaba.version}</version>
+</dependency>
+```
+
+用 `${spring-ai-alibaba.version}` 而非硬编码，保证与 agent-framework 同步升级 —— 升级时 R2 结论需重验（`AgentConfig` 注释 + 任务 6.3 断言是第一道防线）。
 
 `MeterRegistry` 由 `spring-boot-starter-web` + actuator（bootstrap 已引入）在运行期提供，`micrometer-core` 经传递可得；若编译不过再显式补 `io.micrometer:micrometer-core`，**先不预先加**。
 
@@ -216,16 +228,40 @@ mvn -q -pl company-rag-agent test -Dtest=StreamingAgentExecutorStreamTest
 
 ### 任务 4：`RagAgentService.processWithHistoryStream(...)`
 
-**4.1 签名**：
+**4.1 熔断门：手动 `CircuitBreaker`，不用注解**（spec §3.6）
 
 ```java
-@CircuitBreaker(name = "rag-agent", fallbackMethod = "processWithHistoryStreamFallback")
-public Flux<AgentStreamEvent> processWithHistoryStream(List<Message> history, String userMessage)
+public Flux<AgentStreamEvent> processWithHistoryStream(List<Message> history, String userMessage) {
+    CircuitBreaker cb = circuitBreakerRegistry.circuitBreaker("rag-agent");
+    if (!cb.tryAcquirePermission()) {
+        // 熔断打开：建流前同步抛出，controller 转 R.fail（满足 I5）
+        throw CallNotPermittedException.createCallNotPermittedException(cb);
+    }
+    boolean submitted = false;
+    try {
+        Flux<AgentStreamEvent> flux = streamingAgentExecutor.executeStream(...);
+        submitted = true;
+        return flux;
+    } finally {
+        if (!submitted) {
+            // 建流阶段就失败（含池满 RejectedExecutionException）：
+            // 许可必须在抛出前释放，否则熔断器许可被永久占用 → 后续请求全部拒绝
+            cb.releasePermission();
+        }
+    }
+}
 ```
 
-`fallbackMethod` 签名须为 `(List<Message>, String, Throwable)` 且返回 `Flux<AgentStreamEvent>`，返回 `Flux.just(AgentStreamEvent.error(...))` —— 熔断打开时**建流前**就失败，走 I5 路径由 controller 转 `R.fail`。
+> **许可配对是本方案最容易出错的地方**，三条硬约束：
+> 1. `tryAcquirePermission()` 成功但**建流未完成**（池满等）→ 必须 `releasePermission()`。这是 `releasePermission()` 这个 API 存在的唯一理由，漏掉即许可泄漏。
+> 2. 建流成功 → 许可**不在这里**释放，改由流终止时的一次性 `onSuccess` / `onError` 消费（二者内部等价于释放许可，**不得**再额外调 `releasePermission()`，否则双放）。
+> 3. `onSuccess` / `onError` **恰好调用一次**：挂在 `doOnComplete` / `doOnError` / `doOnCancel` 三条终止路径上，用 `AtomicBoolean` 保证幂等（取消路径计为成功，不计入失败率 —— 客户端主动断开不是服务故障）。
 
-> 注意：`@CircuitBreaker` 生效前提是异常**同步抛出**（本设计已保证池满等同步抛出，spec §3.6 第 1 点）。若 AOP 代理因内部自调用失效（本方法是 controller 直接调用，属正常代理路径，预期无问题），任务 4 验收须实测确认熔断日志出现，不得只依赖注解存在即认为已满足 R3。
+**为什么不用 `@CircuitBreaker` 注解**（字节码核查，见 spec §3.6）：切面有两条分派路径，走哪条取决于 `resilience4j-reactor` 是否在 classpath（`ReactorOnClasspathCondition` 是 AND 判定）。当前没有该依赖 → 走 `defaultHandling` 的同步路径；但**一旦配 `fallbackMethod`，同步抛出的 `CallNotPermittedException` 会被 fallback 吃掉并返回 `Flux.just(error)`，controller 拿到 Flux → 响应仍是 SSE，I5 直接破**。而将来任何人引入 `resilience4j-reactor`，分派路径会静默切换成订阅时判定，同样破 I5。手动门控不依赖 classpath 状态。
+
+**也不用「注解 + 手动检查并用」**：注解的 `executeCheckedSupplier` 内部已 `tryAcquirePermission()`，再加手动检查会一次调用扣两票，HALF_OPEN 下实际探测数减半、失败统计翻倍失真。
+
+**熔断统计口径**：手动方案顺带修掉了注解的天然盲区 —— 注解只能观测「建流是否成功」，流内失败一概看不见；手动 `onError` 挂在流终止路径上，熔断率反映**真实的流式失败率**。
 
 **4.2 方法体**：与 `processWithHistory:126-146` 同构构造 `messages`（history + `UserMessage`），捕获 `TenantStreamContext`，委托 `streamingAgentExecutor.executeStream(messages, sessionId, cancelled, ctx)`。
 
@@ -252,7 +288,7 @@ public Object chatStream(@RequestBody ChatRequest request,
 
 1. 开关判断最先：`if (!streamEnabled) return R.fail(503, "流式接口未启用");` —— 不建流、不读历史、不占池。
 2. `TenantContext.setSessionId(...)`。
-3. 安全校验段**逐行照搬** `:92-123`（`verifiedTenantId` 非空、`SecurityUser` 取 `verifiedUserId`、两者写回 `request` 与 `TenantContext`）。异常类型保持 `IllegalArgumentException` / `IllegalStateException` 不变，由 `GlobalExceptionHandler` 转 `R`（HTTP 200）。
+3. 安全校验段**逐行照搬** `:92-123`（`verifiedTenantId` 非空、`SecurityUser` 取 `verifiedUserId`、两者写回 `request` 与 `TenantContext`）。异常类型保持 `IllegalArgumentException` / `IllegalStateException` 不变，由 `GlobalExceptionHandler` 转 `R`（**HTTP 400**，非 200 —— 该 handler 带 `@ResponseStatus(BAD_REQUEST)`，与阻塞端点行为一致）。
 4. 读历史：与 `:128-141` 同条件（`sessionId != null && tenantId != null` 才读 `ragChatMemory.get(...)`）。
 5. `AtomicBoolean cancelled = new AtomicBoolean(false)`。
 6. `try { flux = ragAgentService.processWithHistoryStream(history, query); } catch (RejectedExecutionException | CallNotPermittedException e) { log.warn(...); return R.fail(503, "系统繁忙，请稍后重试"); }` —— **I5 的落点**：此刻尚未返回 `Flux`，Spring 未开始写 SSE 头，可以正常返回统一响应体。
@@ -270,7 +306,7 @@ return flux.doOnCancel(() -> cancelled.set(true))
            });
 ```
 
-> `persistAndEvaluate` 为**流式端点专用**的私有方法（内含落库 + 评估两段），**不**从 `chat()` 抽取共用 —— 理由见 §5.3。
+> `persistAndEvaluate` 为**流式端点专用**的私有方法（内含落库 + 评估两段），**不**从 `chat()` 抽取共用 —— 理由见任务 5.3。
 
 **5.3 落库与评估段的复用方式（用户已裁决：复制不抽取）**：流式端点**自带一份**落库段（对齐 `:147-156`）与评估段（对齐 `:169-196`），**不抽取私有方法共用**。理由：抽取需改动 `ChatController.chat()` 方法体，而阻塞链路的 faithfulness 判定口径是在线评估基线的一部分（spec §3.7 同理），不值得为消除重复承担该风险。代价是两段逻辑重复，须由注释互相指向（「与 `chat()` 落库段语义一致，改动须同步」）控制漂移。
 
@@ -297,7 +333,12 @@ return flux.doOnCancel(() -> cancelled.set(true))
 - `processWithHistoryStream_poolSaturated_throwsFromMethodCallNotOnSubscribe` —— mock `streamExecutor.execute` 抛 `RejectedExecutionException`，断言异常从**方法调用本身**抛出。这是 I5 成立的直接证据，也是「不用 `subscribeOn`」的回归防线。
 - `processWithHistoryStream_idleTimeout_emitsErrorWithoutDone`。
 - `processWithHistoryStream_restoresTenantContext_inPoolThreadOnly` —— 池任务内 `TenantContext.getSchema()` == 快照值；任务结束后再读为空（I1 + 防线程池串扰）。
-- `processWithHistoryStream_toolExecutesOnSameThreadAsPoolTask` —— **防回归断言（守 §3.3.1 的线程归属前提）**：用测试工具回调记录执行线程名，断言与池任务线程名相同。一旦有人开启 `parallelToolExecution` 或加并行节点，本用例立刻红 → 此时 ThreadLocal 方案静默失效、有跨租户风险，必须改走显式传递，不得直接合并。
+- `processWithHistoryStream_toolExecutesOnSameThreadAsPoolTask` —— **防回归断言（守 spec §3.3.1 的线程归属前提）**：用测试工具回调记录执行线程名，断言与池任务线程名相同。一旦有人开启 `parallelToolExecution` 或加并行节点，本用例立刻红 → 此时 ThreadLocal 方案静默失效、有跨租户风险，必须改走显式传递，不得直接合并。
+- `processWithHistoryStream_circuitOpen_throwsCallNotPermittedFromMethodCall` —— mock `CircuitBreaker.tryAcquirePermission()` 返回 false，断言 `CallNotPermittedException` 从**方法调用本身**抛出（不是订阅时）。这是熔断路径满足 I5 的直接证据。
+- `processWithHistoryStream_submitRejected_releasesPermission` —— mock `streamExecutor.execute` 抛 `RejectedExecutionException`，用 `verify(cb).releasePermission()` 断言许可被释放。**这条守的是许可泄漏**：漏掉 `releasePermission()` 会让熔断器许可被永久占用，后续所有流式请求静默拒绝，且现象与「熔断生效」几乎一样难查。
+- `processWithHistoryStream_streamCompletes_recordsSuccessExactlyOnce` —— 断言 `onSuccess` 调用 1 次且 `releasePermission()` **不再**额外调用。
+- `processWithHistoryStream_streamFails_recordsErrorExactlyOnce` —— 断言 `onError` 1 次。
+- `processWithHistoryStream_clientCancelled_countsAsSuccess` —— 取消路径计成功不计失败（客户端断开不是服务故障），断言走 `onSuccess`。
 
 **6.4 不做**（YAGNI）：不引入 MockChatModel 做全链路集成测试；不为 `AgentStreamEvent`/`AgentStreamEventType` 纯数据 record 写测试；不写前端 SSE 契约测试；不为 `ChatController` 新增 `@WebMvcTest`（SSE 端点自动化收益低于成本，改由 6.5 手工验收覆盖）。
 
@@ -308,8 +349,9 @@ return flux.doOnCancel(() -> cancelled.set(true))
 1. `rag.agent.stream.enabled=true`，`curl -N -X POST /api/chat/stream -H "X-Tenant-Id: 1" -H "Authorization: Bearer <jwt>" -d '{"query":"...","sessionId":"s1"}'` —— 肉眼确认 token 逐帧到达，而非最后一次性吐出。
 2. 触发需审批的工具（`execute`），审批等待期间并发打普通 `/api/chat` —— 确认阻塞端点正常响应（验证 §3.1 未拖死 HTTP 线程、两池隔离）。
 3. 中途 `Ctrl+C` 断开 curl —— 查 `rag_session` **未新增行**、无评估记录（验证 §3.5「宁缺不残」）。
-4. 开关置 `false` 重打 —— 返回 `R.fail(503,...)` 且 HTTP 200，**不是 404**（验证 §3.8 配置落地要求）。
-5. 触发一次熔断（临时把池容量压到 0 或制造连续失败）—— 日志出现 `rag-agent` 熔断记录，端点返回 `R.fail`（验证 §3.6 第 1 点真的生效，而非只有注解）。
+4. 开关置 `false` 重打 —— 返回 `R.fail(503,...)`，**不是 404**（验证 spec §3.8 配置落地要求）。注意：这条走的是方法体内显式 `return R.fail`，不经异常处理器，故 HTTP 200；与鉴权失败走 `GlobalExceptionHandler` 返回 400 是两条不同路径，勿混淆。
+5. 触发一次熔断（连续制造失败直至熔断打开）—— 日志出现 `rag-agent` 熔断记录，且端点返回 **`R.fail` 而非 SSE 流**（验证 spec §3.6 手动门控真的在建流前拦截；若收到的是 SSE `ERROR` 事件，说明熔断判定被推迟到了订阅时，I5 已破，必须停下排查）。
+6. **租户落库正例（守复制方案的红线）**：用租户 A 的 JWT + `X-Tenant-Id: A` 完整跑一次成功流，结束后查 `rag_session` 最新行，断言 `tenant_id == A` 且 `user_id` 正确。任务 5.3 采用「复制不抽取」，`saveConversation` 实参顺序一旦与 `chat()` 漂移，会**静默把数据写进错误租户**且无任何报错 —— 这是隔离红线级风险，必须有正例兜底，仅靠「断开不落库」的反例不足以防住。
 
 ---
 
