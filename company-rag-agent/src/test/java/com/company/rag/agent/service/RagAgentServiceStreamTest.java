@@ -2,6 +2,7 @@ package com.company.rag.agent.service;
 
 import com.company.rag.agent.executor.StreamingAgentExecutor;
 import com.company.rag.agent.stream.AgentStreamEvent;
+import com.company.rag.agent.stream.TenantStreamContext;
 import com.company.rag.common.tool.ToolCallRecorder;
 import com.company.rag.tenant.context.TenantContext;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
@@ -173,6 +174,26 @@ class RagAgentServiceStreamTest {
         verify(streamingAgentExecutor).executeStream(anyList(), any(), any(), any(), any(),
                 eq(60L), eq(5L));
         verify(streamingAgentExecutor, never()).execute(anyList());
+    }
+
+    @Test
+    void processWithHistoryStream_capturesTenantContextOnCallingThread() {
+        when(streamingAgentExecutor.executeStream(anyList(), any(), any(), any(), any(), anyLong(), anyLong()))
+                .thenReturn(Flux.empty());
+        TenantContext.setSchema("tenant_a");
+        TenantContext.setTenantId(7L);
+        TenantContext.setUserId(9L);
+
+        service.processWithHistoryStream(List.of(), "hi", new AtomicBoolean(false));
+
+        // 快照必须在调用线程（请求线程）捕获后交给 executor，池线程内再恢复；
+        // 若改成在池任务里 captureNow()，拿到的是空上下文 → 跨租户风险（I1）
+        ArgumentCaptor<TenantStreamContext> ctx = ArgumentCaptor.forClass(TenantStreamContext.class);
+        verify(streamingAgentExecutor).executeStream(anyList(), any(), any(), ctx.capture(), any(),
+                anyLong(), anyLong());
+        assertThat(ctx.getValue().schema()).isEqualTo("tenant_a");
+        assertThat(ctx.getValue().tenantId()).isEqualTo(7L);
+        assertThat(ctx.getValue().userId()).isEqualTo(9L);
     }
 
     @Test
