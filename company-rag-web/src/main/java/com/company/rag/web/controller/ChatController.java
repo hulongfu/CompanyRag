@@ -34,6 +34,7 @@ import org.springframework.ai.chat.messages.Message;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
@@ -246,14 +247,17 @@ public class ChatController {
      * @param headerTenantId  已由 JwtAuthenticationFilter 校验的租户 ID
      * @return 成功返回 SSE 事件流；建流前失败返回统一失败响应
      */
-    @PostMapping(value = "/chat/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    // 不声明 produces：SSE 由返回类型 Flux 经 ReactiveTypeHandler 自动识别为 text/event-stream；
+    // 建流前失败返回 R<T> 时走 JSON。若在此声明 produces=text/event-stream，Spring 会在 handler
+    // 映射阶段把响应类型预设为 SSE，导致 R 找不到 SSE 转换器而抛 HttpMessageNotWritableException → 500。
+    @PostMapping("/chat/stream")
     @PreAuthorize("isAuthenticated()")
     public Object chatStream(@RequestBody ChatRequest request,
                              @RequestHeader(value = "X-Tenant-Id", required = false) Long headerTenantId) {
         // 1. 灰度开关最先判断：未开启时不读历史、不占线程池
         if (!streamEnabled) {
             log.warn("流式接口未启用，拒绝请求：sessionId={}", request.getSessionId());
-            return R.fail(503, "流式接口未启用");
+            return streamFailBody(503, "流式接口未启用");
         }
 
         log.info("收到流式聊天请求：query={}, sessionId={}, headerTenantId={}",
@@ -302,7 +306,7 @@ public class ChatController {
                 // 线程池满或熔断打开：降级为 503，不抛到全局异常处理器（I5）
                 log.warn("流式建流被拒绝，降级为繁忙响应：sessionId={}, cause={}",
                         request.getSessionId(), e.getMessage());
-                return R.fail(503, "系统繁忙，请稍后重试");
+                return streamFailBody(503, "系统繁忙，请稍后重试");
             }
 
             // 必须在请求线程捕获租户快照：落库/评估回调运行在流的生产线程上，
@@ -332,6 +336,20 @@ public class ChatController {
             // 不能挂到流的 doFinally 上——终止信号可能落在池线程，会误清池线程自身的上下文。
             TenantContext.clear();
         }
+    }
+
+    /**
+     * 流式端点「建流前失败」的统一响应体。
+     *
+     * <p>必须用 {@link ResponseEntity} 显式钉住 {@code Content-Type: application/json}：
+     * 流式客户端会带 {@code Accept: text/event-stream}，若直接返回裸 {@code R}，
+     * Spring 的内容协商会在「可产出类型」与 Accept 之间求交集失败而返回 406，
+     * 破坏「建流前错误一律返回统一响应体」的契约。显式指定 Content-Type 会跳过该协商。
+     */
+    private ResponseEntity<R<Void>> streamFailBody(int code, String msg) {
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(R.fail(code, msg));
     }
 
     /**

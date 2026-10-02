@@ -25,6 +25,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -107,8 +108,7 @@ class ChatControllerStreamTest {
 
         Object outcome = controller.chatStream(request(), 1L);
 
-        assertThat(outcome).isInstanceOf(R.class);
-        assertThat(((R<?>) outcome).getCode()).isEqualTo(503);
+        assertThat(failBody(outcome).getCode()).isEqualTo(503);
         verify(ragAgentService, never()).processWithHistoryStream(any(), anyString(), any());
         // 开关关闭时不得读取历史，避免无谓的 Redis/DB 访问
         verify(ragChatMemory, never()).get(anyString());
@@ -146,7 +146,7 @@ class ChatControllerStreamTest {
 
         Object outcome = controller.chatStream(request(), 1L);
 
-        assertThat(((R<?>) outcome).getCode()).isEqualTo(503);
+        assertThat(failBody(outcome).getCode()).isEqualTo(503);
     }
 
     @Test
@@ -156,7 +156,7 @@ class ChatControllerStreamTest {
 
         Object outcome = controller.chatStream(request(), 1L);
 
-        assertThat(((R<?>) outcome).getCode()).isEqualTo(503);
+        assertThat(failBody(outcome).getCode()).isEqualTo(503);
     }
 
     @Test
@@ -329,5 +329,12 @@ class ChatControllerStreamTest {
         // 再钉一次隔离语义本身：租户来自请求头、用户来自 JWT，请求体假值一律不落库
         assertThat(saved.get(1)[0]).isEqualTo(3L);
         assertThat(saved.get(1)[2]).isEqualTo(7L);
+    }
+
+    /** 建流前失败统一走 ResponseEntity 包装（见 controller 的 streamFailBody），此处取出 R 供断言。 */
+    @SuppressWarnings("unchecked")
+    private static R<Void> failBody(Object outcome) {
+        assertThat(outcome).isInstanceOf(ResponseEntity.class);
+        return ((ResponseEntity<R<Void>>) outcome).getBody();
     }
 }
