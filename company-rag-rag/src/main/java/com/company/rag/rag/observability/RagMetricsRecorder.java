@@ -1,6 +1,7 @@
 package com.company.rag.rag.observability;
 
 import com.company.rag.rag.model.RagResult;
+import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import io.micrometer.core.instrument.Counter;
@@ -31,6 +32,11 @@ public class RagMetricsRecorder {
     private final Counter cacheMisses;
     private final Counter rateLimitHits;
 
+    // 最近一次请求的召回率，供 rag.recall.rate Gauge 读取。
+    // Micrometer 的 Gauge 对绑定对象是弱引用且同 MeterId 重复注册会被忽略，
+    // 因此必须绑定本单例常驻对象、只在构造期注册一次，由每次请求刷新该字段。
+    private volatile double lastRecallRate;
+
     public RagMetricsRecorder(MeterRegistry meterRegistry) {
         this.meterRegistry = meterRegistry;
 
@@ -59,6 +65,14 @@ public class RagMetricsRecorder {
         this.rateLimitHits = Counter.builder("rag.ratelimit.hits")
                 .description("限流触发次数")
                 .register(meterRegistry);
+
+        Gauge.builder("rag.recall.rate", this, RagMetricsRecorder::getLastRecallRate)
+                .description("最近一次请求的召回率")
+                .register(meterRegistry);
+    }
+
+    public double getLastRecallRate() {
+        return lastRecallRate;
     }
 
     /**
@@ -82,8 +96,8 @@ public class RagMetricsRecorder {
             meterRegistry.counter("rag.tokens.total",
                     "model", "qwen-max").increment(m.getInputTokens() + m.getOutputTokens());
 
-            // 记录召回率
-            meterRegistry.gauge("rag.recall.rate", m, RagResult.Metrics::getRecallRate);
+            // 记录召回率：Gauge 已在构造期注册，此处只刷新取值，避免重复注册被忽略
+            this.lastRecallRate = m.getRecallRate();
         }
 
         // 记录检索到的文档块数量
