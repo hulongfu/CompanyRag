@@ -15,6 +15,8 @@ import com.company.rag.tenant.context.TenantContext;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -37,6 +39,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -281,5 +284,50 @@ class ChatControllerStreamTest {
         assertThat(outcome).isInstanceOf(Flux.class);
         assertThat(TenantContext.getTenantId()).isNull();
         assertThat(TenantContext.getSessionId()).isNull();
+    }
+
+    /**
+     * 流式落库段与阻塞落库段采用「复制不抽取」，实参顺序一旦漂移会<b>静默把数据写进错误租户</b>
+     * 且无任何报错。本用例让两条链路在完全相同的身份与内容下各跑一次，逐位比对实参，
+     * 把这条隔离红线钉成自动化断言（对应 plan 任务 7 第 6 条）。
+     *
+     * <p>租户/用户/答案/轨迹四个取值刻意两两不同，任两位互换都会被抓住；
+     * 请求体里的 tenantId/userId 填客户端可控的假值，落库必须用请求头与 JWT 的已校验值。
+     */
+    @Test
+    void streamPersistArguments_matchBlockingEndpointArgumentOrder() {
+        // 两条链路各用独立请求体：controller 会回写 tenantId/userId，共用对象会让断言失真
+        ChatRequest blockingRequest = ChatRequest.builder().query("RAG 是什么").sessionId("s-1")
+                .tenantId(999L).userId(888L).build();
+        ChatRequest streamingRequest = ChatRequest.builder().query("RAG 是什么").sessionId("s-1")
+                .tenantId(999L).userId(888L).build();
+        AgentResult same = AgentResult.builder().answer("答案文本").toolContext("轨迹文本")
+                .ragUsed(false).build();
+
+        // 按调用顺序抓取九位实参，便于两条链路逐位比对
+        List<Object[]> saved = new ArrayList<>();
+        doAnswer(invocation -> {
+            saved.add(invocation.getArguments());
+            return 99L;
+        }).when(ragSessionService).saveConversation(any(), any(), any(), any(), any(), any(),
+                any(), any(), any());
+
+        // --- 阻塞链路 ---
+        when(ragChatMemory.get("s-1")).thenReturn(List.of());
+        when(ragAgentService.processWithHistory(List.of(), "RAG 是什么")).thenReturn(same);
+        controller.chat(blockingRequest, 3L);
+
+        // --- 流式链路 ---
+        when(ragAgentService.processWithHistoryStream(any(), anyString(), any()))
+                .thenReturn(Flux.just(AgentStreamEvent.done(same)));
+        StepVerifier.create((Flux<AgentStreamEvent>) controller.chatStream(streamingRequest, 3L))
+                .expectNextCount(1).verifyComplete();
+
+        assertThat(saved).hasSize(2);
+        // 逐位比对：任一位漂移即红（含租户/用户/会话/问/答/轨迹的先后顺序）
+        assertThat(saved.get(1)).containsExactlyElementsOf(Arrays.asList(saved.get(0)));
+        // 再钉一次隔离语义本身：租户来自请求头、用户来自 JWT，请求体假值一律不落库
+        assertThat(saved.get(1)[0]).isEqualTo(3L);
+        assertThat(saved.get(1)[2]).isEqualTo(7L);
     }
 }
