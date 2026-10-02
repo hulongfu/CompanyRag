@@ -2,7 +2,7 @@
 
 | 属性 | 值 |
 | --- | --- |
-| 状态 | 待批准 |
+| 状态 | 已批准，执行中 |
 | 日期 | 2026-10-01 |
 | 来源 spec | `docs/superpowers/specs/2026-10-01-agent-stream-and-trace-design.md`（已冻结） |
 | 领域 | Agent 流式输出 / 执行轨迹 / SSE 端点 |
@@ -69,6 +69,16 @@ R1 是唯一还影响**公开契约**（事件类型是否 6 个）的未定项�
 **0.0 静态验证边界（已做到极限，剩余部分确实必须实测）**：`AgentLlmNode` 内确有 `AssistantMessage.hasToolCalls()` / `getToolCalls()` 引用，但字节码显示其作用对象是 `ChatResponse.getResult().getOutput()` —— 即**聚合后的完整响应**，位于 `apply()` 的轮次判定逻辑，**不是逐 chunk**。同时 `StreamingOutput` 的构造点在 agent-framework 内只有 `Agent`（6 处）与 `A2aNodeActionWithConfig`（24 处），`AgentLlmNode` 自身不构造它 → 增量帧由 graph-core 侧的 LLM 流适配层产出，其 `message()` 是否携带当轮**部分** tool calls，取决于 DashScope 每个 chunk 的实际返回内容。
 
 > 结论：R1 与 R2 **性质不同**。R2（线程模型）看字节码即可定论，已定论；R1 的判据依赖运行期模型返回的分片内容，静态无法证明，故任务 0 的实测不是"偷懒推给实现阶段"，而是该项的事实边界。
+
+> **【已定论，0.1–0.3 作废】** 后续核查 `StreamingOutput` **构造器**字节码补上了缺的那一环，推翻了上面「静态无法证明」的判断：
+> 所有携带 `message` 的 public 构造器都用同一个私有静态方法推导 `chunk` 字段 ——
+> `extractChunkFromMessage(Message)` 的字节码为 `if (msg instanceof AssistantMessage am && !am.hasToolCalls()) return am.getText(); else return null;`
+> 即**工具轮的增量帧 `chunk()` 恒为 `null`**，与模型每个分片实际返回什么内容无关。
+> 因此：① 分支 A 不成立（不是「判不出」，是判出来也没有文本可发）；② 走分支 B，且因思考文本天然不外泄，
+> `THINKING_DELTA` 枚举直接删除；③ `answer` 以累加 `ANSWER_DELTA` 为主口径（等价于末轮全文），
+> mapper 另暴露 `roundFinishedText(NodeOutput)` 取 `AGENT_MODEL_FINISHED` 帧全文作兜底。
+> **仅剩 0.4（`AGENT_TOOL_STREAMING` 是否发送）需要真实 LLM 实测**，它只影响前端有无 `TOOL_START`，不影响答案正确性。
+> 该框架内部行为由 `NodeOutputMapperTest` 的 `chunk()` 断言锁定，升级 `spring-ai-alibaba` 会立刻红。
 
 **0.1 探针做法**：在 `executeStream` 骨架阶段（任务 3 的最初版本）临时把每个 `NodeOutput` 打成日志：
 
@@ -149,7 +159,11 @@ log.info("[STREAM-PROBE] class={} node={} agent={} outputType={} hasToolCalls={}
 
 **新建 4 个文件**（包 `com.company.rag.agent.stream`）：
 
-**2.1 `AgentStreamEventType.java`**（枚举）：`THINKING_DELTA` / `TOOL_START` / `TOOL_END` / `ANSWER_DELTA` / `DONE` / `ERROR`。
+**2.1 `AgentStreamEventType.java`**（枚举）：`TOOL_START` / `TOOL_END` / `ANSWER_DELTA` / `DONE` / `ERROR`。
+
+> 实现时定稿：**删除 `THINKING_DELTA`**。静态核查 `StreamingOutput.extractChunkFromMessage()` 字节码为
+> `instanceof AssistantMessage && !hasToolCalls() → getText()`，否则 `null` —— 工具轮增量帧 `chunk()` 恒空，
+> 思考文本天然不外泄，不存在需要区分的场景（见 spec §5-R1 定论）。
 
 **2.2 `AgentStreamEvent.java`**（record）：
 
@@ -162,7 +176,7 @@ public record AgentStreamEvent(
         String status,        // 仅 TOOL_END
         AgentResult result    // 仅 DONE：answer / toolContext / ragUsed
 ) {
-    // 静态工厂：thinkingDelta / answerDelta / toolStart / toolEnd / done / error
+    // 静态工厂：answerDelta / toolStart / toolEnd / done / error
 }
 ```
 
@@ -173,7 +187,7 @@ public record AgentStreamEvent(
 - 主方法：`List<AgentStreamEvent> map(NodeOutput output)`。返回列表而非单个，因单个 `NodeOutput` 可能需展开为多事件（如 `TOOL_END` + 工具结果文本）。
 - 入站先过滤：`!(output instanceof StreamingOutput)` → 返回 `List.of()`（裸 `NodeOutput` 是 `GRAPH_NODE_*` 生命周期帧，忽略）。`isSTART()/isEND()` 同样忽略。
 - 分派按 `getOutputType()`：
-  - `AGENT_MODEL_STREAMING` → 按任务 0 的分支结论产 `ANSWER_DELTA` / `THINKING_DELTA`；`chunk()` 为 null 或空 → 返回空列表（不产噪声帧）。
+  - `AGENT_MODEL_STREAMING` → 产 `ANSWER_DELTA`；`chunk()` 为 null 或空 → 返回空列表（不产噪声帧）。工具轮 `chunk()` 恒为 null，故天然不产事件。
   - `AGENT_MODEL_FINISHED` → 分支 B 下记录末条 `AssistantMessage` 文本到 mapper 内部**按调用隔离**的状态。
   - `AGENT_TOOL_FINISHED` → `TOOL_END`（`toolName` 取 `node()`/`agent()`，`durationMs`/`status` 见下）。
   - `AGENT_TOOL_STREAMING` → `TOOL_START`（若任务 0.4 实测确认不发，则本期不产出，`TOOL_START` 枚举保留）。
@@ -184,7 +198,11 @@ public record AgentStreamEvent(
 
 **`durationMs` / `status` 的可得性风险**：`NodeOutput` 只有 `node()/agent()/state()/tokenUsage()`，**没有耗时字段**。`status` 可从 state 中工具结果推断，`durationMs` 需 mapper 自己在 `TOOL_START` 与 `TOOL_END` 之间用时间戳差算。若任务 0.4 确认 `TOOL_START` 不发，则 `durationMs` 无来源 → **置 null，不编造数值**，并在 spec §6 记录该限制。`status` 同理：拿不到可靠依据时置 null，不用 "SUCCESS" 填充。
 
-**2.4 mapper 的有状态问题**（必须处理，否则并发串号）：若分支 B 需要「记录末条 AssistantMessage」、或 `durationMs` 需要跨事件配对，mapper 就**不能再是单例 Bean 的无状态方法**。处置：**mapper 保持无状态**，把跨事件累积职责移到任务 3 的池任务局部变量（`StringBuilder answer`、`Map<String,Long> toolStartAt`、`AtomicReference<String> lastAssistantText`）。mapper 只做「单帧 → 事件列表」的纯翻译。这条约束写进 mapper 的类注释。
+**2.4 mapper 的有状态问题**（必须处理，否则并发串号）：**mapper 保持无状态**，把跨事件累积职责移到任务 3 的池任务局部变量（`StringBuilder answer`）。mapper 只做「单帧 → 事件列表」的纯翻译，这条约束写进 mapper 的类注释。
+
+> 实现定稿：`durationMs`/`status` 无可靠来源 → `TOOL_END` 直接置 `null`（不编造数值），因此不需要跨事件配对时间戳；
+> 末轮全文由 `roundFinishedText(NodeOutput)` **按帧读取**（不保存状态），也不需要 `AtomicReference`。
+> 于是跨帧状态只剩 `StringBuilder answer` 一项，mapper 得以完全无状态。
 
 **验证（先红后绿，scoped）**：
 ```
@@ -249,7 +267,7 @@ public Flux<AgentStreamEvent> processWithHistoryStream(List<Message> history, St
         // 建流阶段失败（含池满 RejectedExecutionException）：计入失败率，同时归还许可。
         // 必须用 onError 而非 releasePermission —— 后者只归还许可、不记失败，
         // 若此处只 release，本熔断器将永远收不到失败样本 → 失败率恒 0 → 永不打开。
-        cb.onError(System.nanoTime() - start, ChronoUnit.NANOS, e);
+        cb.onError(System.nanoTime() - start, TimeUnit.NANOSECONDS, e);
         throw e;
     }
 }

@@ -20,6 +20,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 /**
@@ -73,14 +74,35 @@ public class RagAgentService {
     private ExecutorService executorService;
 
     /**
+     * 流式任务专用线程池，与上面的超时池**必须分离**。
+     *
+     * <p>分离理由：一条流的生命周期可达整体超时上限（默认 5 分钟），且期间线程被
+     * {@code blockLast()} 占住。若与阻塞端点共用一个池，几个并发流就能把队列填满，
+     * 让原本正常的 {@code /api/chat} 请求被拒；反之阻塞请求堆积也会饿死流式请求。
+     *
+     * <p>容量刻意小于超时池：流式端点处于灰度开关后面，宁可更早触发拒绝并降级为
+     * 统一响应体，也不要让线程数失控。
+     */
+    private ExecutorService streamExecutor;
+
+    /** 流式线程编号，仅用于线程命名 */
+    private static final AtomicInteger STREAM_THREAD_SEQ = new AtomicInteger(0);
+
+    /**
      * 构造方法，注入 StreamingAgentExecutor 和 ToolCallRecorder
+     *
+     * <p>流式池参数未显式配置时回退读 {@code rag.agent.executor.*}，
+     * 使既有部署不改配置也能直接获得一个与阻塞池同规格的流式池。
      */
     public RagAgentService(StreamingAgentExecutor streamingAgentExecutor,
                            ToolCallRecorder recorder,
                            @org.springframework.beans.factory.annotation.Value("${rag.agent.executor.core-pool-size:4}") int corePoolSize,
                            @org.springframework.beans.factory.annotation.Value("${rag.agent.executor.max-pool-size:8}") int maxPoolSize,
                            @org.springframework.beans.factory.annotation.Value("${rag.agent.executor.queue-capacity:100}") int queueCapacity,
-                           @org.springframework.beans.factory.annotation.Value("${rag.agent.executor.timeout-minutes:5}") int agentTimeoutMinutes) {
+                           @org.springframework.beans.factory.annotation.Value("${rag.agent.executor.timeout-minutes:5}") int agentTimeoutMinutes,
+                           @org.springframework.beans.factory.annotation.Value("${rag.agent.stream.core-pool-size:${rag.agent.executor.core-pool-size:4}}") int streamCorePoolSize,
+                           @org.springframework.beans.factory.annotation.Value("${rag.agent.stream.max-pool-size:${rag.agent.executor.max-pool-size:8}}") int streamMaxPoolSize,
+                           @org.springframework.beans.factory.annotation.Value("${rag.agent.stream.queue-capacity:${rag.agent.executor.queue-capacity:100}}") int streamQueueCapacity) {
         this.streamingAgentExecutor = streamingAgentExecutor;
         this.recorder = recorder;
         this.corePoolSize = corePoolSize;
@@ -100,10 +122,24 @@ public class RagAgentService {
                 new ArrayBlockingQueue<>(queueCapacity),
                 new ThreadPoolExecutor.AbortPolicy());
 
+        // 流式池同样有界 + AbortPolicy：池满时在**方法返回前**同步抛出
+        // RejectedExecutionException，才能被上层降级为统一响应体（不变式 I5）
+        int effectiveStreamMax = Math.max(streamMaxPoolSize, streamCorePoolSize);
+        this.streamExecutor = new ThreadPoolExecutor(
+                streamCorePoolSize,
+                effectiveStreamMax,
+                60L,
+                TimeUnit.SECONDS,
+                new ArrayBlockingQueue<>(streamQueueCapacity),
+                // 线程名单独加前缀：日志排查与「流式任务必须跑在流式池」的回归断言都依赖它
+                r -> new Thread(r, "rag-agent-stream-" + STREAM_THREAD_SEQ.incrementAndGet()),
+                new ThreadPoolExecutor.AbortPolicy());
+
         log.info("RagAgentService 初始化：streamingAgentExecutor={}, timeout={} minutes, " +
-                        "线程池 core={}, max={}, queue={}",
+                        "阻塞池 core={}, max={}, queue={}, 流式池 core={}, max={}, queue={}",
                  streamingAgentExecutor != null ? streamingAgentExecutor.getClass().getSimpleName() : "null",
-                 this.agentTimeoutMinutes, corePoolSize, effectiveMax, queueCapacity);
+                 this.agentTimeoutMinutes, corePoolSize, effectiveMax, queueCapacity,
+                 streamCorePoolSize, effectiveStreamMax, streamQueueCapacity);
     }
 
     /**

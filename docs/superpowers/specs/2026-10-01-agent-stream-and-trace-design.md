@@ -88,7 +88,7 @@ Flux<NodeOutput> streamFromInitialNode(OverAllState, RunnableConfig)
 
 | 组件 | 职责 | 依赖 |
 |---|---|---|
-| `AgentStreamEventType`（枚举） | `THINKING_DELTA` / `TOOL_START` / `TOOL_END` / `ANSWER_DELTA` / `DONE` / `ERROR` | 无 |
+| `AgentStreamEventType`（枚举） | `TOOL_START` / `TOOL_END` / `ANSWER_DELTA` / `DONE` / `ERROR`（无「思考增量」，理由见 §5-R1 定论） | 无 |
 | `AgentStreamEvent`（record） | 单条事件：`type` + `text` + `toolName` + `durationMs` + `status`。`DONE` 事件额外携带 `AgentResult`（answer / toolContext / ragUsed）供 controller 落库使用；**写出 SSE 帧时 `DONE` 不重复携带 `answer` 全文**（前端已逐帧收到 `ANSWER_DELTA`），避免流量翻倍 | 无 |
 | `NodeOutputMapper` | **唯一一处**把 `NodeOutput` 翻译成 `AgentStreamEvent`；识别 `OutputType` 与节点名常量 | graph-core |
 | `StreamingAgentExecutor.executeStream(...)` | 新增方法，走 `getCompiledGraph().stream(inputs, cfg)`，返回 `Flux<AgentStreamEvent>`。内部按 §3.1 的 `Sinks` + 池任务模型实现，**池满异常从方法调用本身抛出**（不是订阅时）。原 `execute()` 保持不动 | ReactAgent |
@@ -96,6 +96,11 @@ Flux<NodeOutput> streamFromInitialNode(OverAllState, RunnableConfig)
 **设计要点**：graph-core 的 `NodeOutput` / `StreamingOutput` / `OutputType` 只在 `NodeOutputMapper` 一个文件内出现。web 层只见 `AgentStreamEvent`。这样将来若真的要换 AgentScope（其事件体系是 31 类 typed event），改动面被压缩在 mapper 一处。
 
 `THINKING_DELTA` 与 `ANSWER_DELTA` 的区分依据：同为 `AGENT_MODEL_STREAMING`，处于 ReAct 循环中间轮次（后续还要调工具）的是思考，末轮的是答案。可用判据与回退分支见 §5-R1，由实现计划任务 0 的实测在写代码前定稿。
+
+> **实现阶段定论（已覆盖上段）**：静态核查 `StreamingOutput.extractChunkFromMessage()` 字节码得到
+> `if (msg instanceof AssistantMessage am && !am.hasToolCalls()) return am.getText(); else return null;`
+> ——工具轮的增量帧 `chunk()` **恒为 `null`**，思考文本根本不会流到前端，无需也无法区分思考事件，
+> 故删除 `THINKING_DELTA`。R1 由「待实测」转为静态定论，详见 §5-R1。
 
 ### 2.2 改动组件
 
@@ -182,6 +187,11 @@ void runStream(Sinks.Many<AgentStreamEvent> sink, ...) {
 **错误路径不得发 `DONE`**：`onErrorResume` 把异常转成 `ERROR` 后流会正常 `complete`，若无 `errored` 判据就会在 `ERROR` 后紧跟 `DONE`，controller 据 `DONE` 落库即写入空/半截答案，直接违反 §3.5「宁缺不残」。§4.2 的异常用例须断言「有 `ERROR` 且**无** `DONE`」。
 
 **`answer` 全文的来源**：流式链路没有现成的完整答案字符串（阻塞链路靠 `reactAgent.call()` 返回值）。做法是管道内累加 `ANSWER_DELTA` 的 `text`（见上 `answer` 累加器）—— 与阻塞链路「末轮模型输出全文」语义等价。**不得**累加 `THINKING_DELTA`，否则思考过程会污染入库答案与后续会话记忆（`RagChatMemory` 会把它当历史读回）。若 R1 判据最终退化为不区分思考/答案的单一 `DELTA`，则 `answer` 改取 graph 末态 state 中最后一条 `AssistantMessage`（由 mapper 在 `AGENT_MODEL_FINISHED` 时记录），此路径在 R1 验证时一并确定。
+
+> **实现阶段定论（已覆盖上句）**：R1 静态定论后，`ANSWER_DELTA` 只可能来自末轮（工具轮 `chunk()` 恒空），
+> 累加语义与「末轮全文」等价，故**累加仍是主口径**；同时 mapper 提供
+> `roundFinishedText(NodeOutput)` 取 `AGENT_MODEL_FINISHED` 帧 `message().getText()` 作为兜底 ——
+> 仅当累加结果为空而 FINISHED 帧有全文时才采用，避免整条流一帧未发却落库空答案。
 
 若上述防回归断言（§4.3）将来失败，回退方案：改用 `RunnableConfig.context()`（实测存在，返回可变 `Map<String,Object>`，另有 `clearContext()`）承载租户信息；但需先确认 graph 是否把该 context 传到工具的 `ToolContext`，若不传则在 `AggregatedToolCallbackProvider` 包装工具时注入。
 
@@ -365,12 +375,18 @@ if (!cb.tryAcquirePermission()) {
 | 边界 | `OutputType` 为 `AGENT_HOOK_*`（节点名带 `AGENT_HOOK_NAME_PREFIX`） | 识别为技能钩子，**不误判为工具** |
 | 异常 | 非 `StreamingOutput` 的裸 `NodeOutput`（`GRAPH_NODE_*`） | 忽略且不抛 |
 
+> **实现阶段的用例修正**：① 「中间轮次 → `THINKING_DELTA`」两条改为「工具轮增量帧 `chunk()` 为 `null`
+> → 不产任何事件」，并断言 `chunk()` 本身为 `null` 以锁定框架行为；② `TOOL_END` 的 `durationMs` 断言改为
+> **`isNull()`** —— `NodeOutput` 无耗时字段、`TOOL_START` 是否发送未确认，无可靠来源时不编造数值；
+> ③ 补 `AGENT_MODEL_FINISHED` 用例：不产事件（其 `chunk()` 是聚合后整轮全文，放行会整段重发），
+> 但 `roundFinishedText()` 返回该全文。
+
 ### 4.2 `StreamingAgentExecutorStreamTest`（新建）
 
 以 `executeStream(...)` 返回的 `Flux` 为被测对象（mock `reactAgent.getCompiledGraph()` 返回固定 `Flux<NodeOutput>`）：
 
-- 正常：`StepVerifier` 验证事件序列与顺序（`THINKING_DELTA`* → `TOOL_START`/`TOOL_END` → `ANSWER_DELTA`* → `DONE`）。
-- 正常：`DONE` 事件的 `answer` 等于所有 `ANSWER_DELTA.text` 拼接结果，且**不含**任何 `THINKING_DELTA` 内容（守 §2.4 的污染红线）。
+- 正常：`StepVerifier` 验证事件序列与顺序（`TOOL_START`/`TOOL_END` → `ANSWER_DELTA`* → `DONE`）。
+- 正常：`DONE` 事件的 `answer` 等于所有 `ANSWER_DELTA.text` 拼接结果，且**不含**工具轮的任何内容（守 §2.4 的污染红线）。
 - 异常：源 `Flux.error(...)` → 产出 `ERROR` 事件、流正常结束、**且断言序列中没有 `DONE`**（守 §2.4 错误路径红线，否则半截答案会入库）。
 - 边界：正常完成时 `recorder.clearRecords()` 与 `TenantContext.clear()` 均被调用（池任务 `finally`）。
 - 边界（§3.4 取消）：下游取消后 `cancelled` 标志置位、池任务不再发 `DONE`、`finally` 仍完成清理。
@@ -403,7 +419,7 @@ if (!cb.tryAcquirePermission()) {
 
 | 编号 | 风险 | 等级 | 处置 |
 |---|---|---|---|
-| R1 | `THINKING_DELTA` 与 `ANSWER_DELTA` 的区分判据不确定（同为 `AGENT_MODEL_STREAMING`） | 中 | 实现阶段先打全量 `OutputType` + `node()` + `agent()` 日志实测一轮再定（实现计划任务 0）。**已实测可得的判据**：`RunnableConfig` 提供 `AGENT_MODEL_NAME="_AGENT_MODEL_"` / `AGENT_TOOL_NAME="_AGENT_TOOL_"` / `AGENT_HOOK_NAME_PREFIX="_AGENT_HOOK_"` 常量，节点类型可直接判定；`StreamingOutput.message()` 在增量帧上返回 `AssistantMessage`，其 `hasToolCalls()` 若能在工具轮提前为真，即可边流边区分（首选分支）。回退：合并为单一 `ANSWER_DELTA`（枚举保留 `THINKING_DELTA` 但本期不产出），`DONE.answer` 改取 `AGENT_MODEL_FINISHED` 时 `message()` 的全文。 |
+| R1 | ~~`THINKING_DELTA` 与 `ANSWER_DELTA` 的区分判据不确定~~ **已静态定论（低风险）**：`javap -c -p StreamingOutput` 显示所有携带 `message` 的构造器都用 `extractChunkFromMessage()` 推导 `chunk()`，其字节码为 `instanceof AssistantMessage && !hasToolCalls() → getText()`，否则 `null`。即工具轮增量帧 `chunk()` 恒空 → 思考文本天然不外泄，删除 `THINKING_DELTA` 枚举；`answer` 以累加为主、`roundFinishedText()` 为兜底。原「首选分支 A（按帧 `hasToolCalls()` 判思考）」不成立，因该帧的 `chunk()` 本就是 `null`，判了也无文本可发。该框架内部行为由 `NodeOutputMapperTest` 的两条断言（`chunk()` 为 null / FINISHED 帧 `chunk()` 为整轮全文）锁定，升级依赖会立刻红。**残留待实测项仅剩 §0.4：`AGENT_TOOL_STREAMING` 是否真会发送**（不影响答案正确性，只影响前端有无 `TOOL_START`） | ~~中~~ 低 | 实现阶段先打全量 `OutputType` + `node()` + `agent()` 日志实测一轮再定（实现计划任务 0）。**已实测可得的判据**：`RunnableConfig` 提供 `AGENT_MODEL_NAME="_AGENT_MODEL_"` / `AGENT_TOOL_NAME="_AGENT_TOOL_"` / `AGENT_HOOK_NAME_PREFIX="_AGENT_HOOK_"` 常量，节点类型可直接判定；`StreamingOutput.message()` 在增量帧上返回 `AssistantMessage`，其 `hasToolCalls()` 若能在工具轮提前为真，即可边流边区分（首选分支）。回退：合并为单一 `ANSWER_DELTA`（枚举保留 `THINKING_DELTA` 但本期不产出），`DONE.answer` 改取 `AGENT_MODEL_FINISHED` 时 `message()` 的全文。 |
 | R2 | graph 内部切换调度器导致 `TenantContext` / `ToolCallRecorder` 的 ThreadLocal 丢失 | ~~高~~ → **低（已静态定论）** | 见 §3.3.1 的四项字节码核查：项目当前配置下 `stream()` 全程同步、在订阅者线程（即本方案池线程）上执行，ThreadLocal 不丢。**残留风险是配置漂移**：若将来开启 `parallelToolExecution(true)` 或图内加入并行节点，结论立即失效且表现为**静默跨租户**。处置：§4.3 增加一条防回归断言（工具执行线程 == 池任务线程），并在 `AgentConfig` 的 `ReactAgent.builder()` 处加注释说明该约束。 |
 | R3 | `getCompiledGraph()` 非 ReactAgent 对外宣称的稳定 API，升级可能变更 | 中 | 版本已在 `company-rag-agent/pom.xml` 锁死 `1.1.2.0`；graph-core 原为纯 BOM 传递（项目 pom 零直接声明），已在父 pom `dependencyManagement` 显式锁定 `${spring-ai-alibaba.version}`，防止将来依赖仲裁变化导致线程模型结论静默失效（spec §3.3.1 依赖 1.1.2.0 的字节码事实）；`NodeOutputMapper` 为唯一耦合点，升级时改动面可控。 |
 | R4 | 审批阻塞长时间占用流式池线程，池被占满 | 中 | 池独立（§3.1）+ `AbortPolicy` → `R.fail` 业务码降级；`ApprovalProperties.timeoutSeconds` 已有上限，等待会自行终止。 |

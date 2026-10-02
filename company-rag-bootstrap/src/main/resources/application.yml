@@ -130,6 +130,17 @@ rag:
       # Agent 整体超时时间（分钟），包含所有工具调用和 LLM 响应时间
       # 超时后按“系统繁忙”降级返回；需大于单次 LLM 调用耗时（默认 5 分钟）
       timeout-minutes: 5
+    stream:
+      # 流式端点总开关。关闭时 /api/chat/stream 返回 R.fail(503,...)，不建流。
+      # 铁律：必须在基段显式写出，profile 不补写；曾因缺键导致端点 404 而非可读错误。
+      enabled: false
+      # 相邻事件最大间隔（秒），治「模型 hang 住但连接不断」
+      idle-timeout-seconds: 60
+      # 流式专用线程池（与 executor.* 拆开，避免压小容量做熔断验收时连带拖死阻塞链路）
+      # 未配置时回退读取 rag.agent.executor.* 同名项，兼容既有部署
+      core-pool-size: 4
+      max-pool-size: 8
+      queue-capacity: 100
 
   # 会话历史读取窗口
   # 单位 = 轮（turn）：一轮 = 一行用户消息 + 一行助手回答（rag_session 中 Q/A 各占一行）
