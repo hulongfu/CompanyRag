@@ -9,6 +9,8 @@
 | 涉及模块 | agent / web / bootstrap（+ agent 模块 pom） |
 | HARD-GATE | 本计划获批前不落实现代码；获批后**只落本计划范围内的代码** |
 
+> **引用约定**：本文所有 `§x.y` 一律指来源 spec 的章节；本计划内部引用一律写作「任务 x.y」。
+
 ---
 
 ## 1. 目标
@@ -23,8 +25,8 @@
 
 - 不改 `AgentConfig.java`（含 `ReactAgent.builder()` 的构建参数；仅在 R2 处置要求的**注释**上例外，见任务 5.3）。
 - 不改现有 `POST /api/chat` 的任何行为、`execute()` 方法、`processWithHistory()` 方法体。
-- 不修 §3.7 既有缺陷（阻塞链路 `toolContext` 恒为 traceId）。
-- 不补 Agent 链路 LLM 调用的熔断（§3.6 结论：注解式 AOP 包不住 graph 内部调用，属独立议题）。
+- 不修 spec §3.7 既有缺陷（阻塞链路 `toolContext` 恒为 traceId）。
+- 不补 Agent 链路 LLM 调用的熔断（spec §3.6 结论：注解式 AOP 包不住 graph 内部调用，属独立议题）。
 - 不动 `AggregatedToolCallbackProvider`、审批门、`ExecuteTool`、`DatabaseQueryTool`。
 - 不做前端、不新增 DB 列、不引入 AgentScope。
 
@@ -89,7 +91,7 @@ log.info("[STREAM-PROBE] class={} node={} agent={} outputType={} hasToolCalls={}
 
 > 两个分支下 `DONE.answer` 的来源都必须在任务 3 开始前定稿，不允许实现时随手写。分支 B 同时要求 mapper 在 `AGENT_MODEL_FINISHED` 记录末条 `AssistantMessage` 文本。
 
-**0.4 顺带确认**：`AGENT_TOOL_STREAMING` 是否真的会发（若不发，`TOOL_START` 只能由 `AGENT_TOOL_FINISHED` 单点合成，则 `TOOL_START` 需降级为「不产出」并在 §6 配置说明里记录）。
+**0.4 顺带确认**：`AGENT_TOOL_STREAMING` 是否真的会发（若不发，`TOOL_START` 只能由 `AGENT_TOOL_FINISHED` 单点合成，则 `TOOL_START` 需降级为「不产出」并在 spec §6 配置说明里记录）。
 
 ---
 
@@ -123,7 +125,7 @@ log.info("[STREAM-PROBE] class={} node={} agent={} outputType={} hasToolCalls={}
 
 同时检查 `application-prod.yml` / `application-test.yml` 是否有 `rag.agent` 段：若有，确认新增键不会被子段整体覆盖（YAML profile 是深合并，但需确认项目未用 `spring.config` 的替换语义）。
 
-**1.3 流式专用线程池**：落在 `RagAgentService` 内，与现有 `executorService` 并列新增字段 `streamExecutor`，在**同一个 `@PostConstruct`** 里按同款 `ThreadPoolExecutor(core, max, 60s, ArrayBlockingQueue(queueCapacity), AbortPolicy)` 构造，线程名前缀区分（如 `rag-agent-stream-`）便于日志与 §6.2 断言。
+**1.3 流式专用线程池**：落在 `RagAgentService` 内，与现有 `executorService` 并列新增字段 `streamExecutor`，在**同一个 `@PostConstruct`** 里按同款 `ThreadPoolExecutor(core, max, 60s, ArrayBlockingQueue(queueCapacity), AbortPolicy)` 构造，线程名前缀区分（如 `rag-agent-stream-`）便于日志与任务 6.3 的线程归属断言。
 
 > 为什么不复用现有超时池：流式任务含审批等待会长时间占线程，混池会与阻塞链路互相饿死（spec §3.1）。
 
@@ -196,7 +198,7 @@ public Flux<AgentStreamEvent> executeStream(List<Message> messages, String sessi
 3. 管道：`.map(mapper::map).flatMapIterable(...)` → `doOnNext` 内先查 `cancelled`（真则抛 `CancellationException`）→ 累加 `ANSWER_DELTA` 到 `StringBuilder` → `sink.tryEmitNext`。
 4. 两层超时：`.timeout(Duration.ofSeconds(idleTimeoutSeconds))`（相邻间隔）+ 整体上限由 `blockLast(Duration.ofMinutes(agentTimeoutMinutes))` 承担。
 5. `onErrorResume`：置 `errored=true` + 发 `ERROR` + `registry.counter("rag.agent.stream.error").increment()` + `return Flux.empty()`。
-6. `blockLast()` 之后：`if (!errored) sink.tryEmitNext(buildDone(...))` —— **错误路径不发 DONE**（否则半截答案入库，违反 §3.5）。
+6. `blockLast()` 之后：`if (!errored) sink.tryEmitNext(buildDone(...))` —— **错误路径不发 DONE**（否则半截答案入库，违反 spec §3.5）。
 7. `catch (CancellationException)` → 只 `tryEmitComplete()`，**不发 ERROR/DONE**。
 8. `catch (Exception)` → 发 `ERROR` + `tryEmitComplete()`。**绝不让异常穿透**（I4：SSE 头已写出，穿透到 `GlobalExceptionHandler` 会往已提交响应写 JSON 造成脏帧）。
 9. `finally`：`recorder.clearRecords()` + `TenantContext.clear()`（`ContextSnapshot.Scope` 由 try-with-resources 自动还原）。
@@ -261,7 +263,7 @@ return flux.doOnCancel(() -> cancelled.set(true))
            .doOnNext(ev -> {
                if (ev.type() == DONE) {
                    // 落库 + 触发在线评估：语义对齐 chat() 的 :147-156 与 :169-196，
-                   // 租户/用户/会话一律用本方法内已校验的局部变量（见 §5.3 约束）
+                   // 租户/用户/会话一律用本方法内已校验的局部变量（见任务 5.3 约束）
                    persistAndEvaluate(ev.result(), verifiedTenantId, verifiedUserId,
                            request.getSessionId(), request.getQuery());
                }

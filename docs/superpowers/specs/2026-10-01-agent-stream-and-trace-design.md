@@ -390,3 +390,4 @@ sink.asFlux().doOnCancel(() -> cancelled.set(true))   // controller 侧置标志
 | `docs/superpowers/specs/2026-09-14-answer-evaluator-design.md` | 在线评估触发口径不变（I3）；`ragUsed` 判定改由流式链路在池线程内取值（§2.4） |
 | `docs/superpowers/specs/2026-09-19-approval-gate-design.md` | 审批门实现与拦截点零改动；本方案仅要求其不在 event-loop 上阻塞（§3.1） |
 | `docs/superpowers/specs/2026-09-14-reflection-design.md` | 自省若要用推理段轨迹，可复用本方案的 `NodeOutputMapper` 产物；本方案不主动接入 |
+| `docs/superpowers/plans/2026-10-01-agent-stream-and-trace.md` | 本 spec 的实现计划（任务拆分、依赖与配置改动、测试用例清单、手工验收步骤）。R1 的最终判据由该计划任务 0 的前置实测关闭并回写本文件 §5-R1 |
