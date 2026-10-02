@@ -95,7 +95,7 @@ Flux<NodeOutput> streamFromInitialNode(OverAllState, RunnableConfig)
 
 **设计要点**：graph-core 的 `NodeOutput` / `StreamingOutput` / `OutputType` 只在 `NodeOutputMapper` 一个文件内出现。web 层只见 `AgentStreamEvent`。这样将来若真的要换 AgentScope（其事件体系是 31 类 typed event），改动面被压缩在 mapper 一处。
 
-`THINKING_DELTA` 与 `ANSWER_DELTA` 的区分依据：同为 `AGENT_MODEL_STREAMING`，处于 ReAct 循环中间轮次（后续还要调工具）的是思考，末轮的是答案。判定方式由实现阶段确定，可选判据见 §5-R1。
+`THINKING_DELTA` 与 `ANSWER_DELTA` 的区分依据：同为 `AGENT_MODEL_STREAMING`，处于 ReAct 循环中间轮次（后续还要调工具）的是思考，末轮的是答案。可用判据与回退分支见 §5-R1，由实现计划任务 0 的实测在写代码前定稿。
 
 ### 2.2 改动组件
 
@@ -353,7 +353,7 @@ sink.asFlux().doOnCancel(() -> cancelled.set(true))   // controller 侧置标志
 
 | 编号 | 风险 | 等级 | 处置 |
 |---|---|---|---|
-| R1 | `THINKING_DELTA` 与 `ANSWER_DELTA` 的区分判据不确定（同为 `AGENT_MODEL_STREAMING`） | 中 | 实现阶段先打全量 `OutputType` + `node()` + `agent()` 日志实测一轮再定；候选判据：节点名是否等于 `AGENT_MODEL_NAME`、state 中是否仍有未消费的 tool call、是否为流中最后一个 model 段。最保守回退：合并为单一 `DELTA` 类型，前端不区分思考与答案（功能降级但不阻塞）。 |
+| R1 | `THINKING_DELTA` 与 `ANSWER_DELTA` 的区分判据不确定（同为 `AGENT_MODEL_STREAMING`） | 中 | 实现阶段先打全量 `OutputType` + `node()` + `agent()` 日志实测一轮再定（实现计划任务 0）。**已实测可得的判据**：`RunnableConfig` 提供 `AGENT_MODEL_NAME="_AGENT_MODEL_"` / `AGENT_TOOL_NAME="_AGENT_TOOL_"` / `AGENT_HOOK_NAME_PREFIX="_AGENT_HOOK_"` 常量，节点类型可直接判定；`StreamingOutput.message()` 在增量帧上返回 `AssistantMessage`，其 `hasToolCalls()` 若能在工具轮提前为真，即可边流边区分（首选分支）。回退：合并为单一 `ANSWER_DELTA`（枚举保留 `THINKING_DELTA` 但本期不产出），`DONE.answer` 改取 `AGENT_MODEL_FINISHED` 时 `message()` 的全文。 |
 | R2 | graph 内部切换调度器导致 `TenantContext` / `ToolCallRecorder` 的 ThreadLocal 丢失 | ~~高~~ → **低（已静态定论）** | 见 §3.3.1 的四项字节码核查：项目当前配置下 `stream()` 全程同步、在订阅者线程（即本方案池线程）上执行，ThreadLocal 不丢。**残留风险是配置漂移**：若将来开启 `parallelToolExecution(true)` 或图内加入并行节点，结论立即失效且表现为**静默跨租户**。处置：§4.3 增加一条防回归断言（工具执行线程 == 池任务线程），并在 `AgentConfig` 的 `ReactAgent.builder()` 处加注释说明该约束。 |
 | R3 | `getCompiledGraph()` 非 ReactAgent 对外宣称的稳定 API，升级可能变更 | 中 | 版本已在 `company-rag-agent/pom.xml` 锁死 `1.1.2.0`；`NodeOutputMapper` 为唯一耦合点，升级时改动面可控。 |
 | R4 | 审批阻塞长时间占用流式池线程，池被占满 | 中 | 池独立（§3.1）+ `AbortPolicy` → `R.fail` 业务码降级；`ApprovalProperties.timeoutSeconds` 已有上限，等待会自行终止。 |
