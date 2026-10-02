@@ -22,7 +22,9 @@ class RagAgentServiceTest {
         recorder = mock(ToolCallRecorder.class);
         // processWithHistory 会调用 recorder.getAndClearRecords() 并遍历，未调用工具时返回空表，避免 NPE
         when(recorder.getAndClearRecords()).thenReturn(List.of());
-        service = new RagAgentService(streamingAgentExecutor, recorder, 1, 2, 10, 5, 1, 2, 10);
+        service = new RagAgentService(streamingAgentExecutor, recorder,
+                io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry.ofDefaults(),
+                1, 2, 10, 5, 1, 2, 10, 60);
     }
 
     @Test
