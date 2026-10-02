@@ -2,6 +2,8 @@ package com.company.rag.web.controller;
 
 import com.company.rag.agent.service.AgentResult;
 import com.company.rag.agent.service.RagAgentService;
+import com.company.rag.agent.stream.AgentStreamEvent;
+import com.company.rag.agent.stream.AgentStreamEventType;
 import com.company.rag.common.model.R;
 import com.company.rag.common.security.SecurityUser;
 import com.company.rag.rag.eval.answer.AnswerCase;
@@ -16,6 +18,7 @@ import com.company.rag.rag.service.RagSessionService;
 import com.company.rag.rag.service.support.RagResultContextBuilder;
 import com.company.rag.tenant.context.TenantContextSnapshot;
 import com.company.rag.tenant.context.TenantContext;
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutorService;
@@ -23,15 +26,18 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.MediaType;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
+import reactor.core.publisher.Flux;
 
 /**
  * 统一对话 Controller
@@ -58,6 +64,10 @@ public class ChatController {
 
     @Value("${rag.eval.async-enabled:true}")
     private boolean asyncEnabled;
+
+    // 流式端点灰度开关：默认关闭。未开启时不建流、不读历史、不占线程池，直接返回 503
+    @Value("${rag.agent.stream.enabled:false}")
+    private boolean streamEnabled;
 
     // Java 17 兼容：使用普通命名线程工厂（Thread.ofVirtual 为 Java 21 API，本项目 java=17，编译会失败）
     private final ThreadFactory evalThreadFactory = new ThreadFactory() {
@@ -221,6 +231,196 @@ public class ChatController {
         }
     }
     
+    /**
+     * 流式对话入口（SSE）。与阻塞式 {@link #chat} 并存，阻塞端点语义不变。
+     *
+     * <p><b>返回类型是 {@code Object} 而非 {@code R<T>}，这是本系统唯一偏离统一响应契约的端点</b>：
+     * 建流前失败要返回 {@code R<ChatResponse>}，成功要返回 {@code Flux<AgentStreamEvent>}。
+     * 与已废弃的 {@code /rag/search} 流式接口同类。
+     *
+     * <p><b>方法体内的顺序即正确性，不可调整</b>：开关判断必须最先（不建流、不读历史、不占池），
+     * 安全校验必须早于建流，建流异常必须在返回 Flux 之前被捕获并转成统一响应体 ——
+     * 一旦返回 Flux，Spring 就开始写 SSE 响应头，之后的任何失败都无法再降级为 {@code R<T>}。
+     *
+     * @param request         聊天请求
+     * @param headerTenantId  已由 JwtAuthenticationFilter 校验的租户 ID
+     * @return 成功返回 SSE 事件流；建流前失败返回统一失败响应
+     */
+    @PostMapping(value = "/chat/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @PreAuthorize("isAuthenticated()")
+    public Object chatStream(@RequestBody ChatRequest request,
+                             @RequestHeader(value = "X-Tenant-Id", required = false) Long headerTenantId) {
+        // 1. 灰度开关最先判断：未开启时不读历史、不占线程池
+        if (!streamEnabled) {
+            log.warn("流式接口未启用，拒绝请求：sessionId={}", request.getSessionId());
+            return R.fail(503, "流式接口未启用");
+        }
+
+        log.info("收到流式聊天请求：query={}, sessionId={}, headerTenantId={}",
+                request.getQuery(), request.getSessionId(), headerTenantId);
+
+        TenantContext.setSessionId(request.getSessionId());
+
+        try {
+            // 【安全关键】以下校验段与 chat() 逐行一致，改动须同步：
+            // 租户 ID 只信请求头（已经过 JwtAuthenticationFilter 验证），请求体里的 tenantId 客户端可控
+            Long verifiedTenantId = headerTenantId;
+            if (verifiedTenantId == null) {
+                log.error("租户 ID 缺失，拒绝流式服务：query={}", request.getQuery());
+                throw new IllegalArgumentException("租户 ID 不能为空，请确认请求头 X-Tenant-Id 已设置");
+            }
+            request.setTenantId(verifiedTenantId);
+            TenantContext.setTenantId(verifiedTenantId);
+
+            // 【安全关键】用户 ID 只信已认证的安全上下文
+            Object principal = SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+            Long verifiedUserId = null;
+            if (principal instanceof SecurityUser) {
+                verifiedUserId = ((SecurityUser) principal).getUserId();
+            }
+            if (verifiedUserId == null) {
+                log.error("用户 ID 缺失，拒绝流式服务：principal={}, tenantId={}",
+                        principal != null ? principal.getClass().getSimpleName() : "null",
+                        verifiedTenantId);
+                throw new IllegalStateException("用户 ID 不能为空，请确认用户已正确登录");
+            }
+            request.setUserId(verifiedUserId);
+            TenantContext.setUserId(verifiedUserId);
+
+            // 读历史：与 chat() 同条件，tenantId 缺失时不读历史，避免记忆与落库租户割裂
+            List<Message> historyMessages = null;
+            if (request.getSessionId() != null && request.getTenantId() != null) {
+                historyMessages = ragChatMemory.get(request.getSessionId());
+            }
+
+            AtomicBoolean cancelled = new AtomicBoolean(false);
+            Flux<AgentStreamEvent> flux;
+            try {
+                // 建流：此刻尚未返回 Flux，Spring 未开始写 SSE 头，异常可正常转统一响应体
+                flux = ragAgentService.processWithHistoryStream(historyMessages, request.getQuery(), cancelled);
+            } catch (RejectedExecutionException | CallNotPermittedException e) {
+                // 线程池满或熔断打开：降级为 503，不抛到全局异常处理器（I5）
+                log.warn("流式建流被拒绝，降级为繁忙响应：sessionId={}, cause={}",
+                        request.getSessionId(), e.getMessage());
+                return R.fail(503, "系统繁忙，请稍后重试");
+            }
+
+            // 必须在请求线程捕获租户快照：落库/评估回调运行在流的生产线程上，
+            // 而下面的 finally 会清空请求线程上下文，回调阶段只能依赖这份快照
+            TenantContextSnapshot snapshot = TenantContextSnapshot.captureNow();
+            String query = request.getQuery();
+            String sessionId = request.getSessionId();
+            // verifiedUserId 经历过条件赋值，不是 effectively final，lambda 需另取副本
+            Long streamUserId = verifiedUserId;
+
+            return flux
+                    .doOnCancel(() -> cancelled.set(true))
+                    .doOnNext(event -> {
+                        if (event.type() == AgentStreamEventType.DONE) {
+                            persistAndEvaluateStreamResult(event.result(), snapshot,
+                                    verifiedTenantId, streamUserId, sessionId, query);
+                        }
+                    })
+                    // 铁律：SSE 已开写后不得让异常穿透到 GlobalExceptionHandler（I4）。
+                    // 落库/评估异常已在下方方法内吞掉，此处只兜住不可预期的回调异常。
+                    .onErrorResume(e -> {
+                        log.error("流式响应异常，结束 SSE 流：sessionId={}", sessionId, e);
+                        return Flux.empty();
+                    });
+        } finally {
+            // 与 chat() 一致：在请求线程清理，防线程复用串扰。
+            // 不能挂到流的 doFinally 上——终止信号可能落在池线程，会误清池线程自身的上下文。
+            TenantContext.clear();
+        }
+    }
+
+    /**
+     * 流式链路收尾：落库 + 触发在线评估。
+     *
+     * <p>语义与 {@link #chat} 的落库段与评估段一致（改动须同步），按用户裁决<b>复制不抽取</b>：
+     * 抽取需改动阻塞链路方法体，而阻塞链路的评估触发口径是在线评估基线的一部分，不值得为此承担风险。
+     *
+     * <p><b>只在收到 DONE 时调用</b>：客户端在 DONE 前断开则不落库、不评估，
+     * 避免半截答案写进 {@code rag_session} 后被当作历史记忆读回、并污染评估统计。
+     *
+     * <p>本方法运行在流的生产线程上，<b>禁止读取任何 ThreadLocal</b>：租户/用户/会话三个参数
+     * 一律由 controller 方法内已校验的局部变量显式传入；仅在 SQL 路由必需的 schema 上下文上
+     * 用请求线程快照做「apply → 执行 → clear」的成对搬运。
+     *
+     * <p>任何异常都在本方法内吞掉并告警：SSE 已开始写出，抛出无法再转成统一响应体。
+     */
+    private void persistAndEvaluateStreamResult(AgentResult result,
+                                                TenantContextSnapshot snapshot,
+                                                Long verifiedTenantId,
+                                                Long verifiedUserId,
+                                                String sessionId,
+                                                String query) {
+        if (result == null) {
+            return;
+        }
+        Long savedRowId = null;
+        try {
+            snapshot.apply();
+            if (sessionId != null) {
+                savedRowId = ragSessionService.saveConversation(
+                        verifiedTenantId,
+                        sessionId,
+                        verifiedUserId,
+                        query,
+                        result.getAnswer(),
+                        result.getToolContext(),
+                        null, null, null
+                );
+                log.debug("流式保存会话记录：sessionId={}, tenantId={}, userId={}, savedRowId={}",
+                        sessionId, verifiedTenantId, verifiedUserId, savedRowId);
+            }
+        } catch (Exception e) {
+            log.error("流式落库失败，跳过在线评估：sessionId={}", sessionId, e);
+            return;
+        } finally {
+            snapshot.clear();
+        }
+
+        // 在线自动评估（默认关闭）：触发口径与 chat() 完全一致 —— 仅对真实执行过 RAG 检索的回答评估
+        if (!evalOnlineEnabled || savedRowId == null || answerEvaluationService == null || !result.isRagUsed()) {
+            return;
+        }
+        // 【铁律】context 可能为 null（无工具调用时），空值归一化为 ""
+        String contextForEval = result.getToolContext() == null ? "" : result.getToolContext();
+        Long rowIdForEval = savedRowId;
+        if (!asyncEnabled) {
+            try {
+                snapshot.apply();
+                answerEvaluationService.evaluateAllPersisted(List.of(
+                        new AnswerCase(query, contextForEval, result.getAnswer(),
+                                verifiedTenantId, rowIdForEval, "online")));
+            } catch (Exception e) {
+                log.error("流式在线评估失败：sessionRowId={}", rowIdForEval, e);
+            } finally {
+                snapshot.clear();
+            }
+            return;
+        }
+        try {
+            evalExecutor.submit(() -> {
+                try {
+                    snapshot.apply();
+                    answerEvaluationService.evaluateAllPersisted(List.of(
+                            new AnswerCase(query, contextForEval, result.getAnswer(),
+                                    verifiedTenantId, rowIdForEval, "online")));
+                } catch (Exception e) {
+                    log.error("流式在线评估任务失败：sessionRowId={}", rowIdForEval, e);
+                } finally {
+                    snapshot.clear();
+                }
+            });
+        } catch (RejectedExecutionException e) {
+            // 队列满丢弃本次评估。不调用 snapshot.clear()：它是请求线程捕获的快照，
+            // 此处 clear 会误清提交线程的上下文
+            log.warn("[EVAL] 流式在线评估线程池已满，丢弃一次评估：query={}", query);
+        }
+    }
+
     /**
      * 保留独立 RAG 入口（标记为 Deprecated，供现有前端使用）
      * 
