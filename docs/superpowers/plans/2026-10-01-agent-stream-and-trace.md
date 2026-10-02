@@ -64,6 +64,10 @@
 
 R1 是唯一还影响**公开契约**（事件类型是否 6 个）的未定项。用一个临时探针把事实钉死，**不提交**该探针代码。
 
+**0.0 静态验证边界（已做到极限，剩余部分确实必须实测）**：`AgentLlmNode` 内确有 `AssistantMessage.hasToolCalls()` / `getToolCalls()` 引用，但字节码显示其作用对象是 `ChatResponse.getResult().getOutput()` —— 即**聚合后的完整响应**，位于 `apply()` 的轮次判定逻辑，**不是逐 chunk**。同时 `StreamingOutput` 的构造点在 agent-framework 内只有 `Agent`（6 处）与 `A2aNodeActionWithConfig`（24 处），`AgentLlmNode` 自身不构造它 → 增量帧由 graph-core 侧的 LLM 流适配层产出，其 `message()` 是否携带当轮**部分** tool calls，取决于 DashScope 每个 chunk 的实际返回内容。
+
+> 结论：R1 与 R2 **性质不同**。R2（线程模型）看字节码即可定论，已定论；R1 的判据依赖运行期模型返回的分片内容，静态无法证明，故任务 0 的实测不是"偷懒推给实现阶段"，而是该项的事实边界。
+
 **0.1 探针做法**：在 `executeStream` 骨架阶段（任务 3 的最初版本）临时把每个 `NodeOutput` 打成日志：
 
 ```java
@@ -254,12 +258,21 @@ public Object chatStream(@RequestBody ChatRequest request,
 
 ```java
 return flux.doOnCancel(() -> cancelled.set(true))
-           .doOnNext(ev -> { if (ev.type() == DONE) onStreamCompleted(ev.result(), ...局部变量...); });
+           .doOnNext(ev -> {
+               if (ev.type() == DONE) {
+                   // 落库 + 触发在线评估：语义对齐 chat() 的 :147-156 与 :169-196，
+                   // 租户/用户/会话一律用本方法内已校验的局部变量（见 §5.3 约束）
+                   persistAndEvaluate(ev.result(), verifiedTenantId, verifiedUserId,
+                           request.getSessionId(), request.getQuery());
+               }
+           });
 ```
 
-**5.3 `onStreamCompleted` 私有方法**：把现有 `chat()` 的落库段（`:147-156`）与评估段（`:169-196`）抽成私有方法，**阻塞端点与流式端点共用**（这是本次唯一允许触碰阻塞链路的一处，且必须是**纯提取、行为等价**；若评估风险偏高，则改为流式端点内复制一份，不抽公共方法 —— 由任务获批时用户裁决，默认取**复制不抽取**，改动面更小）。
+> `persistAndEvaluate` 为**流式端点专用**的私有方法（内含落库 + 评估两段），**不**从 `chat()` 抽取共用 —— 理由见 §5.3。
 
-约束：该方法内**禁止**读任何 ThreadLocal（`TenantContext` / `ToolCallRecorder`），租户/用户/会话三个参数全部由 controller 方法内已校验的局部变量显式传入（`saveConversation` 本就接收这三个参数，无需 ThreadLocal）。原因见 spec §2.3 约束 2：回调在下游订阅者线程执行，不保证是池线程。
+**5.3 落库与评估段的复用方式（用户已裁决：复制不抽取）**：流式端点**自带一份**落库段（对齐 `:147-156`）与评估段（对齐 `:169-196`），**不抽取私有方法共用**。理由：抽取需改动 `ChatController.chat()` 方法体，而阻塞链路的 faithfulness 判定口径是在线评估基线的一部分（spec §3.7 同理），不值得为消除重复承担该风险。代价是两段逻辑重复，须由注释互相指向（「与 `chat()` 落库段语义一致，改动须同步」）控制漂移。
+
+约束：该段内**禁止**读任何 ThreadLocal（`TenantContext` / `ToolCallRecorder`），租户/用户/会话三个参数全部由 controller 方法内已校验的局部变量显式传入（`saveConversation` 本就接收这三个参数，无需 ThreadLocal）。原因见 spec §2.3 约束 2：回调在下游订阅者线程执行，不保证是池线程。
 
 **5.4 `AgentConfig` 注释**（R2 处置）：在 `AgentConfig.java:90` 的 `ReactAgent.builder()` 上方加一行说明 —— 「不得开启 `parallelToolExecution` 或在图内加入并行节点：流式链路依赖工具在订阅线程内同步执行（`TenantContext`/`ToolCallRecorder` 为 ThreadLocal），开启并行会静默导致跨租户风险。约束由 `RagAgentServiceStreamTest` 的线程归属断言守护」。
 
