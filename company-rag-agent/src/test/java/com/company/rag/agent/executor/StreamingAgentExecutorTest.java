@@ -24,7 +24,9 @@ class StreamingAgentExecutorTest {
     void setUp() {
         reactAgent = mock(ReactAgent.class);
         recorder = new ToolCallRecorder();
-        executor = new StreamingAgentExecutor(reactAgent, recorder);
+        executor = new StreamingAgentExecutor(reactAgent, recorder,
+                new com.company.rag.agent.stream.NodeOutputMapper(),
+                new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
     }
 
     @Test
