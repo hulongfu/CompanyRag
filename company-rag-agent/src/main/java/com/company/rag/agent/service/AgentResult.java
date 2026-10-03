@@ -1,5 +1,7 @@
 package com.company.rag.agent.service;
 
+import com.company.rag.common.tool.ToolCallRecord;
+import java.util.List;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -29,4 +31,11 @@ public class AgentResult {
      * 因缺少检索上下文会恒判 0 分，故需要该标志位来过滤。
      */
     private boolean ragUsed;
+
+    /**
+     * 本次执行产生的工具调用明细（由执行线程在清理前带出），
+     * 供上层输出结构化 tools=[...] 日志；其余字段用于落库与评估，
+     * 此字段避免上层跨线程读 ThreadLocal 取到空列表。
+     */
+    private List<ToolCallRecord> toolRecords;
 }

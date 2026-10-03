@@ -203,15 +203,20 @@ public class RagAgentService {
 
             // 聚合工具调用记录，输出结构化日志
             long totalMs = System.currentTimeMillis() - requestStart;
-            List<ToolCallRecord> records = recorder.getAndClearRecords();
-            String toolsSummary = records.stream()
+            // 工具明细由 executor 工作线程在清理前带出（跨线程 ThreadLocal 不可见），
+            // 不再在 controller 线程调用 getAndClearRecords()（恒取到空列表）
+            List<ToolCallRecord> records = agentResult.getToolRecords();
+            String toolsSummary = records == null ? "" : records.stream()
                     .map(r -> String.format("%s(%dms,%s)", r.getToolName(), r.getDurationMs(), r.getStatus()))
                     .collect(Collectors.joining(", "));
             log.info("[AGENT] tools=[{}], total={}ms", toolsSummary, totalMs);
 
-            return new AgentResult(response != null ? response : "",
-                    agentResult.getToolContext() != null ? agentResult.getToolContext() : MDC.get("traceId"),
-                    agentResult.isRagUsed());
+            return AgentResult.builder()
+                    .answer(response != null ? response : "")
+                    .toolContext(agentResult.getToolContext() != null ? agentResult.getToolContext() : MDC.get("traceId"))
+                    .ragUsed(agentResult.isRagUsed())
+                    .toolRecords(agentResult.getToolRecords())
+                    .build();
 
         } catch (Exception e) {
             long totalMs = System.currentTimeMillis() - requestStart;

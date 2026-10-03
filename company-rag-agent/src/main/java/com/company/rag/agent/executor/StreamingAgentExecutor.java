@@ -6,6 +6,7 @@ import com.company.rag.agent.stream.AgentStreamEventType;
 import com.company.rag.agent.stream.NodeOutputMapper;
 import com.company.rag.agent.stream.TenantStreamContext;
 import com.company.rag.common.tool.ToolCallRecorder;
+import com.company.rag.common.tool.ToolCallRecord;
 import com.company.rag.tenant.context.TenantContext;
 import com.alibaba.cloud.ai.graph.CompiledGraph;
 import com.alibaba.cloud.ai.graph.NodeOutput;
@@ -81,10 +82,13 @@ public class StreamingAgentExecutor {
             // 判断本次是否执行过 RAG 检索（searchKnowledgeBase），供在线评估据此过滤：
             // 仅对真实检索过的回答评估 faithfulness，避免无上下文的普通回复被误判为 0 分。
             boolean ragUsed = recorder.usedTool("searchKnowledgeBase");
+            // 取工具明细供上层输出 tools=[...] 日志；必须在清理前（ThreadLocal 线程内）取值
+            List<ToolCallRecord> toolRecords = recorder.getAndClearRecords();
             return AgentResult.builder()
                     .answer(content)
                     .toolContext(toolContext)
                     .ragUsed(ragUsed)
+                    .toolRecords(toolRecords)
                     .build();
         } catch (GraphRunnerException e) {
             log.error("[AGENT-EXEC] Agent 执行失败 | error={}", e.getMessage(), e);

@@ -84,4 +84,20 @@ class StreamingAgentExecutorTest {
         // execute 内部在捕获上下文后用 finally 清理工作线程的记录，避免串号/泄漏
         assertEquals("", recorder.captureToolContext());
     }
+
+    @Test
+    void execute_carriesToolRecords_toAgentResult() throws Exception {
+        when(reactAgent.call(List.of(new UserMessage("hi"))))
+                .thenReturn(new AssistantMessage("hello"));
+
+        long start = recorder.recordStart("searchKnowledgeBase", java.util.Map.of("question", "q"));
+        recorder.recordEnd("searchKnowledgeBase", start, "success", null, "citations=c1");
+
+        AgentResult result = executor.execute(List.of(new UserMessage("hi")));
+
+        // 工具明细必须由 executor 工作线程在清理前带出（跨线程 ThreadLocal 不可见），
+        // 供 RagAgentService 输出 tools=[...] 结构化日志；漏带即回归旧 bug（恒空）
+        assertEquals(1, result.getToolRecords().size());
+        assertEquals("searchKnowledgeBase", result.getToolRecords().get(0).getToolName());
+    }
 }

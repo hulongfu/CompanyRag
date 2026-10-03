@@ -30,7 +30,11 @@ class RagAgentServiceTest {
     @Test
     void processWithHistory_returnsRealToolContext() throws Exception {
         when(streamingAgentExecutor.execute(org.mockito.ArgumentMatchers.anyList()))
-                .thenReturn(new AgentResult("answer", "searchKnowledgeBase:citations=c1", true));
+                .thenReturn(AgentResult.builder()
+                        .answer("answer")
+                        .toolContext("searchKnowledgeBase:citations=c1")
+                        .ragUsed(true)
+                        .build());
 
         AgentResult result = service.processWithHistory(null, "hi");
 
