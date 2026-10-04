@@ -20,6 +20,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import reactor.core.publisher.Flux;
 
@@ -66,7 +67,7 @@ class StreamingAgentExecutorStreamTest {
         recorder = mock(ToolCallRecorder.class);
         meterRegistry = new SimpleMeterRegistry();
         executor = new StreamingAgentExecutor(reactAgent, recorder, new NodeOutputMapper(), meterRegistry);
-        when(reactAgent.getCompiledGraph()).thenReturn(compiledGraph);
+        when(reactAgent.getAndCompileGraph()).thenReturn(compiledGraph);
         when(recorder.captureToolContext()).thenReturn("ctx");
         when(recorder.usedTool(anyString())).thenReturn(true);
     }
@@ -88,6 +89,19 @@ class StreamingAgentExecutorStreamTest {
         return frame(TOOL_NODE, new AssistantMessage(""), OutputType.AGENT_TOOL_FINISHED);
     }
 
+    /** 真机形状：ReactAgent 的工具节点名不带工具名后缀，工具名只能来自 message。 */
+    private static StreamingOutput<Message> toolFinishedFromBareNode(String toolName) {
+        return frame(RunnableConfig.AGENT_TOOL_NAME, ToolResponseMessage.builder()
+                .responses(List.of(new ToolResponseMessage.ToolResponse("c1", toolName, "结果")))
+                .build(), OutputType.AGENT_TOOL_FINISHED);
+    }
+
+    private static StreamingOutput<Message> modelFinishedWithToolCall(String toolName) {
+        return frame(MODEL_NODE, AssistantMessage.builder().content("")
+                .toolCalls(List.of(new AssistantMessage.ToolCall("c1", "function", toolName, "{}")))
+                .build(), OutputType.AGENT_MODEL_FINISHED);
+    }
+
     private void givenGraphStream(Flux<NodeOutput> stream) {
         when(compiledGraph.stream(anyMap(), any(RunnableConfig.class))).thenReturn(stream);
     }
@@ -103,9 +117,69 @@ class StreamingAgentExecutorStreamTest {
         return TenantStreamContext.captureNow();
     }
 
+    /**
+     * 真机形状：工具节点名为裸常量（无后缀）时，TOOL_END 的工具名必须来自 ToolResponseMessage，
+     * 且 TOOL_START 由模型轮聚合帧补发，前端才能渲染「执行中 → 已完成」。
+     */
     @Test
-    void executeStream_normalFlow_emitsToolAndAnswerEventsInOrder() {
-        givenGraphStream(Flux.just(toolFinished(), modelChunk("你"), modelChunk("好")));
+    void executeStream_bareToolNodeName_emitsToolStartAndEndWithToolName() {
+        givenGraphStream(Flux.just(modelFinishedWithToolCall("searchKnowledgeBase"),
+                toolFinishedFromBareNode("searchKnowledgeBase"), modelChunk("答")));
+
+        List<AgentStreamEvent> events = collect(contextOf("tenant_a"), new AtomicBoolean(false));
+
+        assertThat(events).extracting(AgentStreamEvent::type).containsExactly(
+                AgentStreamEventType.TOOL_START, AgentStreamEventType.TOOL_END,
+                AgentStreamEventType.ANSWER_DELTA, AgentStreamEventType.DONE);
+        assertThat(events).extracting(AgentStreamEvent::toolName)
+                .containsExactly("searchKnowledgeBase", "searchKnowledgeBase", null, null);
+    }
+
+    /**
+     * TOOL_START 与 TOOL_END 配对时，执行器必须补上真实耗时；无配对开始帧时保持 null 不编造。
+     */
+    @Test
+    void executeStream_pairedToolEvents_fillDurationAndLeaveUnpairedNull() {
+        givenGraphStream(Flux.just(modelFinishedWithToolCall("searchKnowledgeBase"),
+                toolFinishedFromBareNode("searchKnowledgeBase"),
+                toolFinishedFromBareNode("queryDatabase")));
+
+        List<AgentStreamEvent> events = collect(contextOf("tenant_a"), new AtomicBoolean(false));
+
+        assertThat(events).filteredOn(e -> e.type() == AgentStreamEventType.TOOL_END)
+                .filteredOn(e -> "searchKnowledgeBase".equals(e.toolName()))
+                .allSatisfy(e -> assertThat(e.durationMs()).isNotNull().isGreaterThanOrEqualTo(0L));
+        assertThat(events).filteredOn(e -> e.type() == AgentStreamEventType.TOOL_END)
+                .filteredOn(e -> "queryDatabase".equals(e.toolName()))
+                .allSatisfy(e -> assertThat(e.durationMs()).isNull());
+    }
+
+    /**
+     * 真机场景：模型一轮发起 3 个同名工具调用，3 个 TOOL_START 必须各自配到 1 个 TOOL_END。
+     * 若用单值 Map 记录开始时刻，后一个 START 会覆盖前一个，导致部分 TOOL_END 丢耗时。
+     */
+    @Test
+    void executeStream_sameToolCalledInParallel_fillDurationForEveryCall() {
+        givenGraphStream(Flux.just(frame(MODEL_NODE, AssistantMessage.builder().content("")
+                        .toolCalls(List.of(
+                                new AssistantMessage.ToolCall("c1", "function", "searchKnowledgeBase", "{}"),
+                                new AssistantMessage.ToolCall("c2", "function", "searchKnowledgeBase", "{}"),
+                                new AssistantMessage.ToolCall("c3", "function", "searchKnowledgeBase", "{}")))
+                        .build(), OutputType.AGENT_MODEL_FINISHED),
+                toolFinishedFromBareNode("searchKnowledgeBase"),
+                toolFinishedFromBareNode("searchKnowledgeBase"),
+                toolFinishedFromBareNode("searchKnowledgeBase")));
+
+        List<AgentStreamEvent> events = collect(contextOf("tenant_a"), new AtomicBoolean(false));
+
+        assertThat(events).filteredOn(e -> e.type() == AgentStreamEventType.TOOL_START).hasSize(3);
+        assertThat(events).filteredOn(e -> e.type() == AgentStreamEventType.TOOL_END)
+                .hasSize(3)
+                .allSatisfy(e -> assertThat(e.durationMs()).isNotNull().isGreaterThanOrEqualTo(0L));
+    }
+
+    @Test
+    void executeStream_normalFlow_emitsToolAndAnswerEventsInOrder() {        givenGraphStream(Flux.just(toolFinished(), modelChunk("你"), modelChunk("好")));
 
         List<AgentStreamEvent> events = collect(contextOf("tenant_a"), new AtomicBoolean(false));
 

@@ -133,9 +133,11 @@ rag:
     stream:
       # 流式端点总开关。关闭时 /api/chat/stream 返回 R.fail(503,...)，不建流。
       # 铁律：必须在基段显式写出，profile 不补写；曾因缺键导致端点 404 而非可读错误。
-      enabled: false
-      # 相邻事件最大间隔（秒），治「模型 hang 住但连接不断」
-      idle-timeout-seconds: 60
+      enabled: true
+      # 相邻事件最大间隔（秒），治「模型 hang 住但连接不断」。
+      # 180s：多轮工具型任务里模型存在长时间不吐字的间隙（检索 + 工具执行 + 下一轮首 token），
+      # 60s 会误判为 hang 并把整条流降级为 ERROR；真机实测 6 轮工具任务确实撞过 60s。
+      idle-timeout-seconds: 180
       # 流式专用线程池（与 executor.* 拆开，避免压小容量做熔断验收时连带拖死阻塞链路）
       # 未配置时回退读取 rag.agent.executor.* 同名项，兼容既有部署
       core-pool-size: 4

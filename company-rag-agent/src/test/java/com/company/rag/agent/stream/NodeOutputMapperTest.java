@@ -8,6 +8,7 @@ import com.alibaba.cloud.ai.graph.streaming.StreamingOutput;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.ToolResponseMessage;
 
 import java.util.List;
 
@@ -31,6 +32,11 @@ class NodeOutputMapperTest {
      */
     private static StreamingOutput<Message> frame(String node, Message message, OutputType type) {
         return new StreamingOutput<>(message, node, AGENT, new OverAllState(), type);
+    }
+
+    /** ToolResponseMessage 构造器是 protected，只能走 builder。 */
+    private static ToolResponseMessage toolResponseMessage(ToolResponseMessage.ToolResponse... responses) {
+        return ToolResponseMessage.builder().responses(List.of(responses)).build();
     }
 
     private static AssistantMessage toolCallMessage() {
@@ -115,6 +121,62 @@ class NodeOutputMapperTest {
 
         assertThat(events).hasSize(1);
         assertThat(events.get(0).toolName()).isEqualTo("someCustomNode");
+    }
+
+    /**
+     * 真机场景：ReactAgent 的工具节点名恒等于 {@code _AGENT_TOOL_}（无工具名后缀），
+     * 工具名必须取自 ToolResponseMessage 的响应项，否则会发出空工具名让前端渲染成空白卡片。
+     */
+    @Test
+    void map_toolFinishedWithoutNameInNodeName_usesToolResponseName() {
+        var events = mapper.map(frame(RunnableConfig.AGENT_TOOL_NAME,
+                toolResponseMessage(new ToolResponseMessage.ToolResponse("call-1", "searchKnowledgeBase", "结果")),
+                OutputType.AGENT_TOOL_FINISHED));
+
+        assertThat(events).hasSize(1);
+        assertThat(events.get(0).type()).isEqualTo(AgentStreamEventType.TOOL_END);
+        assertThat(events.get(0).toolName()).isEqualTo("searchKnowledgeBase");
+    }
+
+    /**
+     * message 优先于 node 名：一轮并行调用多个工具时，一帧展开成多个 TOOL_END 且顺序保持。
+     */
+    @Test
+    void map_toolFinishedWithParallelCalls_emitsOneEventPerTool() {
+        var events = mapper.map(frame(TOOL_NODE, toolResponseMessage(
+                new ToolResponseMessage.ToolResponse("c1", "searchKnowledgeBase", "a"),
+                new ToolResponseMessage.ToolResponse("c2", "queryDatabase", "b")),
+                OutputType.AGENT_TOOL_FINISHED));
+
+        assertThat(events).extracting(AgentStreamEvent::toolName)
+                .containsExactly("searchKnowledgeBase", "queryDatabase");
+    }
+
+    /**
+     * 边界：node 名与 message 都给不出工具名时必须整帧跳过，不能把空串当合法工具名下发。
+     */
+    @Test
+    void map_toolFinishedWithUnresolvableToolName_emitsNothing() {
+        assertThat(mapper.map(frame(RunnableConfig.AGENT_TOOL_NAME,
+                new AssistantMessage("工具结果"), OutputType.AGENT_TOOL_FINISHED))).isEmpty();
+    }
+
+    @Test
+    void map_modelFinishedWithToolCalls_emitsToolStartPerCall() {
+        var events = mapper.map(frame(MODEL_NODE, toolCallMessage(), OutputType.AGENT_MODEL_FINISHED));
+
+        assertThat(events).hasSize(1);
+        assertThat(events.get(0).type()).isEqualTo(AgentStreamEventType.TOOL_START);
+        assertThat(events.get(0).toolName()).isEqualTo("searchKnowledgeBase");
+    }
+
+    /**
+     * 末轮（产出最终答案、无 tool calls）不得产生任何工具事件，否则前端会出现幽灵工具卡片。
+     */
+    @Test
+    void map_modelFinishedWithoutToolCalls_emitsNothing() {
+        assertThat(mapper.map(frame(MODEL_NODE, new AssistantMessage("最终答案"),
+                OutputType.AGENT_MODEL_FINISHED))).isEmpty();
     }
 
     @Test

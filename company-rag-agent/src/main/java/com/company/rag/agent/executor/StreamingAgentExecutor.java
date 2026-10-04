@@ -26,6 +26,8 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
 
 import java.time.Duration;
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -157,6 +159,10 @@ public class StreamingAgentExecutor {
             StringBuilder answer = new StringBuilder();
             // 末轮 AGENT_MODEL_FINISHED 的整轮全文，仅在累加结果为空时兜底
             AtomicReference<String> lastRoundText = new AtomicReference<>();
+            // 工具开始时间（纳秒）：mapper 必须无状态，跨帧状态只能由池任务用局部变量承载。
+            // 同名工具可并行/重复调用，故按 FIFO 队列配对：一个 TOOL_START 恰好被一个 TOOL_END 消费，
+            // 避免用单值 Map 时后一个 START 覆盖前一个、导致部分 TOOL_END 丢掉耗时。
+            Map<String, Deque<Long>> toolStartNanos = new HashMap<>();
 
             Flux<NodeOutput> graphStream = graphStream(messages, sessionId);
 
@@ -175,9 +181,10 @@ public class StreamingAgentExecutor {
                         if (event.type() == AgentStreamEventType.ANSWER_DELTA && event.text() != null) {
                             answer.append(event.text());
                         }
+                        AgentStreamEvent toEmit = fillToolDuration(event, toolStartNanos);
                         // unicast sink 在客户端断开后返回 FAIL_CANCELLED，据此终止上游消费，
                         // 避免模型继续为已断开的连接产出 token
-                        Sinks.EmitResult emitResult = sink.tryEmitNext(event);
+                        Sinks.EmitResult emitResult = sink.tryEmitNext(toEmit);
                         if (emitResult == Sinks.EmitResult.FAIL_CANCELLED) {
                             cancelled.set(true);
                             throw new CancellationException("client disconnected");
@@ -225,6 +232,31 @@ public class StreamingAgentExecutor {
     }
 
     /**
+     * 为工具事件补全耗时：TOOL_START 记录起始时刻，TOOL_END 回填与起始时刻的差值。
+     *
+     * <p>graph 帧本身不带耗时与状态，只有在本类持有的跨帧局部计时上才能测得；
+     * 找不到配对的开始时刻（例如客户端在中途重连、或框架漏发模型轮聚合帧）时保持
+     * {@code durationMs} 为 null，不编造数值。
+     */
+    private AgentStreamEvent fillToolDuration(AgentStreamEvent event, Map<String, Deque<Long>> toolStartNanos) {
+        if (event.type() == AgentStreamEventType.TOOL_START && event.toolName() != null) {
+            toolStartNanos.computeIfAbsent(event.toolName(), k -> new ArrayDeque<>())
+                    .addLast(System.nanoTime());
+            return event;
+        }
+        if (event.type() != AgentStreamEventType.TOOL_END || event.toolName() == null) {
+            return event;
+        }
+        Deque<Long> starts = toolStartNanos.get(event.toolName());
+        Long startNanos = starts == null ? null : starts.pollFirst();
+        if (startNanos == null) {
+            return event;
+        }
+        return AgentStreamEvent.toolEnd(event.toolName(),
+                Duration.ofNanos(System.nanoTime() - startNanos).toMillis(), event.status());
+    }
+
+    /**
      * 构造 graph 输入。{@code Agent.buildMessageInput} 是 protected，流式侧自行构造同结构 Map。
      */
     private Flux<NodeOutput> graphStream(List<Message> messages, String sessionId) {
@@ -232,9 +264,12 @@ public class StreamingAgentExecutor {
         inputs.put("messages", messages);
         inputs.put(OverAllState.DEFAULT_INPUT_KEY, lastUserText(messages));
 
-        CompiledGraph graph = reactAgent.getCompiledGraph();
+        // 必须用 getAndCompileGraph()：ReactAgent.getCompiledGraph() 只读字段不做懒加载，
+        // 而框架只在 call()/asNode() 内部才编译图。阻塞链路先跑过才会有值，
+        // 冷启动直接走流式就会拿到 null。
+        CompiledGraph graph = reactAgent.getAndCompileGraph();
         if (graph == null) {
-            throw new IllegalStateException("ReactAgent 未初始化 CompiledGraph，无法流式执行");
+            throw new IllegalStateException("ReactAgent 编译图不可用，无法流式执行");
         }
         return graph.stream(inputs, RunnableConfig.builder().threadId(sessionId).build());
     }
