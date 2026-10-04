@@ -15,6 +15,15 @@ import org.slf4j.MDC;
  */
 public final class TenantContextSnapshot {
 
+    /**
+     * 跨线程传播时写入 {@code RunnableConfig} metadata 的键名。
+     *
+     * <p>graph 框架会把 config 的 metadata 原样放进 {@code ToolContext} 交给
+     * {@code ToolCallback.call(input, toolContext)}，工具因此能在自己的执行线程内取回并
+     * {@link #apply()} 本快照。键名必须唯一，避免与框架保留键（{@code _AGENT_*_}）冲突。
+     */
+    public static final String METADATA_KEY = "rag.tenant-context-snapshot";
+
     /** 日志 MDC 中 traceId 的键名（与 logback-spring.xml 的 %X{traceId} 一致）。 */
     private static final String MDC_TRACE_ID = "traceId";
     /** 日志 MDC 中 spanId 的键名（与 logback-spring.xml 的 %X{spanId} 一致）。 */

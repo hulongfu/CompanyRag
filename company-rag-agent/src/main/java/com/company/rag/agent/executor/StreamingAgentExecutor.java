@@ -8,6 +8,7 @@ import com.company.rag.agent.stream.TenantStreamContext;
 import com.company.rag.common.tool.ToolCallRecorder;
 import com.company.rag.common.tool.ToolCallRecord;
 import com.company.rag.tenant.context.TenantContext;
+import com.company.rag.tenant.context.TenantContextSnapshot;
 import com.alibaba.cloud.ai.graph.CompiledGraph;
 import com.alibaba.cloud.ai.graph.NodeOutput;
 import com.alibaba.cloud.ai.graph.OverAllState;
@@ -75,7 +76,9 @@ public class StreamingAgentExecutor {
         log.info("[AGENT-EXEC] 开始执行 Agent 调用");
 
         try {
-            AssistantMessage response = reactAgent.call(messages);
+            // 工具节点跑在 graph 框架线程上，ThreadLocal 租户上下文跟不过去，
+            // 统一通过 RunnableConfig metadata 把快照显式传给 ToolCallback
+            AssistantMessage response = reactAgent.call(messages, configWithTenantSnapshot());
             String content = response != null ? response.getText() : "";
 
             log.info("[AGENT-EXEC] Agent 调用完成，响应长度={}", content.length());
@@ -271,7 +274,29 @@ public class StreamingAgentExecutor {
         if (graph == null) {
             throw new IllegalStateException("ReactAgent 编译图不可用，无法流式执行");
         }
-        return graph.stream(inputs, RunnableConfig.builder().threadId(sessionId).build());
+        return graph.stream(inputs, configWithTenantSnapshot(sessionId));
+    }
+
+    /**
+     * 构造 graph 运行配置：threadId 用会话 ID，metadata 携带当前线程的租户快照。
+     *
+     * <p>metadata 会被框架原样放进 {@code ToolContext} 交给工具执行线程，
+     * 是自定义 {@code TenantContext} 唯一能穿透 graph 内部调度线程的通道。
+     */
+    private RunnableConfig configWithTenantSnapshot(String sessionId) {
+        return RunnableConfig.builder()
+                .threadId(sessionId)
+                .addMetadata(TenantContextSnapshot.METADATA_KEY, TenantContextSnapshot.captureNow())
+                .build();
+    }
+
+    /**
+     * 阻塞链路的运行配置：与流式一致携带租户快照，threadId 由调用方语义决定（此处不需要会话检查点）。
+     */
+    private RunnableConfig configWithTenantSnapshot() {
+        return RunnableConfig.builder()
+                .addMetadata(TenantContextSnapshot.METADATA_KEY, TenantContextSnapshot.captureNow())
+                .build();
     }
 
     /**

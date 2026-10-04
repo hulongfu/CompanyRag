@@ -13,6 +13,7 @@ import com.company.rag.agent.stream.NodeOutputMapper;
 import com.company.rag.agent.stream.TenantStreamContext;
 import com.company.rag.common.tool.ToolCallRecorder;
 import com.company.rag.tenant.context.TenantContext;
+import com.company.rag.tenant.context.TenantContextSnapshot;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -319,6 +320,10 @@ class StreamingAgentExecutorStreamTest {
         assertThat(inputs.getValue().get("messages")).isEqualTo(messages);
         assertThat(inputs.getValue().get(OverAllState.DEFAULT_INPUT_KEY)).isEqualTo("公司报销政策");
         assertThat(config.getValue().threadId()).contains(SESSION_ID);
+        // 工具节点跑在 graph 框架线程上，租户快照必须经 metadata 传给 ToolCallback，
+        // 否则工具内检索报「未设置租户上下文」、审计缺 tenant_id
+        assertThat(config.getValue().metadata(TenantContextSnapshot.METADATA_KEY).orElse(null))
+                .isInstanceOf(TenantContextSnapshot.class);
     }
 
     private List<AgentStreamEvent> collect(TenantStreamContext ctx, AtomicBoolean cancelled,

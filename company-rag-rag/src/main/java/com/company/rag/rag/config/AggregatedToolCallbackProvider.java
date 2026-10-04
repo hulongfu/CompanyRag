@@ -5,8 +5,10 @@ import com.company.rag.agent.approve.ToolApprovalService;
 import com.company.rag.agent.tool.AgentTool;
 import com.company.rag.agent.tool.AgentToolRegistry;
 import com.company.rag.mcp.client.McpClientRegistry;
+import com.company.rag.tenant.context.TenantContextSnapshot;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.ai.tool.definition.ToolDefinition;
@@ -99,6 +101,47 @@ public class AggregatedToolCallbackProvider implements ToolCallbackProvider {
             
             @Override
             public String call(String input) {
+                return doCall(input, null);
+            }
+
+            /**
+             * graph 工具节点跑在框架自己的调度线程（boundedElastic-*）上，
+             * {@code TenantContext} 这类普通 ThreadLocal 无法跟随过去，导致检索报
+             * “未设置租户上下文”、审计落库缺 tenant_id。
+             * 框架会把 {@code RunnableConfig} 的 metadata 原样放进 ToolContext，
+             * 因此约定用 metadata 携带租户快照，在这里写回当前执行线程。
+             */
+            @Override
+            public String call(String input, ToolContext toolContext) {
+                return doCall(input, toolContext);
+            }
+
+            private String doCall(String input, ToolContext toolContext) {
+                TenantContextSnapshot snapshot = tenantSnapshotOf(toolContext);
+                if (snapshot == null) {
+                    return invokeTool(input);
+                }
+                // 工具可能与调用线程同线程执行，直接 clear() 会把调用线程后续的
+                // DB 访问打成无租户状态，因此进入前捕获原值、退出时精确还原
+                TenantContextSnapshot previous = TenantContextSnapshot.captureNow();
+                snapshot.apply();
+                try {
+                    return invokeTool(input);
+                } finally {
+                    previous.clear();
+                    previous.apply();
+                }
+            }
+
+            private TenantContextSnapshot tenantSnapshotOf(ToolContext toolContext) {
+                if (toolContext == null || toolContext.getContext() == null) {
+                    return null;
+                }
+                Object value = toolContext.getContext().get(TenantContextSnapshot.METADATA_KEY);
+                return value instanceof TenantContextSnapshot tenantSnapshot ? tenantSnapshot : null;
+            }
+
+            private String invokeTool(String input) {
                 try {
                     // Spring AI 传递的是 JSON 字符串参数，需要解析为 Map
                     log.debug("调用工具：{}, input={}", name, input);
