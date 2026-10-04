@@ -1219,3 +1219,66 @@ $ git rev-parse HEAD
 - remote_head_check_command: git ls-remote gitee feat/answer-evaluator; git ls-remote origin feat/answer-evaluator
 - remote_head:            88af922b208260eaf1b74c5161d2adfa2f68e47b（gitee，ccd3a6d..88af922 推送成功）/ github 未连接成功（无代理、HTTPS 443 被墙、SSH key 无授权）
 - result:                Agent 超时改为可配置（rag.agent.executor.timeout-minutes，默认 5 分钟，Math.max 兜底≥1）+ parseCommand 移除反斜杠转义语义（方案B：无 shell、ProcessBuilder 直 exec，\ 一律作为普通字符保留），修复 Windows 反斜杠绝对路径 python 命令被 parseCommand 破坏导致的安全校验误拒。新增 ExecuteToolTest 复现测试（正斜杠基线放行+反斜杠路径放行）；RagAgentServiceTest 同步构造器新增参。ExecuteToolTest 24 例 + RagAgentServiceTest 1 例全绿。新增 browser-search 技能（SKILL.md + browser_search.py）。gitee 已推送且远端 HEAD 与本地一致（ls-remote 校验 88af922 通过）；github 当前网络无法直连（HTTPS 443 被墙、本机无可用 HTTP 代理、SSH key publickey 认证失败），推送待网络恢复后补推。无关未跟踪项 data/（运行期上传空占位目录）未纳入本次提交，已按用户确认跳过。
+
+## Git Push
+
+- commit_type:            Feat
+- task_id:                0000
+- task_name:              nl2sql 表/列名自校验实现
+- commit_hash:            37ec4b76299d83eeaf68bf616dee5bc5dbe7f087
+- branch:                 feat/answer-evaluator
+- remote:                 gitee + origin(github)
+- staged_files:           company-rag-agent/src/main/java/com/company/rag/agent/tool/DatabaseQueryTool.java、company-rag-agent/src/main/java/com/company/rag/agent/security/SqlSchemaValidator.java、company-rag-agent/src/main/java/com/company/rag/agent/config/Nl2sqlSchemaValidationProperties.java、company-rag-agent/src/test/java/com/company/rag/agent/security/SqlSchemaValidatorTest.java、company-rag-agent/src/test/java/com/company/rag/agent/tool/DatabaseQueryToolTest.java、company-rag-bootstrap/src/main/resources/application.yml
+- commit_message:         feat(nl2sql): 实现表/列名自校验（窄范围校验+降级放行+热关断+ReAct自愈）
+- commit_command:         git add <6 个交付文件> && git commit -m "feat(nl2sql): 实现表/列名自校验（窄范围校验+降级放行+热关断+ReAct自愈）"
+- commit_exit_code:       0
+- push_command:           git push gitee feat/answer-evaluator; git push origin feat/answer-evaluator
+- push_exit_code:         gitee=0；github(origin)=0（本次网络可用，推送成功）
+- remote_head_check_command: git ls-remote gitee feat/answer-evaluator; git ls-remote origin feat/answer-evaluator
+- remote_head:            37ec4b76299d83eeaf68bf616dee5bc5dbe7f087（gitee）/ 37ec4b76299d83eeaf68bf616dee5bc5dbe7f087（origin/github），两端均与本地 HEAD 一致
+- result:                实现 nl2sql 表/列名自校验：SqlSchemaValidator（窄范围校验，仅单表无 JOIN/子查询/CTE、非 SELECT * 时校验列；表校验全量；敏感列脱敏；元数据查询失败/空集降级放行），DatabaseQueryTool queryDatabase 接入第四道防线（缺失时返回错误文本触发 ReAct 自愈），配置开关 NL2SQL_SCHEMA_VALIDATION_ENABLED（默认 true 热关断）。单测 SqlSchemaValidatorTest 18 例 + DatabaseQueryToolTest 38 例全绿（BUILD SUCCESS）。浏览器实测验证通过：错误列 author/publisher 被拦截并回传「缺失列：author、publisher」，LLM 弃错列后自愈重查。gitee 与 github 两端均推送成功且远端 HEAD 与本地一致（ls-remote 校验 37ec4b7 通过）。无关改动 application-dev.yml（MCP client 反注释，非本次交付）与 data/（运行期占位目录）未纳入本次提交。
+
+## Git Push
+
+- commit_type:            Feat
+- task_id:                0000
+- task_name:              前端 eval.html 接线回归闭环卡片
+- commit_hash:            95f6285bf0a14beca458c2fcee8d2871b75b0318
+- branch:                 feat/answer-evaluator
+- remote:                 gitee + origin(github)
+- staged_files:
+  - company-rag-web/src/main/resources/templates/eval.html（修改）
+- commit_message:         feat(eval): 前端eval.html接线回归闭环卡片(数据集抽取/回归重跑/回归历史)
+- commit_command:         git add company-rag-web/src/main/resources/templates/eval.html && git commit -m "feat(eval): 前端eval.html接线回归闭环卡片(数据集抽取/回归重跑/回归历史)"
+- commit_exit_code:       0
+- push_command:           git push gitee feat/answer-evaluator; git push origin feat/answer-evaluator
+- push_exit_code:         gitee=0；github(origin)=0
+- remote_head_check_command: git ls-remote gitee feat/answer-evaluator; git ls-remote origin feat/answer-evaluator
+- remote_head:            95f6285bf0a14beca458c2fcee8d2871b75b0318（gitee）/ 95f6285bf0a14beca458c2fcee8d2871b75b0318（origin/github），两端均与本地 HEAD 一致
+- result:                前端 eval.html 接线三个新接口：新增「回归闭环」卡片（时间范围 + 样本数 + 抽取数据集/回归重跑/刷新历史三按钮 + 历史分页表格），权限 v-if=canEval（admin/user 可见，viewer 只读）。前端对未选时间范围先弹「请选择时间范围」提示避免打到后端 400。真实运行验证（应用 8081）：/eval 页面回归闭环区块渲染、三按钮均在、后端 dataset/regression/history 三接口均 200、点「刷新历史」历史区块展开显示「共 7 条」表格列渲染，均通过。gitee 与 github 两端均推送成功且远端 HEAD 与本地一致（ls-remote 校验 95f6285 通过）。无关改动 deploy-log.md（本次记录所在文件，不入版）与 data/（运行期上传占位目录）未纳入本次提交。
+
+## Git Push
+
+- record_no:              18
+- push_time:              2026-10-04T15:45:00+08:00
+- commit_type:            BugFix
+- task_id:                0000
+- task_name:              Agent 流式工具轨迹修复
+- commit_hash:            fadb581cdbfb13a9721c05f8435e18f2a61df8ab
+- branch:                 feat/answer-evaluator
+- remote:                 gitee + origin(github)
+- staged_files:
+  - company-rag-agent/src/main/java/com/company/rag/agent/executor/StreamingAgentExecutor.java（修改）
+  - company-rag-agent/src/main/java/com/company/rag/agent/stream/NodeOutputMapper.java（修改）
+  - company-rag-agent/src/test/java/com/company/rag/agent/executor/StreamingAgentExecutorStreamTest.java（修改）
+  - company-rag-agent/src/test/java/com/company/rag/agent/stream/NodeOutputMapperTest.java（修改）
+  - company-rag-bootstrap/src/main/resources/application.yml（修改）
+  - company-rag-web/src/main/resources/templates/index.html（修改）
+- commit_message:         fix(agent): 修复流式工具轨迹缺工具名与 TOOL_START，idle-timeout 调至 180s
+- commit_command:         git add <6 个交付文件> && git commit -m "fix(agent): 修复流式工具轨迹缺工具名与 TOOL_START，idle-timeout 调至 180s"
+- commit_exit_code:       0
+- push_command:           git push gitee feat/answer-evaluator; git push origin feat/answer-evaluator
+- push_exit_code:         gitee=0（a8dcde8..fadb581）；github(origin)=0（95f6285..fadb581）
+- remote_head_check_command: git ls-remote gitee feat/answer-evaluator; git ls-remote origin feat/answer-evaluator
+- remote_head:            fadb581cdbfb13a9721c05f8435e18f2a61df8ab（gitee，ls-remote 实测与本地 HEAD 一致）/ github 推送命令 exit=0 且本地 refs/remotes/origin/feat/answer-evaluator 已更新为 fadb581，但推送后 ls-remote 复核因 github.com:443 连接超时/重置未能取回远端值
+- result:                修复 SSE 流式执行轨迹三处缺陷：1) NodeOutputMapper 的 AGENT_TOOL_FINISHED 工具名恒为空串（ReactAgent 工具节点名恰等于 RunnableConfig.AGENT_TOOL_NAME 常量、无后缀，substring 得空），改为优先取 ToolResponseMessage.getResponses().name()，node 名截取退化为兜底且空串整帧跳过；2) 框架不发「工具开始」帧，改由 AGENT_MODEL_FINISHED 帧的 AssistantMessage.getToolCalls() 补发 TOOL_START（该轮 chunk() 是整轮全文，绝不放行以免重发答案）；3) durationMs 由 StreamingAgentExecutor 池任务内局部 Map<String, Deque<Long>> 做 FIFO 配对计时补全（同名工具并行调用不可用单值 Map，真机实测会丢耗时；跨帧状态不得放无状态单例 mapper 的实例字段）。另 application.yml stream.enabled=false→true、idle-timeout-seconds 60→180（真机 6 轮工具任务撞过 60s 被降级为 ERROR）。前端 index.html 接入 POST /api/chat/stream（fetch + getReader，支持 Authorization/X-Tenant-Id 头）、工具轨迹卡片渲染、DONE 后服务端断连不再误报网络错误。scoped 单测 29/29 绿（NodeOutputMapperTest 17 + StreamingAgentExecutorStreamTest 12，BUILD SUCCESS）；前端 SSE 解析自检 exit=0（含 DONE 后断连回归、真实 fetch 分包 E2E）；真机 curl 强制工具调用提问得 TOOL_START:4 / TOOL_END:4（工具名与 durationMs 齐全）/ ANSWER_DELTA:129 / DONE:1，落库 savedRowId=112；浏览器真机渲染「🔧 searchKnowledgeBase 已完成（2271ms）」等 19 条轨迹、无残留执行中、无错误、反馈按钮可用。gitee 已推送且远端 HEAD 与本地一致；github 推送成功但 ls-remote 复核受网络限制未完成。未跟踪项 BOOT-INF/（检查 jar 内容时误留垃圾，删除受策略拦截待人工清理）与 data/（运行期上传占位目录）未纳入本次提交。
