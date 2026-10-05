@@ -1329,3 +1329,27 @@ $ git rev-parse HEAD
 - remote_head_check_command: git ls-remote gitee feat/answer-evaluator; git ls-remote origin feat/answer-evaluator
 - remote_head:            f4f67373d87f0d54afee9f22a35900cd584d3b5d（gitee）/ f4f67373d87f0d54afee9f22a35900cd584d3b5d（origin/github），两端均与本地 HEAD 一致
 - result:                推送证据完整：本次仅为 README.md 文档更新（新增「Agent 流式输出与执行轨迹（Stream & Trace）」章节，无代码/测试变更，无需构建与 E2E 验证），本地 HEAD=f4f6737，gitee 与 github 两端 ls-remote 实测一致。本记录仅为 Git Push 证据，不构成发布/部署证据。未跟踪项 data/（运行期上传占位目录）未纳入提交。
+
+### Git Push #21
+
+- record_no:              21
+- push_time:              2026-10-05T15:42:00+08:00
+- commit_type:            Task
+- task_id:                0000
+- task_name:              补全 AnswerCorrectness/Faithfulness 评估器单测
+- commit_hash:            43dbb3c1b7154c496ab4349b06b103c5905d5567
+- branch:                 feat/answer-evaluator
+- remote:                 gitee + origin(github)
+- staged_files:
+  - docs/superpowers/specs/2026-10-05-answer-evaluator-test-gap-design.md（新建）
+  - docs/superpowers/plans/2026-10-05-answer-evaluator-test-gap.md（新建）
+  - company-rag-rag/src/test/java/com/company/rag/rag/eval/answer/AnswerCorrectnessEvaluatorTest.java（新建）
+  - company-rag-rag/src/test/java/com/company/rag/rag/eval/answer/AnswerFaithfulnessEvaluatorTest.java（新建）
+- commit_message:         四个特性提交（f02f432 设计文档、112c074 实现计划、bd433e1 correctness 单测、43dbb3c faithfulness 单测）
+- commit_command:         已存在提交，本次仅推送（4 个提交 41b038a..43dbb3c 一并推送），未新建提交
+- commit_exit_code:       0（既有提交，无需重新 commit）
+- push_command:           git push gitee feat/answer-evaluator; git push origin feat/answer-evaluator
+- push_exit_code:         gitee=0（41b038a..43dbb3c）；github(origin)=0（41b038a..43dbb3c）
+- remote_head_check_command: git ls-remote gitee feat/answer-evaluator; git ls-remote origin feat/answer-evaluator
+- remote_head:            43dbb3c1b7154c496ab4349b06b103c5905d5567（gitee）/ 43dbb3c1b7154c496ab4349b06b103c5905d5567（origin/github），两端均与本地 HEAD 一致
+- result:                推送证据完整：本次交付为补全两个评估器单测（AnswerCorrectnessEvaluator 9 例 + AnswerFaithfulnessEvaluator 7 例）及对应设计/计划文档，零 src/main 改动。收口回归已重跑 mvn -pl company-rag-rag test -Dtest='Answer*EvaluatorTest,FaithfulnessCheckerTest'，4 类共 30 用例全部通过（0 失败/0 错误/0 跳过），BUILD SUCCESS，未跑全量。本地 HEAD=43dbb3c，gitee 与 github 两端 ls-remote 实测远端 HEAD 均为 43dbb3c，与本地一致。本记录仅为 Git Push 证据，不构成发布/部署证据。未跟踪项 data/（运行期上传占位目录）未纳入提交。
