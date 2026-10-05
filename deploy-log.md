@@ -1353,3 +1353,24 @@ $ git rev-parse HEAD
 - remote_head_check_command: git ls-remote gitee feat/answer-evaluator; git ls-remote origin feat/answer-evaluator
 - remote_head:            43dbb3c1b7154c496ab4349b06b103c5905d5567（gitee）/ 43dbb3c1b7154c496ab4349b06b103c5905d5567（origin/github），两端均与本地 HEAD 一致
 - result:                推送证据完整：本次交付为补全两个评估器单测（AnswerCorrectnessEvaluator 9 例 + AnswerFaithfulnessEvaluator 7 例）及对应设计/计划文档，零 src/main 改动。收口回归已重跑 mvn -pl company-rag-rag test -Dtest='Answer*EvaluatorTest,FaithfulnessCheckerTest'，4 类共 30 用例全部通过（0 失败/0 错误/0 跳过），BUILD SUCCESS，未跑全量。本地 HEAD=43dbb3c，gitee 与 github 两端 ls-remote 实测远端 HEAD 均为 43dbb3c，与本地一致。本记录仅为 Git Push 证据，不构成发布/部署证据。未跟踪项 data/（运行期上传占位目录）未纳入提交。
+
+### Git Push #22
+
+- record_no:              22
+- push_time:              2026-10-05T15:48:00+08:00
+- commit_type:            Task
+- task_id:                0000
+- task_name:              合并 feat/answer-evaluator 至 main 并推送
+- commit_hash:            bc6ea5444fc8a58694d666bec8e60e551110a149
+- branch:                 main（合并自 feat/answer-evaluator）
+- remote:                 gitee + origin(github)
+- staged_files:
+    - （本次为分支合并与推送操作；合并内容为 feat/answer-evaluator 全部分支历史，见 #21 及更早记录）
+- commit_message:         Merge feat/answer-evaluator: 补全 AnswerCorrectness/Faithfulness 评估器单测（bc6ea54）
+- commit_command:         git checkout main && git merge --no-ff feat/answer-evaluator
+- commit_exit_code:       0（合并成功，无冲突）
+- push_command:           git push gitee main; git push origin main
+- push_exit_code:         gitee=0（e523b42..bc6ea54）；github(origin)=FAILED（无法连接 github.com:443，连接超时；重试仍失败）
+- remote_head_check_command: git ls-remote gitee main; git ls-remote origin main
+- remote_head:            bc6ea5444fc8a58694d666bec8e60e551110a149（gitee，与本地 main 一致）/ github(origin) 无法访问（连接超时，未能核验）
+- result:                推送证据部分完整：feat/answer-evaluator 已合并到本地 main（合并提交 bc6ea54，无冲突），合并后收口回归 mvn -pl company-rag-rag test -Dtest='Answer*EvaluatorTest,FaithfulnessCheckerTest' 4 类共 30 用例全部通过（0 失败/0 错误/0 跳过），BUILD SUCCESS，未跑全量。gitee 端 main 已推送成功且 ls-remote 实测与本地一致。github(origin) main 因网络无法连接（github.com:443 超时）推送失败，尚未同步；本地 feat/answer-evaluator 分支因 github main 未同步而保留，待网络恢复后再推送 github main 并清理分支。本记录仅为 Git Push 证据，不构成发布/部署证据。未跟踪项 data/（运行期上传占位目录）未纳入提交。
