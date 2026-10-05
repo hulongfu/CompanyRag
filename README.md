@@ -163,6 +163,18 @@ AGENT_APPROVAL_HIGH_RISK_TOOLS=execute  # 高危兜底集（逗号分隔工具�
   - `POST /api/tool-approval/{id}/deny`（body 可选 reason）：拒绝，返回拒绝文案
 - **实现路径**：Superpowers 工作流，代码见 `company-rag-agent/.../approve/`（`ToolApprovalService` / `ToolApprovalConverger`），审批页见 `tool-approval.html`
 
+### 🛰️ Agent 流式输出与执行轨迹（Stream & Trace）
+- **能力**：为 Agent 主链路补上「边生成边推送」的流式增量输出，并提供「推理段 / 工具段 / 技能段」分层的实时执行轨迹，以 SSE 端点对外暴露；不引入新框架，不改动既有阻塞端点。
+- **底层原理**：ReactAgent 自身不暴露 `stream()`，但其基础层 `CompiledGraph` 提供 `stream(inputs, RunnableConfig)` 返回 `Flux<NodeOutput>`——**模型 token 增量 / 工具调用起止 / 技能钩子事件，框架底层本来就在发**，只是阻塞实现用 `call()` 全部吞掉了。流式实现即消费这些事件（`StreamingExecutor` 的池任务内 `getCompiledGraph().stream(...)` + `NodeOutputMapper` 映射），当前配置下 `stream()` 全程同步同线程执行，`TenantContext` / `ToolCallRecorder` 两个 ThreadLocal 在线程内全程有效。
+- **事件契约**（SSE `POST /api/chat/stream`）：`TOOL_START`(`toolName`) → `TOOL_END`(`toolName,durationMs`) 与 `ANSWER_DELTA`(`text`) 交错 → 终帧 `DONE`。`TOOL_END.durationMs` 由 `StreamingAgentExecutor` 池任务内局部 `Map<String, Deque<Long>>` 做 FIFO 配对计时补全（同名工具并行调用不可用单值 Map，会互相覆盖 key）；`NodeOutputMapper` 为全项目唯一耦合 graph 框架类型（`NodeOutput`/`StreamingOutput`/`OutputType`）的类，且**必须无状态**（跨帧配对状态一律放调用方池任务内局部变量，防并发请求串号）。
+- **工具轨迹**：框架不发独立的「工具开始」帧，`TOOL_START` 由 `AGENT_MODEL_FINISHED` 帧的 `AssistantMessage.getToolCalls()` 补发；`TOOL_END` 从 `ToolResponseMessage.getResponses().name()` 取真实工具名（不应从 node 名截取——ReactAgent 工具节点名恰等于常量 `AGENT_TOOL_NAME`、无后缀）；skill 钩子节点（`AGENT_HOOK_*`）绝不可误判为工具。工具名无法解析时整帧跳过，不下发空串。
+- **落库与评估语义**（宁缺不残）：`saveConversation` 与在线评估**只在收到 `DONE` 时触发**（controller 侧 `doOnNext`）；客户端在 `DONE` 前断开 → 不落库、不评估，避免半截答案污染会话记忆与评估统计。轨迹随最终结果落 `rag_session.context` 列，历史会话可回看执行过程，**不新增列、不改表结构**。
+- **线程模型与取消**：流式专用线程池（复用 `rag.agent.executor.*` 参数，与阻塞超时池**分离**，长期占用含审批等待也不互相饿死）；池满/熔断打开等**建流前**失败由方法体内同步抛出 → controller 转 `R.fail` 标准响应（不建半开 SSE，守统一响应惯例），不依赖 `subscribeOn`（否则池拒绝发生在订阅后才无法降级）。客户端断线：`doOnCancel` 置 `cancelled` 标志，池任务每次事件先检查、为真即终止且**不发 DONE**，`finally` 中 `recorder.clearRecords()` + `TenantContext.clear()` 防线程池串扰。
+- **熔断（建流入口手动门控）**：流式入口用 `circuitBreakerRegistry.circuitBreaker("rag-agent")` 手动 `tryAcquirePermission()`，熔断打开即抛 `CallNotPermittedException` → `R.fail`；建流成功立即 `onSuccess` 归还许可（不等流结束，防 HALF_OPEN 探测名额被长流占满）。统计口径为「建流阶段成败率」，**不衡量流内失败率**（流内失败已优雅降级为 `ERROR` 事件，且 `onErrorResume` 会令流以 `onComplete` 正常终止，挂回调记账会被静默记成成功），流内失败走独立计数器 `rag.agent.stream.error`。
+- **配置**（`rag.agent.stream.*`，基段 `application.yml` 显式写出）：`enabled`（默认 `false`，关闭时端点命中返回 `R.fail(503)` 而非 404）；`idle-timeout-seconds`（默认 `60`，相邻事件最大间隔，超时推 `ERROR` 并正常结束；真机 6 轮工具任务曾撞过 60s，生产建议调至 `180`）；整体上限复用 `rag.agent.executor.timeout-minutes`。
+- **API**：`POST /api/chat/stream`（SSE，成功 `Flux<AgentStreamEvent>` → `text/event-stream`；失败返回 `R<T>` JSON；不声明 `produces`，由返回类型走 `ReactiveTypeHandler` 自动识别）。前端 `index.html` 以 `fetch` + `getReader` 接入（原生 `EventSource` 不支持 POST 与自定义 `Authorization`/`X-Tenant-Id` 头），渲染工具轨迹卡片并支持 DONE 后服务端断连不误报网络错误。
+- **实现路径**：Superpowers 工作流，spec 见 `docs/superpowers/specs/2026-10-01-agent-stream-and-trace-design.md` v1.1，代码见 `company-rag-agent/.../stream/`（`AgentStreamEvent` / `AgentStreamEventType` / `NodeOutputMapper`）、`company-rag-agent/.../executor/StreamingAgentExecutor.java`、`ChatController#postChatStream`；测试见 `NodeOutputMapperTest` / `StreamingAgentExecutorStreamTest` / `ChatControllerStreamTest`
+
 ## 技术栈
 
 | 组件 | 技术选型 |
