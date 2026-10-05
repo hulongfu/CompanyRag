@@ -15,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -167,6 +168,39 @@ public class RagSessionServiceImpl implements RagSessionService {
                         .eq(RagSession::getSessionId, sessionId)
                         .orderByAsc(RagSession::getCreateTime)
         );
+    }
+
+    @Override
+    public List<RagSession> getRecentSessionDetail(Long tenantId, Long userId, String sessionId, int limit) {
+        // 任一可信身份/会话缺失时返回空列表，避免查询；身份由调用方（TenantContext/SecurityContext）保证可信
+        if (tenantId == null || userId == null || sessionId == null) {
+            return List.of();
+        }
+        // 【强制契约】有界须由 DB 层 LIMIT 完成：DESC 取最近 limit 条再反转回升序。
+        // 禁止 getSessionDetail 全量查询后内存 subList —— 那会让 DB 仍 O(n) 读全表，window-size 的性能承诺不兑现。
+        if (limit <= 0) {
+            // -1 退化：等价全量升序（运维显式打开，知晓 O(n)+token 风险）
+            return sessionMapper.selectList(
+                    new LambdaQueryWrapper<RagSession>()
+                            .eq(RagSession::getTenantId, tenantId)
+                            .eq(RagSession::getUserId, userId)
+                            .eq(RagSession::getSessionId, sessionId)
+                            .orderByAsc(RagSession::getCreateTime)
+            );
+        }
+        // 最近 limit 条（时间降序为主、自增 id 兜底保证同刻稳定）
+        List<RagSession> recentDesc = sessionMapper.selectList(
+                new LambdaQueryWrapper<RagSession>()
+                        .eq(RagSession::getTenantId, tenantId)
+                        .eq(RagSession::getUserId, userId)
+                        .eq(RagSession::getSessionId, sessionId)
+                        .orderByDesc(RagSession::getCreateTime)
+                        .orderByDesc(RagSession::getId)
+                        .last("LIMIT " + limit)
+        );
+        // 反转回升序，保持原顺序语义
+        Collections.reverse(recentDesc);
+        return recentDesc;
     }
 
     @Override

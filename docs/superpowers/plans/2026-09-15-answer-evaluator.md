@@ -188,7 +188,7 @@ if (response.isSuccess()) {
 if (response.isSuccess()) {
     String outputSummary = response.getCitations() != null
         ? "citations=" + response.getCitations().stream()
-            .map(c -> c.getDocumentName() + "#" + c.getChunkIndex())
+            .map(c -> c.getFilename() + "#" + c.getChunkIndex())
             .collect(Collectors.joining(","))
         : "";
     recorder.recordEnd("searchKnowledgeBase", startTime, "success", null, outputSummary);
@@ -450,28 +450,35 @@ git commit -m "feat(rag): 新增 AnswerEvalResult 评估结果数据结构"
 ```java
 package com.company.rag.rag.eval.answer;
 
-import org.springframework.ai.evaluation.EvaluationRequest;
-import org.springframework.ai.evaluation.Evaluator;
-
 /**
- * 回答质量评估接口。继承 Spring AI Evaluator SPI，保证与官方生态一致。
- * 各维度实现（相关性/正确性/忠实度）统一返回 pass + score。
+ * 回答质量评估接口。为内部离线/规则式评估提供自包含契约，不依赖 Spring AI
+ * {@code org.springframework.ai.evaluation.Evaluator} SPI（该 SPI 面向流式在线评估，
+ * 与本场景的解耦目标不符）。各维度实现（相关性/正确性/忠实度）只需实现
+ * {@link #evaluate(String, String, String)} 与 {@link #dimensionName()}。
  */
-public interface AnswerEvaluator extends Evaluator {
+public interface AnswerEvaluator {
 
     /**
      * 返回该评估器对应的维度名。
      */
     String dimensionName();
+
+    /**
+     * 评估单条回答。
+     *
+     * @param query   用户问题
+     * @param context 检索上下文（可为 null，faithfulness 据此判定）
+     * @param answer  待评估的回答
+     * @return 该维度是否通过
+     */
+    boolean evaluate(String query, String context, String answer);
 }
 ```
 
-> 注：Spring AI 1.1.3 的 `Evaluator` 接口方法签名以 `org.springframework.ai.evaluation.Evaluator` 为准；实现类需补全 `evaluate(EvaluationRequest)` 与 `getDimensions()`（或实际存在的抽象方法）。具体重写方法以实际 jar 中的抽象方法为准，若 `dimensionName()` 产生冲突则调整命名。
-
-- [ ] **Step 2: 编译验证（若依赖缺失则补充 spring-ai 依赖）**
+- [ ] **Step 2: 编译验证**
 
 Run: `cd /d/tmp/CompanyRag && mvn -q -pl company-rag-rag compile`
-Expected: BUILD SUCCESS（`org.springframework.ai.evaluation.Evaluator` 可用；若不可用，需在 `company-rag-rag/pom.xml` 补充 `spring-ai-model` 等既有依赖同源的 evaluation 支持）
+Expected: BUILD SUCCESS
 
 - [ ] **Step 3: Commit**
 
@@ -493,10 +500,6 @@ git commit -m "feat(rag): 新增 AnswerEvaluator 接口，继承 Spring AI Evalu
 ```java
 package com.company.rag.rag.eval.answer;
 
-import java.util.List;
-import org.springframework.ai.evaluation.EvaluationRequest;
-import org.springframework.ai.evaluation.EvaluationResponse;
-
 /**
  * 回答相对问题的相关性评估。第一版以可观察的规则式判定为主：
  * 回答非空且包含问题核心词/非"抱歉"兜底，即视为相关。
@@ -509,16 +512,7 @@ public class AnswerRelevancyEvaluator implements AnswerEvaluator {
     }
 
     @Override
-    public EvaluationResponse evaluate(EvaluationRequest evaluationRequest) {
-        String answer = evaluationRequest.getResponse() != null
-                ? evaluationRequest.getResponse().getResult().output().toString() : "";
-        String query = evaluationRequest.getUserText();
-        boolean pass = isRelevant(answer, query);
-        double score = pass ? 1.0 : 0.0;
-        return EvaluationResponse.evaluation(dimensionName(), pass, score);
-    }
-
-    private boolean isRelevant(String answer, String query) {
+    public boolean evaluate(String query, String context, String answer) {
         if (answer == null || answer.isBlank() || answer.startsWith("抱歉")) {
             return false;
         }
@@ -536,11 +530,6 @@ public class AnswerRelevancyEvaluator implements AnswerEvaluator {
         }
         return false;
     }
-
-    @Override
-    public List<String> getDimensions() {
-        return List.of(dimensionName());
-    }
 }
 ```
 
@@ -548,10 +537,6 @@ public class AnswerRelevancyEvaluator implements AnswerEvaluator {
 
 ```java
 package com.company.rag.rag.eval.answer;
-
-import java.util.List;
-import org.springframework.ai.evaluation.EvaluationRequest;
-import org.springframework.ai.evaluation.EvaluationResponse;
 
 /**
  * 回答相对参考答案的正确性评估。第一版以可观察的规则式判定为主：
@@ -567,13 +552,9 @@ public class AnswerCorrectnessEvaluator implements AnswerEvaluator {
     }
 
     @Override
-    public EvaluationResponse evaluate(EvaluationRequest evaluationRequest) {
-        String answer = evaluationRequest.getResponse() != null
-                ? evaluationRequest.getResponse().getResult().output().toString() : "";
-        boolean pass = answer != null && !answer.isBlank()
+    public boolean evaluate(String query, String context, String answer) {
+        return answer != null && !answer.isBlank()
                 && answer.length() >= MIN_ANSWER_LENGTH && !answer.startsWith("抱歉");
-        double score = pass ? 1.0 : 0.0;
-        return EvaluationResponse.evaluation(dimensionName(), pass, score);
     }
 }
 ```
@@ -582,10 +563,6 @@ public class AnswerCorrectnessEvaluator implements AnswerEvaluator {
 
 ```java
 package com.company.rag.rag.eval.answer;
-
-import java.util.List;
-import org.springframework.ai.evaluation.EvaluationRequest;
-import org.springframework.ai.evaluation.EvaluationResponse;
 
 /**
  * 回答相对检索上下文的忠实度评估（防幻觉）。
@@ -606,16 +583,10 @@ public class AnswerFaithfulnessEvaluator implements AnswerEvaluator {
     }
 
     @Override
-    public EvaluationResponse evaluate(EvaluationRequest evaluationRequest) {
-        String answer = evaluationRequest.getResponse() != null
-                ? evaluationRequest.getResponse().getResult().output().toString() : "";
-        String context = (String) evaluationRequest.getContextVariables().get("context");
+    public boolean evaluate(String query, String context, String answer) {
         FaithfulnessChecker.Verdict verdict = checker.check(answer, context);
-        return switch (verdict) {
-            case FAITHFUL   -> new EvaluationResponse(true, new double[]{1.0}, List.of(dimensionName()), 1.0);
-            case UNFAITHFUL -> new EvaluationResponse(false, new double[]{0.0}, List.of(dimensionName()), 0.0);
-            case UNKNOWN    -> new EvaluationResponse(false, new double[]{0.0}, List.of(dimensionName()), -1.0);
-        };
+        // UNKNOWN 视为不通过提示风险，但 log 不判死；本方法仅返回布尔判定
+        return verdict == FaithfulnessChecker.Verdict.FAITHFUL;
     }
 }
 ```
@@ -623,10 +594,7 @@ public class AnswerFaithfulnessEvaluator implements AnswerEvaluator {
 - [ ] **Step 4: 编译验证**
 
 Run: `cd /d/tmp/CompanyRag && mvn -q -pl company-rag-rag compile`
-
-> 若 `EvaluationResponse`/`EvaluationRequest` 的构造器与 Spring AI 1.1.3 实际 API 不符，按 jar 内真实签名调整（例如用 `EvaluationResponse.evaluation(...)` 静态工厂或相应构造器）。以编译通过为准。
-
-Expected: BUILD SUCCESS
+Expected: BUILD SUCCESS（三个评估器仅依赖自包含的 `AnswerEvaluator` 接口与 `FaithfulnessChecker`，无 Spring AI SPI 依赖）
 
 - [ ] **Step 5: Commit**
 
@@ -670,7 +638,8 @@ public class FaithfulnessChecker {
         }
         // 上下文摘要中存在 citations 来源片段，视为回答有据可依（宽松启发式）
         boolean grounded = context.contains("citations=") && context.contains("#");
-        return grounded ? Verdict.FAITHFUL : Verdict.UNFAITHFUL;    }
+        return grounded ? Verdict.FAITHFUL : Verdict.UNFAITHFUL;
+    }
 }
 ```
 
@@ -700,16 +669,16 @@ package com.company.rag.rag.eval.answer;
 
 import com.company.rag.common.constant.RagConstant;
 import com.company.rag.tenant.context.TenantContext;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.codec.digest.DigestUtils;
 import org.redisson.api.RedissonClient;
-import org.springframework.ai.evaluation.EvaluationRequest;
 import org.springframework.stereotype.Service;
+import org.springframework.util.DigestUtils;
 
 /**
  * 回答评估聚合服务：按维度依次评估，合成综合 pass/score，并写入 Redis 临时缓冲层
@@ -735,25 +704,23 @@ public class AnswerEvaluationService {
         if (answerCase == null) {
             return null;
         }
-        EvaluationRequest request = new EvaluationRequest(
-                answerCase.query(),
-                answerCase.context(),
-                answerCase.answer());
+        String query = answerCase.query();
+        String context = answerCase.context();
+        String answer = answerCase.answer();
 
-        Map<String, Boolean> passes = Map.of(
-                "relevancy", depend(relevancyEvaluator.evaluate(request)),
-                "correctness", depend(correctnessEvaluator.evaluate(request)),
-                "faithfulness", depend(faithfulnessEvaluator.evaluate(request)));
+        // 保持维度顺序：relevancy → correctness → faithfulness
+        Map<String, Boolean> passes = new LinkedHashMap<>();
+        passes.put("relevancy", relevancyEvaluator.evaluate(query, context, answer));
+        passes.put("correctness", correctnessEvaluator.evaluate(query, context, answer));
+        passes.put("faithfulness", faithfulnessEvaluator.evaluate(query, context, answer));
 
-        Map<String, Double> scores = new HashMap<>();
+        Map<String, Double> scores = new LinkedHashMap<>();
         passes.forEach((k, v) -> scores.put(k, v ? 1.0 : 0.0));
 
         boolean pass = AnswerEvalResult.allPass(passes);
         double avgScore = scores.values().stream().mapToDouble(Double::doubleValue).average().orElse(0.0);
 
-        AnswerEvalResult result = new AnswerEvalResult(
-                answerCase.query(), answerCase.context(), answerCase.answer(),
-                pass, avgScore, scores);
+        AnswerEvalResult result = new AnswerEvalResult(query, context, answer, pass, avgScore, scores);
 
         writeToRedis(answerCase, result);
         return result;
@@ -762,19 +729,15 @@ public class AnswerEvaluationService {
     /** 批量评估入口 */
     public List<AnswerEvalResult> evaluateAll(List<AnswerCase> cases) {
         if (cases == null) return List.of();
-        return cases.stream().map(this::evaluate).filter(java.util.Objects::nonNull).toList();
-    }
-
-    private boolean depend(EvaluationResponse resp) {
-        return resp != null && resp.isPass();
+        return cases.stream().map(this::evaluate).filter(Objects::nonNull).toList();
     }
 
     private void writeToRedis(AnswerCase answerCase, AnswerEvalResult result) {
         try {
             Long tenantId = TenantContext.getTenantId();
-            String hash = DigestUtils.md5Hex(answerCase.query() == null ? "" : answerCase.query());
+            String hash = DigestUtils.md5DigestAsHex(answerCase.query() == null ? "" : answerCase.query());
             String key = EVAL_PREFIX + (tenantId != null ? tenantId : "0") + ":" + hash;
-            redissonClient.getMapCache(EVALUATION_MAP)
+            redissonClient.getMapCache("answer-eval")
                     .put(key, result, EVAL_TTL_SECONDS, TimeUnit.SECONDS);
             log.info("[EVAL] 已写入评估结果 key={}, pass={}, score={}", key, result.pass(), result.score());
         } catch (Exception e) {
@@ -785,9 +748,12 @@ public class AnswerEvaluationService {
 }
 ```
 
-> 说明：`AnswerCase`、`EvaluationResponse`、常量 `EVALUATION_MAP`、`evaluationRequest.getResponse()` 的具体类型依赖 Spring AI 1.1.3 实际 API，执行时若与实际不符，按 jar 内真实签名调整。`AnswerCase` record 定义如下（如无现成类）：
+> `AnswerCase` record 定义如下（与阶段 1 其余评估器同包，新增文件）：
 >
 > ```java
+> package com.company.rag.rag.eval.answer;
+>
+> /** 待评估的一条问答样本。 */
 > public record AnswerCase(String query, String context, String answer) {}
 > ```
 
@@ -799,8 +765,10 @@ public class AnswerEvaluationService {
 package com.company.rag.rag.eval.answer;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -808,7 +776,6 @@ import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.redisson.api.RedissonClient;
-import org.springframework.ai.evaluation.EvaluationResponse;
 
 class AnswerEvaluationServiceTest {
 
@@ -828,28 +795,35 @@ class AnswerEvaluationServiceTest {
 
     @Test
     void evaluate_allPass_whenAllDimensionsPass() {
-        when(relevancy.evaluate(any())).thenReturn(EvaluationResponse... passTrue);
-        when(correctness.evaluate(any())).thenReturn(...);
-        when(faithfulness.evaluate(any())).thenReturn(...);
+        when(relevancy.evaluate(anyString(), anyString(), anyString())).thenReturn(true);
+        when(correctness.evaluate(anyString(), anyString(), anyString())).thenReturn(true);
+        when(faithfulness.evaluate(anyString(), anyString(), anyString())).thenReturn(true);
 
         AnswerEvalResult result = service.evaluate(new AnswerCase("q", "ctx", "an answer here that is long"));
+        assertNotNull(result);
         assertTrue(result.pass());
         assertTrue(result.score() > 0);
     }
 
     @Test
     void evaluate_fails_whenAnyDimensionFails() {
-        when(relevancy.evaluate(any())).thenReturn(falseResp());
-        when(correctness.evaluate(any())).thenReturn(trueResp());
-        when(faithfulness.evaluate(any())).thenReturn(trueResp());
+        when(relevancy.evaluate(anyString(), anyString(), anyString())).thenReturn(false);
+        when(correctness.evaluate(anyString(), anyString(), anyString())).thenReturn(true);
+        when(faithfulness.evaluate(anyString(), anyString(), anyString())).thenReturn(true);
 
         AnswerEvalResult result = service.evaluate(new AnswerCase("q", "ctx", "an answer"));
+        assertNotNull(result);
         assertFalse(result.pass());
+    }
+
+    @Test
+    void evaluate_returnsNull_forNullCase() {
+        assertNull(service.evaluate(null));
+        assertTrue(service.evaluateAll(null).isEmpty());
+        assertTrue(service.evaluateAll(List.of()).isEmpty());
     }
 }
 ```
-
-> 注：`EvaluationResponse` 的真实构造方式（静态工厂/构造器）以 Spring AI 1.1.3 为准；示例中 `...` 占位需按真实 API 填充为 `EvaluationResponse.evaluation(...)` 或等价构造，使测试可编译通过。
 
 - [ ] **Step 3: 运行测试验证通过**
 

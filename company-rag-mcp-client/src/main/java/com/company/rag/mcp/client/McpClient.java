@@ -46,4 +46,15 @@ public interface McpClient {
      * @return 工具执行结果
      */
     Object callTool(String toolName, Map<String, Object> params);
+
+    /**
+     * 探活：复用现有连接发起一次 tools/list，成功（无 JSON-RPC error）即视为可达，失败返回 false。
+     * 不重建 HttpClient，规避重连风暴。
+     */
+    boolean ping();
+
+    /**
+     * 直连远端获取最新工具列表（绕过本地工具缓存），用于按源全量同步。
+     */
+    List<McpToolDefinition> listToolsRemote();
 }

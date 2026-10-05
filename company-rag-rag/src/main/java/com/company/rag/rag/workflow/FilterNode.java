@@ -6,6 +6,7 @@ import com.company.rag.rag.fusion.ResultFilter;
 import com.company.rag.rag.model.FusedResult;
 import com.company.rag.rag.model.RagQuery;
 import com.company.rag.rag.model.RagResult;
+import com.company.rag.tenant.context.TenantContextSnapshot;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;

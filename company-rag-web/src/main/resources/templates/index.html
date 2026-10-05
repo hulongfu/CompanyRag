@@ -62,6 +62,10 @@
         .message .bubble .feedback-btn { cursor: pointer; font-size: 14px; opacity: 0.5; filter: grayscale(1); transition: all 0.2s; user-select: none; }
         .message .bubble .feedback-btn:hover { opacity: 1; filter: none; transform: scale(1.1); }
         .message .bubble .feedback-btn.active { opacity: 1; filter: none; }
+        /* 流式执行轨迹（工具调用起止）与答案文本分层展示 */
+        .message .bubble .tool-trace { margin-bottom: 8px; padding: 6px 10px; background: #f8f9fb; border-left: 3px solid #c6d8f5; border-radius: 4px; font-size: 12px; color: #606266; }
+        .message .bubble .tool-trace-item { line-height: 1.8; }
+        .message .bubble .stream-error { margin-top: 8px; font-size: 13px; color: #c45656; }
         .chat-input-area { padding: 16px 24px; background: white; border-top: 1px solid #e4e7ed; }
         .chat-input-row { display: flex; gap: 12px; align-items: center; }
         .chat-input-row .el-input { flex: 1; }
@@ -117,6 +121,9 @@
             <button class="hdr-btn" :class="{ active: currentTab === 'tenant' }" @click="currentTab = 'tenant'">🏢 租户</button>
             <button class="hdr-btn" v-if="role === 'admin'" :class="{ active: currentTab === 'user' }" @click="currentTab = 'user'">👤 用户</button>
             <button class="hdr-btn" v-if="role === 'admin'" @click="goAuditLog">📋 日志</button>
+            <button class="hdr-btn" @click="goToolApproval">🛂 审批面板</button>
+            <button class="hdr-btn" v-if="role === 'admin'" @click="goMcpStatus" title="MCP 服务器状态">🌐</button>
+            <button class="hdr-btn" @click="goEval">📊 评估</button>
             <button class="hdr-btn" v-if="role !== 'viewer'" @click="showUpload = true">📤 上传文件</button>
             <button class="hdr-btn" :class="{ active: showMetrics }" @click="showMetrics = !showMetrics">📊 实时指标</button>
             <button class="hdr-btn" @click="showAdvanced = !showAdvanced" title="高级设置">⚙️ 设置</button>
@@ -451,7 +458,16 @@
                 <div v-for="(msg, idx) in messages" :key="idx" :class="['message', msg.role]">
                     <div class="avatar">{{ msg.role === 'user' ? '👤' : '🤖' }}</div>
                     <div class="bubble">
-                        <div v-html="renderMarkdown(msg.content)"></div>
+                        <!-- 流式增量渲染：有文本才渲染 Markdown，首帧到达前用打字指示占位 -->
+                        <div v-if="msg.content" v-html="renderMarkdown(msg.content)"></div>
+                        <div v-else-if="msg.streaming" class="typing-indicator"><span></span><span></span><span></span></div>
+                        <!-- 执行轨迹：TOOL_START / TOOL_END 事件逐条展示，与答案文本分层 -->
+                        <div v-if="msg.trace && msg.trace.length" class="tool-trace">
+                            <div v-for="(t, ti) in msg.trace" :key="ti" class="tool-trace-item">
+                                🔧 {{ t.name }}{{ t.running ? ' 执行中…' : ' 已完成' }}<span v-if="t.durationMs">（{{ t.durationMs }}ms）</span>
+                            </div>
+                        </div>
+                        <div v-if="msg.error" class="stream-error">{{ msg.error }}</div>
                         <div v-if="msg.sources && msg.sources.length" class="sources">
                             📎 来源: <span v-for="s in msg.sources">{{ s }}</span>
                         </div>
@@ -468,7 +484,7 @@
                         </div>
                     </div>
                 </div>
-                <div v-if="isLoading" class="message assistant">
+                <div v-if="isLoading && !hasStreamingMessage" class="message assistant">
                     <div class="avatar">🤖</div>
                     <div class="bubble">
                         <div class="typing-indicator"><span></span><span></span><span></span></div>
@@ -566,7 +582,7 @@
 </script>
 
 <script>
-const { createApp, ref, nextTick, onMounted } = Vue;
+const { createApp, ref, reactive, computed, nextTick, onMounted } = Vue;
 
 createApp({
     setup() {
@@ -593,6 +609,9 @@ createApp({
         const sessions = ref([]);
         const currentSessionId = ref(null);
         const sessionMessagesMap = ref({}); // 按 sessionId 缓存消息
+
+        // 流式回答已自带占位气泡（内含打字指示），需隐藏底部通用的「等待回复」气泡，避免双气泡
+        const hasStreamingMessage = computed(() => messages.value.some(m => m.streaming));
 
         // 租户管理相关
         const currentTab = ref('chat'); // 'chat' or 'tenant' or 'user'
@@ -856,6 +875,177 @@ createApp({
             return d.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
         }
 
+        // ========== 流式对话（SSE） ==========
+        // EventSource 不支持 POST 与自定义请求头（JWT + X-Tenant-Id 是鉴权必需），
+        // 故用 fetch + ReadableStream 手动解析 SSE 帧，语义与 EventSource 一致。
+        function handleSseFrame(msg, rawFrame) {
+            // 一帧内只取 data: 行（注释行 :heartbeat、event:/id: 字段一律忽略）
+            const dataLines = rawFrame.split('\n')
+                .map(line => line.replace(/\r$/, ''))
+                .filter(line => line.indexOf('data:') === 0)
+                .map(line => line.slice(5).trim());
+            if (dataLines.length === 0) return null;
+            let ev;
+            try {
+                ev = JSON.parse(dataLines.join('\n'));
+            } catch (e) {
+                console.error('SSE 帧解析失败', dataLines, e);
+                return null;
+            }
+            applyStreamEvent(msg, ev);
+            return ev.type;
+        }
+
+        // 事件序列约定（见 AgentStreamEventType）：ANSWER_DELTA/TOOL_START/TOOL_END 若干
+        // → DONE 正常收尾；异常路径只有一个 ERROR 且不再有 DONE（半截答案不入库）。
+        function applyStreamEvent(msg, ev) {
+            if (ev.type === 'ANSWER_DELTA') {
+                msg.content += (ev.text || '');
+            } else if (ev.type === 'TOOL_START') {
+                msg.trace.push({ name: ev.toolName, running: true, durationMs: null });
+            } else if (ev.type === 'TOOL_END') {
+                // 与最近一条同名「执行中」记录配对；配不上就直接追加，保证工具事件不丢
+                let paired = -1;
+                for (let i = msg.trace.length - 1; i >= 0; i--) {
+                    if (msg.trace[i].running && msg.trace[i].name === ev.toolName) { paired = i; break; }
+                }
+                if (paired >= 0) {
+                    msg.trace[paired].running = false;
+                    msg.trace[paired].durationMs = ev.durationMs || null;
+                } else {
+                    msg.trace.push({ name: ev.toolName, running: false, durationMs: ev.durationMs || null });
+                }
+            } else if (ev.type === 'DONE') {
+                // DONE 不重复携带 answer 全文（已逐帧收到），仅补空答案占位
+                if (!msg.content) msg.content = '抱歉，没有找到相关答案。';
+                metrics.value.totalRequests++;
+            } else if (ev.type === 'ERROR') {
+                msg.error = ev.text || '流式响应出错，请稍后重试';
+            }
+        }
+
+        // 流式链路拿不到 sessionRowId（DONE 的 result 为服务端专用、不参与序列化），
+        // 反馈按钮需要它，故 DONE 后回读会话详情取最新一行主键。失败不影响已展示的答案。
+        async function refreshLastRowId(msg) {
+            if (!currentSessionId.value) return;
+            try {
+                const json = await apiRequest('/api/session/' + currentSessionId.value, {
+                    headers: { 'X-Tenant-Id': currentTenantId.value }
+                });
+                if (json && json.code === 200 && json.data && json.data.length) {
+                    msg.rowId = json.data[json.data.length - 1].id;
+                    msg.feedback = json.data[json.data.length - 1].feedback || 0;
+                }
+            } catch (e) {
+                console.error('回读会话行失败', e);
+            }
+        }
+
+        /**
+         * 请求 POST /api/chat/stream 并把增量写进传入的响应式消息对象。
+         * @returns {{ok:boolean, fallback?:boolean, error?:string}} ok=false 且 fallback=true 时由调用方降级阻塞端点
+         */
+        async function requestStreamChat(text, msg) {
+            const headers = {
+                'Content-Type': 'application/json',
+                // 声明只接受 SSE，后端「建流前失败」会显式返回 JSON，据此区分两条路径
+                'Accept': 'text/event-stream',
+                'X-Tenant-Id': currentTenantId.value
+            };
+            const token = localStorage.getItem('token');
+            if (token) headers['Authorization'] = 'Bearer ' + token;
+
+            const res = await fetch('/api/chat/stream', {
+                method: 'POST',
+                headers: headers,
+                body: JSON.stringify({
+                    query: text,
+                    sessionId: currentSessionId.value,
+                    tenantId: parseInt(currentTenantId.value),
+                    topK: 10,
+                    enableRerank: true,
+                    mode: chatMode.value === 'auto' ? undefined : chatMode.value,
+                    includeDebug: false
+                })
+            });
+
+            if (res.status === 401) {
+                ElementPlus.ElMessage.error('登录已过期，请重新登录');
+                window.location.href = '/login';
+                return { ok: false, fallback: false };
+            }
+
+            const contentType = res.headers.get('Content-Type') || '';
+            if (contentType.indexOf('text/event-stream') < 0) {
+                // 建流前失败：统一响应体 R<T>。503 = 流式开关关闭 / 线程池满 / 熔断打开 → 降级阻塞端点
+                const json = await res.json().catch(() => null);
+                if (json && json.code === 401) {
+                    ElementPlus.ElMessage.error('登录已过期，请重新登录');
+                    window.location.href = '/login';
+                    return { ok: false, fallback: false };
+                }
+                const code = json && json.code ? json.code : res.status;
+                if (code === 503 || res.status >= 500) return { ok: false, fallback: true };
+                return { ok: false, fallback: false, error: '查询失败：' + ((json && json.msg) || ('HTTP ' + res.status)) };
+            }
+
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder('utf-8');
+            let buffer = '';
+            let sawDone = false;
+            const drain = (text) => {
+                let sep;
+                while ((sep = text.match(/\r?\n\r?\n/)) !== null) {
+                    if (handleSseFrame(msg, text.slice(0, sep.index)) === 'DONE') sawDone = true;
+                    text = text.slice(sep.index + sep[0].length);
+                    scrollToBottom();
+                }
+                return text;
+            };
+            try {
+                while (true) {
+                    const chunk = await reader.read();
+                    if (chunk.done) break;
+                    buffer = drain(buffer + decoder.decode(chunk.value, { stream: true }));
+                }
+            } catch (e) {
+                // 服务端发完 DONE 即关闭连接时，chunked 流可能非正常终止、read() 直接 reject。
+                // 已收到 DONE 说明答案完整，这种断连属于正常收尾，不能报网络错误。
+                if (!sawDone) throw e;
+                console.warn('SSE 连接在 DONE 后异常关闭，已按正常结束处理', e);
+            }
+            // 收尾：连接已断但仍有残留帧（末帧缺空行），补处理一次，避免丢掉 DONE 之后的内容
+            if (buffer.trim() && handleSseFrame(msg, buffer) === 'DONE') sawDone = true;
+            return { ok: true, sawDone: sawDone };
+        }
+
+        // 阻塞端点兜底：保持流式不可用时的原有问答体验
+        async function sendBlockingFallback(text, msg) {
+            const json = await apiRequest('/api/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Tenant-Id': currentTenantId.value },
+                body: JSON.stringify({
+                    query: text,
+                    sessionId: currentSessionId.value,
+                    tenantId: parseInt(currentTenantId.value),
+                    topK: 10,
+                    enableRerank: true,
+                    mode: chatMode.value === 'auto' ? undefined : chatMode.value,
+                    includeDebug: false
+                })
+            });
+            if (json && json.code === 200 && json.data) {
+                const data = json.data;
+                msg.content = data.answer || '抱歉，没有找到相关答案。';
+                msg.rowId = data.sessionRowId;
+                msg.sources = data.sources || [];
+                metrics.value.totalRequests++;
+                if (data.metrics) metrics.value.avgLatency = data.metrics.totalMs || 0;
+            } else if (json) {
+                msg.error = '查询失败：' + (json.msg || '未知错误');
+            }
+        }
+
         async function sendMessage() {
             const text = userInput.value.trim();
             if (!text || isLoading.value) return;
@@ -884,41 +1074,32 @@ createApp({
             isLoading.value = true;
             scrollToBottom();
 
+            // 先占位一条流式 assistant 消息，增量事件直接写入该对象实现逐帧渲染
+            const msg = reactive({ role: 'assistant', content: '', trace: [], streaming: true, rowId: null, feedback: 0, error: '', sources: [] });
+            messages.value.push(msg);
             try {
-                const json = await apiRequest('/api/chat', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-Tenant-Id': currentTenantId.value },
-                    body: JSON.stringify({
-                        query: text,
-                        sessionId: currentSessionId.value,
-                        tenantId: parseInt(currentTenantId.value),
-                        topK: 10,
-                        enableRerank: true,
-                        mode: chatMode.value === 'auto' ? undefined : chatMode.value,
-                        includeDebug: false
-                    })
-                });
-                if (json && json.code === 200 && json.data) {
-                    const data = json.data;
-                    messages.value.push({
-                        role: 'assistant',
-                        content: data.answer || '抱歉，没有找到相关答案。',
-                        sources: data.sessions || [],
-                        rowId: data.sessionRowId,
-                        feedback: 0
-                    });
-                    if (data.metrics) {
-                        metrics.value.totalRequests++;
-                        metrics.value.avgLatency = data.metrics.totalMs || 0;
+                const outcome = await requestStreamChat(text, msg);
+                if (!outcome.ok) {
+                    if (outcome.fallback) {
+                        await sendBlockingFallback(text, msg);
+                    } else if (outcome.error) {
+                        msg.error = outcome.error;
                     }
-                } else if (json) {
-                    messages.value.push({ role: 'assistant', content: '查询失败：' + (json.msg || '未知错误') });
+                } else if (outcome.sawDone === false && !msg.error) {
+                    // 未见 DONE：服务端不落库，半截答案不入库，此处同样不伪装成完整回答
+                    msg.error = '回答中断，未生成完整结果，请重试';
+                } else if (!msg.error) {
+                    await refreshLastRowId(msg);
                 }
-            } catch(e) {
-                messages.value.push({ role: 'assistant', content: '网络错误，请检查后端服务是否启动' });
+                if (!msg.content && !msg.error) msg.content = '抱歉，没有找到相关答案。';
+            } catch (e) {
+                console.error('流式对话失败', e);
+                msg.error = '网络错误，请检查后端服务是否启动';
+            } finally {
+                msg.streaming = false;
+                isLoading.value = false;
+                scrollToBottom();
             }
-            isLoading.value = false;
-            scrollToBottom();
         }
 
         function scrollToBottom() {
@@ -1054,6 +1235,8 @@ createApp({
         
         function selectTenant(row) {
             currentTenantId.value = row.id.toString();
+            // 将当前租户写入 localStorage，确保整页跳转（如进入评估页）后仍使用所选择的租户
+            localStorage.setItem('currentTenantId', row.id.toString());
             uploadHeaders['X-Tenant-Id'] = row.id.toString();
             ElementPlus.ElMessage.success('已选择租户：' + row.tenantName);
             currentTab.value = 'chat';
@@ -1264,6 +1447,19 @@ createApp({
             window.location.href = '/audit-log.html';
         }
 
+        function goToolApproval() {
+            // 审批面板：新窗口打开，便于边聊天边关注审批
+            window.open('/tool-approval', '_blank');
+        }
+
+        function goEval() {
+            window.location.href = '/eval';
+        }
+
+        function goMcpStatus() {
+            window.location.href = '/mcp-status';
+        }
+
         onMounted(() => {
             // 已登录，加载数据
             loadDocuments();
@@ -1277,6 +1473,7 @@ createApp({
 
         return {
             messages, userInput, isLoading, documents, selectedDocId,
+            hasStreamingMessage,
             showUpload, showMetrics, splitStrategy, currentTenantId, role, displayName, chatContainer,
             metrics, uploadUrl, uploadHeaders, formatSize, renderMarkdown,
             sendMessage, loadDocuments, beforeUpload, onUploadSuccess,
@@ -1293,7 +1490,7 @@ createApp({
             // 高级模式
             chatMode, showAdvanced,
             // 认证
-            handleLogout, goAuditLog
+            handleLogout, goAuditLog, goEval, goMcpStatus, goToolApproval
         };
     }
 }).use(ElementPlus).mount('#app');

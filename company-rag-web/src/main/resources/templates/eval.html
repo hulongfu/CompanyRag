@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>回答评估 - CompanyRag</title>
+    <link rel="stylesheet" href="https://cdn.staticfile.net/element-plus/2.6.1/index.css">
+    <style>
+        body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f7fa; }
+        .app-header { height: 56px; background: #303133; color: white; display: flex; align-items: center; padding: 0 24px; justify-content: space-between; }
+        .container { max-width: 1200px; margin: 24px auto; padding: 0 16px; }
+        .card { background: white; border-radius: 12px; padding: 20px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+        .card h3 { font-size: 16px; margin-bottom: 16px; }
+        .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+        .stat-item { background: white; border-radius: 12px; padding: 20px; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+        .stat-item .num { font-size: 28px; font-weight: 700; color: #1a73e8; }
+        .stat-item .label { font-size: 13px; color: #909399; margin-top: 4px; }
+        .toolbar { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+        .query-cell { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: bottom; }
+        .detail-block { margin-bottom: 12px; }
+        .detail-block .t { font-size: 12px; color: #909399; margin-bottom: 4px; }
+        .detail-block .c { background: #f5f7fa; border-radius: 6px; padding: 10px; white-space: pre-wrap; font-size: 13px; word-break: break-all; max-height: 200px; overflow: auto; }
+        .score-tag { min-width: 40px; text-align: center; }
+        .muted { color: #909399; font-size: 12px; }
+        .hdr-btn{display:inline-flex;align-items:center;justify-content:center;padding:5px 15px;height:32px;border-radius:16px;border:1px solid rgba(255,255,255,.5);background:rgba(255,255,255,.15);color:#fff !important;font-size:13px;cursor:pointer;transition:all .2s;white-space:nowrap;line-height:1;margin-left:8px}
+        .hdr-btn:hover{background:rgba(255,255,255,.3);border-color:rgba(255,255,255,.8);color:#fff !important}
+    </style>
+</head>
+<body>
+<div id="app">
+    <header class="app-header">
+        <h1>📊 CompanyRag 回答评估</h1>
+        <div>
+            <button class="hdr-btn" @click="goHome">← 返回首页</button>
+            <button class="hdr-btn" @click="goAdmin">⚙️ 管理后台</button>
+        </div>
+    </header>
+    <div class="container">
+        <!-- 概览统计 -->
+        <div class="stats-grid">
+            <div class="stat-item"><div class="num">{{ stats.total || 0 }}</div><div class="label">评估总数</div></div>
+            <div class="stat-item"><div class="num">{{ (stats.passRate !== undefined ? (stats.passRate*100).toFixed(1) : '0.0') + '%' }}</div><div class="label">通过率</div></div>
+            <div class="stat-item"><div class="num">{{ stats.avgScore !== undefined ? stats.avgScore.toFixed(3) : '0.000' }}</div><div class="label">平均分</div></div>
+            <div class="stat-item"><div class="num">{{ stats.avgRelevancy !== undefined ? stats.avgRelevancy.toFixed(3) : '0.000' }}</div><div class="label">平均相关性</div></div>
+        </div>
+
+        <!-- 手动评估触发区 -->
+        <div class="card">
+            <h3>✏️ 手动评估</h3>
+            <el-alert v-if="!canEval" type="info" :closable="false" show-icon
+                title="当前为只读角色（viewer），可查看评估结果，但不能发起手动评估。"
+                style="margin-bottom:16px;"></el-alert>
+            <el-form label-width="90px">
+                <el-form-item label="从会话带入">
+                    <el-select v-model="selectedSessionId" placeholder="选择历史会话，自动带入 query/answer" clearable filterable
+                        style="width:360px;" @change="loadSession" :disabled="!canEval">
+                        <el-option v-for="s in sessions" :key="s.sessionId" :label="(s.lastQuery || s.title || s.sessionId) + '（' + s.sessionId + '）'" :value="s.sessionId" />
+                    </el-select>
+                    <span class="muted" style="margin-left:12px;">从“回答评估”会话列表选择以自动填入问题与回答</span>
+                </el-form-item>
+                <el-form-item label="问题 query">
+                    <el-input v-model="evalForm.query" type="textarea" :rows="2" placeholder="要评估的问题" />
+                </el-form-item>
+                <el-form-item label="回答 answer">
+                    <el-input v-model="evalForm.answer" type="textarea" :rows="4" placeholder="系统生成的回答" />
+                </el-form-item>
+                <el-form-item label="上下文 context">
+                    <el-input v-model="evalForm.context" type="textarea" :rows="3" placeholder="评估时使用的检索上下文（可选）" />
+                </el-form-item>
+                <el-form-item>
+                    <el-button type="primary" @click="runEval" :loading="evaluating" :disabled="!canEval">提交评估</el-button>
+                    <el-button @click="clearForm" :disabled="!canEval">清空</el-button>
+                </el-form-item>
+            </el-form>
+        </div>
+
+        <!-- 评估列表 -->
+        <div class="card">
+            <h3>📋 评估结果</h3>
+            <div class="toolbar">
+                <el-form :inline="true" :model="filters">
+                    <el-form-item label="来源">
+                        <el-select v-model="filters.source" placeholder="来源" clearable size="small" style="width:120px;">
+                            <el-option label="在线" value="online" />
+                            <el-option label="手动" value="manual" />
+                        </el-select>
+                    </el-form-item>
+                    <el-form-item label="开始时间">
+                        <el-date-picker v-model="filters.startTime" type="datetime" placeholder="开始时间" size="small"
+                            style="width:190px;" value-format="YYYY-MM-DDTHH:mm:ss" clearable />
+                    </el-form-item>
+                    <el-form-item label="结束时间">
+                        <el-date-picker v-model="filters.endTime" type="datetime" placeholder="结束时间" size="small"
+                            style="width:190px;" value-format="YYYY-MM-DDTHH:mm:ss" clearable />
+                    </el-form-item>
+                    <el-form-item>
+                        <el-button type="primary" size="small" @click="loadResults" :loading="loading">查询</el-button>
+                        <el-button size="small" @click="resetFilters">重置</el-button>
+                        <el-button size="small" @click="refreshAll">刷新</el-button>
+                    </el-form-item>
+                </el-form>
+            </div>
+            <el-table :data="results" v-loading="loading" border stripe>
+                <el-table-column prop="id" label="ID" width="70" />
+                <el-table-column label="时间" width="170">
+                    <template #default="{ row }">{{ formatTime(row.createTime) }}</template>
+                </el-table-column>
+                <el-table-column label="问题" min-width="180">
+                    <template #default="{ row }"><span class="query-cell" :title="row.query">{{ row.query }}</span></template>
+                </el-table-column>
+                <el-table-column label="来源" width="80">
+                    <template #default="{ row }">
+                        <el-tag :type="row.source === 'online' ? 'success' : 'warning'" size="small">{{ row.source === 'online' ? '在线' : '手动' }}</el-tag>
+                    </template>
+                </el-table-column>
+                <el-table-column label="通过" width="70">
+                    <template #default="{ row }">
+                        <el-tag :type="row.pass ? 'success' : 'danger'" size="small">{{ row.pass ? '是' : '否' }}</el-tag>
+                    </template>
+                </el-table-column>
+                <el-table-column label="综合分" width="90">
+                    <template #default="{ row }"><span class="score-tag">{{ row.score !== null ? row.score.toFixed(3) : '-' }}</span></template>
+                </el-table-column>
+                <el-table-column label="相关性" width="90">
+                    <template #default="{ row }"><span class="score-tag">{{ row.relevancyScore !== null ? row.relevancyScore.toFixed(3) : '-' }}</span></template>
+                </el-table-column>
+                <el-table-column label="正确性" width="90">
+                    <template #default="{ row }"><span class="score-tag">{{ row.correctnessScore !== null ? row.correctnessScore.toFixed(3) : '-' }}</span></template>
+                </el-table-column>
+                <el-table-column label="忠实性" width="90">
+                    <template #default="{ row }"><span class="score-tag">{{ row.faithfulnessScore !== null ? row.faithfulnessScore.toFixed(3) : '-' }}</span></template>
+                </el-table-column>
+                <el-table-column label="操作" width="80" fixed="right">
+                    <template #default="{ row }"><el-button type="primary" size="small" link @click="showDetail(row)">详情</el-button></template>
+                </el-table-column>
+            </el-table>
+        </div>
+
+        <!-- 回归闭环：数据集抽取 / 回归重跑 / 回归历史 -->
+        <div class="card" v-if="canEval">
+            <h3>🔄 回归闭环</h3>
+            <el-form :inline="true" label-width="80px">
+                <el-form-item label="时间范围">
+                    <el-date-picker v-model="loopRange" type="datetimerange" range-separator="至"
+                        start-placeholder="开始时间" end-placeholder="结束时间" size="small"
+                        style="width:380px;" value-format="YYYY-MM-DDTHH:mm:ss" />
+                </el-form-item>
+                <el-form-item label="样本数">
+                    <el-input-number v-model="loopLimit" :min="1" :max="200" size="small" />
+                </el-form-item>
+            </el-form>
+            <div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
+                <el-button type="primary" size="small" @click="runDataset" :loading="datasetLoading">抽取数据集</el-button>
+                <el-button type="warning" size="small" @click="runRegression" :loading="regressing">回归重跑</el-button>
+                <el-button size="small" @click="loadHistory(historyCurrent)">刷新历史</el-button>
+                <span class="muted" style="align-self:center;">仅 admin/user 可操作；viewer 只读不可见</span>
+            </div>
+
+            <!-- 数据集抽取结果 -->
+            <div class="detail-block" v-if="datasetVisible">
+                <div class="t">数据集（{{ samples.length }} 条）</div>
+                <el-table :data="samples" v-loading="datasetLoading" border stripe size="small" max-height="280">
+                    <el-table-column prop="sessionRowId" label="会话行" width="90" />
+                    <el-table-column prop="tenantId" label="租户" width="70" />
+                    <el-table-column label="人工标签" width="90">
+                        <template #default="{ row }">
+                            <el-tag :type="row.humanLabel === 1 ? 'success' : 'danger'" size="small">
+                                {{ row.humanLabel === 1 ? '👍 赞' : '👎 踩' }}
+                            </el-tag>
+                        </template>
+                    </el-table-column>
+                    <el-table-column label="落库通过" width="90">
+                        <template #default="{ row }">
+                            <el-tag :type="row.persistedPass ? 'success' : 'info'" size="small">{{ row.persistedPass ? '是' : '否' }}</el-tag>
+                        </template>
+                    </el-table-column>
+                    <el-table-column label="落库分" width="80">
+                        <template #default="{ row }">{{ row.persistedScore != null ? row.persistedScore.toFixed(3) : '-' }}</template>
+                    </el-table-column>
+                    <el-table-column label="问题" min-width="160">
+                        <template #default="{ row }"><span class="query-cell" :title="row.query">{{ row.query }}</span></template>
+                    </el-table-column>
+                    <el-table-column label="回答" min-width="200">
+                        <template #default="{ row }"><span class="query-cell" :title="row.answer">{{ row.answer }}</span></template>
+                    </el-table-column>
+                </el-table>
+            </div>
+
+            <!-- 回归重跑结果 -->
+            <div class="detail-block" v-if="report">
+                <div class="t">回归报告</div>
+                <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:10px;">
+                    <div class="stat-item" style="padding:14px;min-width:110px;">
+                        <div class="num" style="font-size:22px;">{{ report.accuracy != null ? report.accuracy.toFixed(3) : '-' }}</div><div class="label">准确率</div>
+                    </div>
+                    <div class="stat-item" style="padding:14px;min-width:110px;">
+                        <div class="num" style="font-size:22px;">{{ report.precision != null ? report.precision.toFixed(3) : '-' }}</div><div class="label">精确率</div>
+                    </div>
+                    <div class="stat-item" style="padding:14px;min-width:110px;">
+                        <div class="num" style="font-size:22px;">{{ report.recall != null ? report.recall.toFixed(3) : '-' }}</div><div class="label">召回率</div>
+                    </div>
+                    <div class="stat-item" style="padding:14px;min-width:110px;">
+                        <div class="num" style="font-size:22px;">{{ report.f1 != null ? report.f1.toFixed(3) : '-' }}</div><div class="label">F1</div>
+                    </div>
+                    <div class="stat-item" style="padding:14px;min-width:110px;">
+                        <div class="num" style="font-size:22px;">{{ report.avgScore != null ? report.avgScore.toFixed(3) : '-' }}</div><div class="label">综合分</div>
+                    </div>
+                    <div class="stat-item" style="padding:14px;min-width:110px;">
+                        <div class="num" style="font-size:22px;">{{ report.passRate != null ? (report.passRate*100).toFixed(1) : '-' }}%</div><div class="label">通过率</div>
+                    </div>
+                </div>
+                <div class="c" style="font-size:13px;white-space:pre-wrap;">规则版本 {{ report.ruleVersion }} · 样本 {{ report.sampleCount }}
+混淆矩阵：TP {{ report.tp }} TN {{ report.tn }} FP {{ report.fp }} FN {{ report.fn }}（和 = 样本数）
+负类召回 {{ report.negativeRecall }} · 落库一致率 {{ report.persistedPassAgree }}
+平均相关性 {{ report.avgRelevancy }} · 平均正确性 {{ report.avgCorrectness }} · 平均忠实性 {{ report.avgFaithfulness }}
+指纹 {{ report.datasetFingerprint }}</div>
+            </div>
+
+            <!-- 回归历史 -->
+            <div class="detail-block" v-if="historyVisible">
+                <div class="t">回归历史（共 {{ historyTotal }} 条）</div>
+                <el-table :data="historyRecords" v-loading="historyLoading" border stripe size="small" max-height="300">
+                    <el-table-column prop="id" label="ID" width="70" />
+                    <el-table-column label="时间" width="160">
+                        <template #default="{ row }">{{ formatTime(row.runTime) }}</template>
+                    </el-table-column>
+                    <el-table-column prop="sampleCount" label="样本" width="70" />
+                    <el-table-column label="准确率" width="90">
+                        <template #default="{ row }">{{ row.accuracy != null ? row.accuracy.toFixed(3) : '-' }}</template>
+                    </el-table-column>
+                    <el-table-column label="精确率" width="90">
+                        <template #default="{ row }">{{ row.precision != null ? row.precision.toFixed(3) : '-' }}</template>
+                    </el-table-column>
+                    <el-table-column label="召回率" width="90">
+                        <template #default="{ row }">{{ row.recall != null ? row.recall.toFixed(3) : '-' }}</template>
+                    </el-table-column>
+                    <el-table-column label="F1" width="90">
+                        <template #default="{ row }">{{ row.f1 != null ? row.f1.toFixed(3) : '-' }}</template>
+                    </el-table-column>
+                    <el-table-column label="综合分" width="90">
+                        <template #default="{ row }">{{ row.avgScore != null ? row.avgScore.toFixed(3) : '-' }}</template>
+                    </el-table-column>
+                    <el-table-column label="规则" width="80">
+                        <template #default="{ row }">{{ row.ruleVersion }}</template>
+                    </el-table-column>
+                </el-table>
+                <div style="margin-top:12px;text-align:right;">
+                    <el-pagination background layout="prev, pager, next, total" :total="historyTotal"
+                        :page-size="historyPageSize" :current-page="historyCurrent" @current-change="loadHistory" />
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 详情弹窗 -->
+    <el-dialog v-model="detailVisible" title="评估详情" width="60%" top="5vh">
+        <div class="detail-block" v-if="detail">
+            <div class="t">问题</div>
+            <div class="c">{{ detail.query }}</div>
+            <div class="t" style="margin-top:10px;">综合判断：<el-tag :type="detail.pass ? 'success' : 'danger'" size="small">{{ detail.pass ? '通过' : '未通过' }}</el-tag></div>
+        </div>
+        <div class="detail-block" v-if="detail">
+            <div class="t">回答</div>
+            <div class="c">{{ detail.answer }}</div>
+        </div>
+        <div class="detail-block" v-if="detail && detail.context">
+            <div class="t">上下文</div>
+            <div class="c">{{ detail.context }}</div>
+        </div>
+        <template v-if="detail">
+            <div style="display:flex;gap:16px;flex-wrap:wrap;">
+                <div class="detail-block">
+                    <div class="t">综合分</div>
+                    <div class="c" style="min-width:80px;">{{ detail.score !== null ? detail.score.toFixed(3) : '-' }}</div>
+                </div>
+                <div class="detail-block">
+                    <div class="t">相关性</div>
+                    <div class="c" style="min-width:80px;">{{ detail.relevancyScore !== null ? detail.relevancyScore.toFixed(3) : '-' }}</div>
+                </div>
+                <div class="detail-block">
+                    <div class="t">正确性</div>
+                    <div class="c" style="min-width:80px;">{{ detail.correctnessScore !== null ? detail.correctnessScore.toFixed(3) : '-' }}</div>
+                </div>
+                <div class="detail-block">
+                    <div class="t">忠实性</div>
+                    <div class="c" style="min-width:80px;">{{ detail.faithfulnessScore !== null ? detail.faithfulnessScore.toFixed(3) : '-' }}</div>
+                </div>
+            </div>
+        </template>
+    </el-dialog>
+</div>
+<script src="https://cdn.staticfile.net/vue/3.4.21/vue.global.prod.min.js"></script>
+<script src="https://cdn.staticfile.net/element-plus/2.6.1/index.full.min.js"></script>
+<script src="https://cdn.staticfile.net/element-plus-icons-vue/2.3.1/global.min.js"></script>
+<script>
+const { createApp, ref, onMounted } = Vue;
+createApp({
+    setup() {
+        const currentTenantId = ref(localStorage.getItem('currentTenantId') || '1');
+        const role = ref(localStorage.getItem('role') || 'user');
+        // viewer 只能看，不能手动评估
+        const canEval = role.value !== 'viewer';
+
+        const stats = ref({});
+        const results = ref([]);
+        const loading = ref(false);
+        const evaluating = ref(false);
+        const filters = ref({ source: '', startTime: null, endTime: null });
+        const evalForm = ref({ query: '', answer: '', context: '' });
+        const sessions = ref([]);
+        const selectedSessionId = ref(null);
+        const detailVisible = ref(false);
+        const detail = ref(null);
+
+        // 回归闭环状态
+        const loopRange = ref(null);
+        const loopLimit = ref(50);
+        const datasetLoading = ref(false);
+        const regressing = ref(false);
+        const samples = ref([]);
+        const datasetVisible = ref(false);
+        const report = ref(null);
+        const historyRecords = ref([]);
+        const historyTotal = ref(0);
+        const historyLoading = ref(false);
+        const historyVisible = ref(false);
+        const historyCurrent = ref(1);
+        const historyPageSize = ref(20);
+
+        // 后端要求 from/to 必传，未选时间范围时前端先提示，避免打到 400
+        function loopFromTo() {
+            if (!loopRange.value || loopRange.value.length !== 2 || !loopRange.value[0] || !loopRange.value[1]) {
+                ElementPlus.ElMessage.warning('请选择时间范围（开始 ~ 结束）');
+                return null;
+            }
+            return 'from=' + encodeURIComponent(loopRange.value[0]) + '&to=' + encodeURIComponent(loopRange.value[1])
+                + (loopLimit.value ? '&limit=' + loopLimit.value : '');
+        }
+
+        async function runDataset() {
+            const q = loopFromTo();
+            if (!q) return;
+            datasetLoading.value = true;
+            try {
+                const json = await apiRequest('/api/eval/dataset?' + q, { method: 'POST' });
+                if (json && json.code === 200) {
+                    samples.value = json.data || [];
+                    datasetVisible.value = true;
+                    ElementPlus.ElMessage.success('抽取到 ' + samples.value.length + ' 条样本');
+                } else if (json && json.code !== 200) {
+                    ElementPlus.ElMessage.error('抽取失败：' + (json.msg || ''));
+                }
+            } finally { datasetLoading.value = false; }
+        }
+
+        async function runRegression() {
+            const q = loopFromTo();
+            if (!q) return;
+            regressing.value = true;
+            try {
+                const json = await apiRequest('/api/eval/regression?' + q, { method: 'POST' });
+                if (json) {
+                    if (json.code === 200 && json.data) {
+                        report.value = json.data;
+                        ElementPlus.ElMessage.success('回归完成，已落快照');
+                        await loadHistory(1);
+                    } else if (json.code === 200) {
+                        // data=null：未落快照
+                        report.value = null;
+                        ElementPlus.ElMessage.info(json.msg || '无匹配样本，未落快照');
+                    } else {
+                        ElementPlus.ElMessage.error('回归失败：' + (json.msg || ''));
+                    }
+                }
+            } finally { regressing.value = false; }
+        }
+
+        async function loadHistory(page) {
+            historyLoading.value = true;
+            try {
+                const p = page || 1;
+                const json = await apiRequest('/api/eval/history?page=' + p + '&pageSize=' + historyPageSize.value);
+                if (json && json.code === 200 && json.data) {
+                    historyRecords.value = json.data.records || [];
+                    historyTotal.value = json.data.total || 0;
+                    historyCurrent.value = json.data.current || p;
+                    historyVisible.value = true;
+                }
+            } finally { historyLoading.value = false; }
+        }
+
+        function getAuthHeaders() {
+            var token = localStorage.getItem('token');
+            var headers = { 'X-Tenant-Id': currentTenantId.value };
+            if (token) headers['Authorization'] = 'Bearer ' + token;
+            return headers;
+        }
+
+        async function apiRequest(url, options = {}) {
+            try {
+                if (!options.headers) options.headers = {};
+                if (!options.headers['X-Tenant-Id']) options.headers['X-Tenant-Id'] = currentTenantId.value;
+                var token = localStorage.getItem('token');
+                if (token && !options.headers['Authorization']) options.headers['Authorization'] = 'Bearer ' + token;
+                const res = await fetch(url, options);
+                if (res.status === 401) {
+                    ElementPlus.ElMessage.error('登录已过期，请重新登录');
+                    window.location.href = '/login';
+                    return null;
+                }
+                const json = await res.json();
+                if (res.status === 403) {
+                    ElementPlus.ElMessage.error(json && json.msg ? json.msg : '无权限执行该操作');
+                    return null;
+                }
+                return json;
+            } catch(e) { console.error('API 请求失败', e); throw e; }
+        }
+
+        function formatTime(t) {
+            if (!t) return '-';
+            return String(t).replace('T', ' ').substring(0, 19);
+        }
+
+        // 加载概览统计
+        async function loadStats() {
+            try {
+                const json = await apiRequest('/api/eval/stats', { headers: { 'X-Tenant-Id': currentTenantId.value } });
+                if (json && json.code === 200) stats.value = json.data || {};
+            } catch(e) { console.error('加载统计失败', e); }
+        }
+
+        // 加载评估列表（来源在前端二次过滤；时间范围后端已支持 from/to）
+        async function loadResults() {
+            loading.value = true;
+            try {
+                const json = await apiRequest('/api/eval/results?limit=200', { headers: { 'X-Tenant-Id': currentTenantId.value } });
+                if (json && json.code === 200) {
+                    let list = json.data || [];
+                    list = list.filter(r => {
+                        if (filters.value.source && r.source !== filters.value.source) return false;
+                        if (filters.value.startTime) {
+                            const t = new Date(r.createTime);
+                            if (t < new Date(filters.value.startTime)) return false;
+                        }
+                        if (filters.value.endTime) {
+                            const t = new Date(r.createTime);
+                            if (t > new Date(filters.value.endTime)) return false;
+                        }
+                        return true;
+                    });
+                    results.value = list;
+                }
+            } catch(e) { console.error('加载评估列表失败', e); }
+            finally { loading.value = false; }
+        }
+
+        // 加载历史会话（用于一键带入）
+        async function loadSessions() {
+            try {
+                const json = await apiRequest('/api/session/list?page=1&size=50', { headers: { 'X-Tenant-Id': currentTenantId.value } });
+                if (json && json.code === 200) sessions.value = (json.data && json.data.records) || [];
+            } catch(e) { console.error('加载会话列表失败', e); }
+        }
+
+        // 判断是否历史脏数据：裸 32 位 hex ID 或 UUID 形式的引用标识，非检索正文则视为垃圾标识
+        function isGarbageHex(s) {
+            return /^[0-9a-fA-F]{32}$/.test(s)
+                || /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(s);
+        }
+
+        // 从选中会话带入 query/answer/context
+        async function loadSession(sessionId) {
+            if (!sessionId) return;
+            try {
+                const json = await apiRequest('/api/session/' + sessionId, { headers: { 'X-Tenant-Id': currentTenantId.value } });
+                if (json && json.code === 200 && json.data && json.data.length > 0) {
+                    // 取最后一条助手回答作为评估对象
+                    const last = json.data[json.data.length - 1];
+                    evalForm.value.query = last.query || '';
+                    evalForm.value.answer = last.answer || '';
+                    // 历史脏数据：评估功能开发前旧版工具上下文被写成了裸 32 位 hex ID（如 6ac77429be989835bb330c568f2ab669），
+                    // 并非检索正文，带入会污染评估上下文，故检测到此类垃圾标识时置空
+                    evalForm.value.context = (last.context && isGarbageHex(last.context.trim())) ? '' : (last.context || '');
+                    ElementPlus.ElMessage.success('已从会话带入问题与回答');
+                } else {
+                    ElementPlus.ElMessage.warning('该会话无消息可带入');
+                }
+            } catch(e) { console.error('加载会话详情失败', e); }
+        }
+
+        async function runEval() {
+            if (!evalForm.value.query || !evalForm.value.answer) {
+                ElementPlus.ElMessage.warning('请填写问题（query）和回答（answer）');
+                return;
+            }
+            evaluating.value = true;
+            try {
+                const json = await apiRequest('/api/eval/run', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Tenant-Id': currentTenantId.value },
+                    body: JSON.stringify([{
+                        query: evalForm.value.query,
+                        answer: evalForm.value.answer,
+                        context: evalForm.value.context || ''
+                    }])
+                });
+                if (json && json.code === 200) {
+                    ElementPlus.ElMessage.success('评估完成，共 ' + ((json.data && json.data.length) || 0) + ' 条');
+                    await refreshAll();
+                    selectedSessionId.value = null;
+                } else if (json) {
+                    ElementPlus.ElMessage.error('评估失败：' + (json.msg || ''));
+                }
+            } catch(e) {
+                console.error('评估失败', e);
+                ElementPlus.ElMessage.error('评估失败');
+            } finally { evaluating.value = false; }
+        }
+
+        function clearForm() {
+            evalForm.value = { query: '', answer: '', context: '' };
+            selectedSessionId.value = null;
+        }
+
+        function showDetail(row) {
+            detail.value = row;
+            detailVisible.value = true;
+        }
+
+        function resetFilters() {
+            filters.value = { source: '', startTime: null, endTime: null };
+            loadResults();
+        }
+
+        async function refreshAll() {
+            await Promise.all([loadStats(), loadResults()]);
+        }
+
+        onMounted(() => { refreshAll(); loadSessions(); });
+
+        return {
+            currentTenantId, role, canEval, stats, results, loading, evaluating, filters,
+            evalForm, sessions, selectedSessionId, detailVisible, detail,
+            apiRequest, formatTime, loadResults, loadSession, runEval, clearForm,
+            showDetail, resetFilters, refreshAll, goHome: () => { window.location.href = '/'; },
+            goAdmin: () => { window.location.href = '/admin'; },
+            loopRange, loopLimit, datasetLoading, regressing, samples, datasetVisible, report,
+            historyRecords, historyTotal, historyLoading, historyVisible, historyCurrent, historyPageSize,
+            runDataset, runRegression, loadHistory
+        };
+    }
+}).use(ElementPlus).mount('#app');
+</script>
+</body>
+</html>

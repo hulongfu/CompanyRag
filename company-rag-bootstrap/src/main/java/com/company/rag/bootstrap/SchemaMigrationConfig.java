@@ -1,5 +1,6 @@
 package com.company.rag.bootstrap;
 
+import com.company.rag.common.constant.EvalRegressionReportDdl;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.ApplicationRunner;
@@ -62,26 +63,26 @@ public class SchemaMigrationConfig {
                         if (columnExists != null && columnExists) {
                             log.debug("Schema [{}] 的 rag_session 表已存在 feedback 列，跳过", schemaName);
                             skippedCount++;
-                            continue;
+                        } else {
+                            // 添加 feedback 列（NOT NULL + DEFAULT 0，避免影响现有数据）
+                            String alterSql = String.format(
+                                    "ALTER TABLE %s.rag_session ADD COLUMN feedback SMALLINT NOT NULL DEFAULT 0",
+                                    schemaName
+                            );
+                            jdbcTemplate.execute(alterSql);
+
+                            log.info("Schema [{}] 的 rag_session 表成功添加 feedback 列", schemaName);
+                            migratedCount++;
                         }
-                        
-                        // 添加 feedback 列（NOT NULL + DEFAULT 0，避免影响现有数据）
-                        String alterSql = String.format(
-                                "ALTER TABLE %s.rag_session ADD COLUMN feedback SMALLINT NOT NULL DEFAULT 0",
-                                schemaName
-                        );
-                        jdbcTemplate.execute(alterSql);
-                        
-                        // 添加索引（如果不存在）
+
+                        // 索引位于 if/else 之后、两分支共用：存量 schema（列已存在）重跑时
+                        // 同样要建上 feedback 索引，不能因列已存在而跳过（否则该索引永远建不上）
                         String createIndexSql = String.format(
                                 "CREATE INDEX IF NOT EXISTS idx_%s_session_feedback ON %s.rag_session(feedback)",
                                 schemaName, schemaName
                         );
                         jdbcTemplate.execute(createIndexSql);
-                        
-                        log.info("Schema [{}] 的 rag_session 表成功添加 feedback 列", schemaName);
-                        migratedCount++;
-                        
+
                     } catch (Exception e) {
                         log.error("Schema [{}] 的 feedback 列迁移失败：{}", schemaName, e.getMessage());
                         // 继续处理下一个 schema，不中断整体迁移
@@ -165,5 +166,231 @@ public class SchemaMigrationConfig {
                 // 不抛出异常，避免启动失败
             }
         };
+    }
+
+    /**
+     * 为所有租户 schema 幂等创建 answer_eval_result 表、索引并启用 RLS
+     * （与 rag_session 一致：tenant_id = current_tenant_id()）。
+     */
+    @Bean
+    public ApplicationRunner migrateAnswerEvalResultTable() {
+        return args -> {
+            log.info("开始执行 answer_eval_result 表迁移...");
+            try {
+                List<String> tenantSchemas = jdbcTemplate.queryForList(
+                        "SELECT schema_name FROM information_schema.schemata " +
+                        "WHERE schema_name LIKE 'tenant_%'",
+                        String.class
+                );
+                int migratedCount = 0;
+                for (String schemaName : tenantSchemas) {
+                    // schemaName 白名单校验，防 SQL 注入
+                    if (!schemaName.matches("^[a-zA-Z_][a-zA-Z0-9_]*$")) {
+                        log.warn("跳过非法 schema 名：{}", schemaName);
+                        continue;
+                    }
+                    String ddl = """
+                        CREATE TABLE IF NOT EXISTS %1$s.answer_eval_result (
+                            id BIGSERIAL PRIMARY KEY,
+                            tenant_id BIGINT NOT NULL,
+                            session_row_id BIGINT,
+                            query TEXT,
+                            context TEXT,
+                            answer TEXT,
+                            pass BOOLEAN NOT NULL,
+                            score DOUBLE PRECISION NOT NULL,
+                            relevancy_score DOUBLE PRECISION NOT NULL DEFAULT 0,
+                            correctness_score DOUBLE PRECISION NOT NULL DEFAULT 0,
+                            faithfulness_score DOUBLE PRECISION NOT NULL DEFAULT 0,
+                            source VARCHAR(16) NOT NULL,
+                            create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        );
+                        CREATE INDEX IF NOT EXISTS idx_%1$s_answer_eval_tenant_time
+                            ON %1$s.answer_eval_result (tenant_id, create_time DESC);
+                        ALTER TABLE %1$s.answer_eval_result ENABLE ROW LEVEL SECURITY;
+                        ALTER TABLE %1$s.answer_eval_result FORCE ROW LEVEL SECURITY;
+                        DROP POLICY IF EXISTS tenant_isolation_answer_eval ON %1$s.answer_eval_result;
+                        CREATE POLICY tenant_isolation_answer_eval ON %1$s.answer_eval_result
+                            FOR ALL TO company_rag_app
+                            USING (tenant_id = current_tenant_id())
+                            WITH CHECK (tenant_id = current_tenant_id());
+                        GRANT SELECT, INSERT, UPDATE, DELETE ON %1$s.answer_eval_result TO company_rag_app;
+                        GRANT USAGE, SELECT ON SEQUENCE %1$s.answer_eval_result_id_seq TO company_rag_app;
+                        """.formatted(schemaName);
+                    jdbcTemplate.execute(ddl);
+                    migratedCount++;
+                }
+                log.info("answer_eval_result 表迁移完成：处理 {} 个 schema", migratedCount);
+            } catch (Exception e) {
+                // 不抛出异常，避免启动失败
+                log.error("answer_eval_result 表迁移失败：{}", e.getMessage(), e);
+            }
+        };
+    }
+
+    /**
+     * 为所有租户 schema 幂等创建 tool_approval_request 表、索引并启用 RLS
+     * （审批门功能依赖；与 answer_eval_result 同款 RLS：tenant_id = current_tenant_id()）。
+     */
+    @Bean
+    public ApplicationRunner migrateToolApprovalTable() {
+        return args -> {
+            log.info("开始执行 tool_approval_request 表迁移...");
+            try {
+                List<String> tenantSchemas = jdbcTemplate.queryForList(
+                        "SELECT schema_name FROM information_schema.schemata " +
+                        "WHERE schema_name LIKE 'tenant_%'",
+                        String.class
+                );
+                int migratedCount = 0;
+                for (String schemaName : tenantSchemas) {
+                    // schemaName 白名单校验，防 SQL 注入
+                    if (!schemaName.matches("^[a-zA-Z_][a-zA-Z0-9_]*$")) {
+                        log.warn("跳过非法 schema 名：{}", schemaName);
+                        continue;
+                    }
+                    String ddl = """
+                        CREATE TABLE IF NOT EXISTS %1$s.tool_approval_request (
+                            id BIGSERIAL PRIMARY KEY,
+                            tenant_id BIGINT NOT NULL,
+                            tool_name VARCHAR(64) NOT NULL,
+                            args_json TEXT,
+                            session_id VARCHAR(128),
+                            requester_user_id BIGINT,
+                            status VARCHAR(16) NOT NULL,
+                            result TEXT,
+                            requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            decided_at TIMESTAMP
+                        );
+                        CREATE INDEX IF NOT EXISTS idx_%1$s_tool_approval_status
+                            ON %1$s.tool_approval_request (tenant_id, status);
+                        CREATE INDEX IF NOT EXISTS idx_%1$s_tool_approval_time
+                            ON %1$s.tool_approval_request (tenant_id, requested_at DESC);
+                        ALTER TABLE %1$s.tool_approval_request ENABLE ROW LEVEL SECURITY;
+                        ALTER TABLE %1$s.tool_approval_request FORCE ROW LEVEL SECURITY;
+                        DROP POLICY IF EXISTS tenant_isolation_tool_approval ON %1$s.tool_approval_request;
+                        CREATE POLICY tenant_isolation_tool_approval ON %1$s.tool_approval_request
+                            FOR ALL TO company_rag_app
+                            USING (tenant_id = current_tenant_id())
+                            WITH CHECK (tenant_id = current_tenant_id());
+                        GRANT SELECT, INSERT, UPDATE, DELETE ON %1$s.tool_approval_request TO company_rag_app;
+                        GRANT USAGE, SELECT ON SEQUENCE %1$s.tool_approval_request_id_seq TO company_rag_app;
+                        """.formatted(schemaName);
+                    jdbcTemplate.execute(ddl);
+                    migratedCount++;
+                }
+                log.info("tool_approval_request 表迁移完成：处理 {} 个 schema", migratedCount);
+            } catch (Exception e) {
+                // 不抛出异常，避免启动失败
+                log.error("tool_approval_request 表迁移失败：{}", e.getMessage(), e);
+            }
+        };
+    }
+
+    /**
+     * 为所有租户 schema 幂等创建 document_pipeline_state 表、索引并启用 RLS。
+     *
+     * 文档入库异步分步 ETL 依赖该表（DocumentPipelineServiceImpl.submitUpload 会首先写
+     * PENDING 状态）；V4 迁移只对当次执行时的存量 schema 建表，之后新建的 schema 若缺表，
+     * 该租户上传文档会在插入状态时抛 "relation does not exist" 且留下孤儿 document 记录。
+     * 本启动迁移为所有缺表的 schema 兜底补建（与答案评估/审批门同类机制）。
+     */
+    @Bean
+    public ApplicationRunner migrateDocumentPipelineStateTable() {
+        return args -> {
+            log.info("开始执行 document_pipeline_state 表迁移...");
+            try {
+                List<String> tenantSchemas = jdbcTemplate.queryForList(
+                        "SELECT schema_name FROM information_schema.schemata " +
+                        "WHERE schema_name LIKE 'tenant_%'",
+                        String.class
+                );
+                int migratedCount = 0;
+                for (String schemaName : tenantSchemas) {
+                    // schemaName 白名单校验，防 SQL 注入
+                    if (!schemaName.matches("^[a-zA-Z_][a-zA-Z0-9_]*$")) {
+                        log.warn("跳过非法 schema 名：{}", schemaName);
+                        continue;
+                    }
+                    String ddl = """
+                        CREATE TABLE IF NOT EXISTS %1$s.document_pipeline_state (
+                            task_id UUID PRIMARY KEY,
+                            document_id BIGINT NOT NULL,
+                            tenant_id BIGINT NOT NULL,
+                            step VARCHAR(32) NOT NULL,
+                            status VARCHAR(32) NOT NULL,
+                            error_step VARCHAR(32),
+                            error_msg TEXT,
+                            retry_count INT NOT NULL DEFAULT 0,
+                            create_time TIMESTAMP NOT NULL DEFAULT now(),
+                            update_time TIMESTAMP NOT NULL DEFAULT now()
+                        );
+                        CREATE INDEX IF NOT EXISTS idx_%1$s_pipeline_tenant
+                            ON %1$s.document_pipeline_state (tenant_id);
+                        CREATE INDEX IF NOT EXISTS idx_%1$s_pipeline_status
+                            ON %1$s.document_pipeline_state (status);
+                        ALTER TABLE %1$s.document_pipeline_state ENABLE ROW LEVEL SECURITY;
+                        ALTER TABLE %1$s.document_pipeline_state FORCE ROW LEVEL SECURITY;
+                        DROP POLICY IF EXISTS tenant_isolation_pipeline ON %1$s.document_pipeline_state;
+                        CREATE POLICY tenant_isolation_pipeline ON %1$s.document_pipeline_state
+                            FOR ALL TO company_rag_app
+                            USING (tenant_id = current_tenant_id())
+                            WITH CHECK (tenant_id = current_tenant_id());
+                        GRANT SELECT, INSERT, UPDATE, DELETE ON %1$s.document_pipeline_state TO company_rag_app;
+                        """.formatted(schemaName);
+                    jdbcTemplate.execute(ddl);
+                    migratedCount++;
+                }
+                log.info("document_pipeline_state 表迁移完成：处理 {} 个 schema", migratedCount);
+            } catch (Exception e) {
+                // 不抛出异常，避免启动失败
+                log.error("document_pipeline_state 表迁移失败：{}", e.getMessage(), e);
+            }
+        };
+    }
+
+    /**
+     * 为所有租户 schema 幂等创建 eval_regression_report 表、索引并启用 RLS。
+     *
+     * 回归评估快照表（与 answer_eval_result 同类机制，spec §3.2.3）：对存量租户兜底补建，
+     * 新建租户则由 TenantServiceImpl.createTenantSchema 直接渲染同一 DDL（单一来源 EvalRegressionReportDdl）。
+     */
+    @Bean
+    public ApplicationRunner migrateEvalRegressionReportTable() {
+        return args -> {
+            log.info("开始执行 eval_regression_report 表迁移...");
+            int[] processed = {0};
+            forAllTenantSchemas(schemaName -> {
+                try {
+                    jdbcTemplate.execute(EvalRegressionReportDdl.build(schemaName));
+                    processed[0]++;
+                } catch (Exception e) {
+                    // 继续处理下一个 schema，不中断整体迁移
+                    log.error("Schema [{}] 的 eval_regression_report 表迁移失败：{}", schemaName, e.getMessage());
+                }
+            });
+            log.info("eval_regression_report 表迁移完成：处理 {} 个 schema", processed[0]);
+        };
+    }
+
+    /**
+     * 遍历所有租户 schema，对每个合法 schema 执行指定操作。
+     *
+     * <p>统一收敛「查询 tenant_% schema + 正则白名单校验收 + per-schema 防御」样板，
+     * 供新增迁移 runner 复用。回调内抛出的异常由调用方（runner）自行 try/catch 决定是否中断。
+     */
+    private void forAllTenantSchemas(java.util.function.Consumer<String> action) {
+        List<String> tenantSchemas = jdbcTemplate.queryForList(
+                "SELECT schema_name FROM information_schema.schemata WHERE schema_name LIKE 'tenant_%'",
+                String.class
+        );
+        for (String schemaName : tenantSchemas) {
+            // schemaName 白名单校验，防 SQL 注入
+            if (schemaName == null || !schemaName.matches("^[a-zA-Z_][a-zA-Z0-9_]*$")) {
+                log.warn("跳过非法 schema 名：{}", schemaName);
+                continue;
+            }
+            action.accept(schemaName);
+        }
     }
 }

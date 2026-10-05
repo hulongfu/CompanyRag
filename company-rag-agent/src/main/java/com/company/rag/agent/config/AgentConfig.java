@@ -87,6 +87,10 @@ public class AgentConfig {
         log.info("SkillsAgentHook 已创建，包含技能注册表：{}", skillRegistry.getClass().getSimpleName());
         log.info("ToolCallbackProvider 已注入：{}", toolCallbackProvider.getClass().getSimpleName());
         
+        // 【线程模型约束，勿改】不得开启 parallelToolExecution 或图内并行节点：
+        // 流式链路依赖 graph 流在单一订阅线程上顺序产出 NodeOutput，
+        // ToolCallRecorder 与租户上下文均按「同一线程顺序记录」的前提设计，
+        // 并行执行会让工具轨迹乱序、上下文串扰。
         ReactAgent agent = ReactAgent.builder()
                 .name("rag-agent")
                 .systemPrompt("""

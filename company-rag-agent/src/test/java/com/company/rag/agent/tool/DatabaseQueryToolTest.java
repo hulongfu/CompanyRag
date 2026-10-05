@@ -1,11 +1,14 @@
 package com.company.rag.agent.tool;
 
+import com.company.rag.agent.config.Nl2sqlSchemaValidationProperties;
+import com.company.rag.agent.security.SqlSchemaValidator;
 import com.company.rag.tenant.context.TenantContext;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.ConnectionCallback;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.sql.Connection;
 import java.sql.ResultSet;
@@ -689,5 +692,35 @@ class DatabaseQueryToolTest {
         assertFalse(result.contains("secret-hash"));
         assertFalse(result.contains("13800138000"));
         assertTrue(result.contains("***"));
+    }
+
+    @Test
+    void noValidatorInjected_stillExecutes() throws SQLException {
+        // 默认未注入 validator（构造单参）→ 跳过校验，走既有成功路径
+        stubExecuteResult(List.of(Map.of("title", "d")));
+        TenantContext.setSchema("tenant_123");
+
+        String r = databaseQueryTool.execute(Map.of("sql", "SELECT * FROM rag_document"));
+
+        assertNotNull(r);
+        assertTrue(r.contains("查询结果"));
+        assertFalse(r.contains("缺失表"));
+    }
+
+    @Test
+    void injectedValidator_unknownTable_returnsError() throws SQLException {
+        TenantContext.setSchema("tenant_123");
+        SqlSchemaValidator sv = new SqlSchemaValidator(
+                mockJdbcTemplate, new Nl2sqlSchemaValidationProperties());
+        ReflectionTestUtils.setField(databaseQueryTool, "schemaValidator", sv);
+
+        when(mockJdbcTemplate.queryForList(anyString(), eq("tenant_123")))
+                .thenReturn(List.of(Map.<String, Object>of("table_name", "rag_document")));
+        stubExecuteResult(List.of());
+
+        String r = databaseQueryTool.execute(Map.of("sql", "SELECT * FROM typo_document"));
+
+        assertTrue(r.contains("缺失表"));
+        assertTrue(r.contains("typo_document"));
     }
 }

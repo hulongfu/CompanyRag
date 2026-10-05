@@ -1,206 +1,135 @@
 package com.company.rag.agent.executor;
 
-import com.company.rag.agent.service.AgentResult;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
+import com.alibaba.cloud.ai.graph.RunnableConfig;
 import com.alibaba.cloud.ai.graph.agent.ReactAgent;
-import com.alibaba.cloud.ai.graph.exception.GraphRunnerException;
+import com.company.rag.agent.service.AgentResult;
+import com.company.rag.common.tool.ToolCallRecorder;
+import com.company.rag.tenant.context.TenantContext;
+import com.company.rag.tenant.context.TenantContextSnapshot;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
 
-import java.util.List;
-
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
-
-/**
- * StreamingAgentExecutor 单元测试
- * 
- * 测试场景：
- * 1. 正常执行：Agent 成功处理请求
- * 2. 空响应：Agent 返回空字符串
- * 3. 异常处理：Agent 执行失败
- * 
- * @author AI Assistant
- * @since 2026-08-30
- */
-@ExtendWith(MockitoExtension.class)
 class StreamingAgentExecutorTest {
-    
-    @Mock
+
     private ReactAgent reactAgent;
-    
+    private ToolCallRecorder recorder;
     private StreamingAgentExecutor executor;
-    
+
     @BeforeEach
     void setUp() {
-        executor = new StreamingAgentExecutor(reactAgent);
+        reactAgent = mock(ReactAgent.class);
+        recorder = new ToolCallRecorder();
+        executor = new StreamingAgentExecutor(reactAgent, recorder,
+                new com.company.rag.agent.stream.NodeOutputMapper(),
+                new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
     }
-    
-    /**
-     * 测试场景 1：正常执行
-     * 验证 Agent 成功处理请求并返回响应
-     */
+
     @Test
-    @SuppressWarnings("unchecked")
-    void testExecute_Success() throws GraphRunnerException {
-        // 准备测试数据
-        String userInput = "请生成 API 文档";
-        String expectedResponse = "这是 API 文档内容";
-        List<Message> messages = List.of(new UserMessage(userInput));
-        
-        // Mock ReactAgent 行为
-        AssistantMessage mockResponse = new AssistantMessage(expectedResponse);
-        when(reactAgent.call(any(List.class))).thenReturn(mockResponse);
-        
-        // 执行测试
-        AgentResult result = executor.execute(messages);
-        
-        // 验证结果
-        assertNotNull(result);
-        assertEquals(expectedResponse, result.getAnswer());
-        assertNull(result.getToolContext());
-        
-        // 验证 ReactAgent 被调用
-        verify(reactAgent, times(1)).call(anyList());
+    void execute_returnsRealToolContext() throws Exception {
+        when(reactAgent.call(eq(List.of(new UserMessage("hi"))), any(RunnableConfig.class)))
+                .thenReturn(new AssistantMessage("hello"));
+
+        long start = recorder.recordStart("searchKnowledgeBase", java.util.Map.of("question", "q"));
+        recorder.recordEnd("searchKnowledgeBase", start, "success", null, "citations=c1");
+
+        AgentResult result = executor.execute(List.of(new UserMessage("hi")));
+
+        assertEquals("hello", result.getAnswer());
+        assertEquals("searchKnowledgeBase:citations=c1", result.getToolContext());
+        // 实际调用了 searchKnowledgeBase，ragUsed 应为 true（供在线评估过滤）
+        assertEquals(true, result.isRagUsed());
     }
-    
-    /**
-     * 测试场景 2：空响应
-     * 验证 Agent 返回空字符串时的处理
-     */
+
     @Test
-    @SuppressWarnings("unchecked")
-    void testExecute_EmptyResponse() throws GraphRunnerException {
-        // 准备测试数据
-        String userInput = "测试问题";
-        List<Message> messages = List.of(new UserMessage(userInput));
-        
-        // Mock ReactAgent 行为（返回空响应）
-        AssistantMessage mockResponse = new AssistantMessage("");
-        when(reactAgent.call(any(List.class))).thenReturn(mockResponse);
-        
-        // 执行测试
-        AgentResult result = executor.execute(messages);
-        
-        // 验证结果
-        assertNotNull(result);
-        assertEquals("", result.getAnswer());
-        
-        // 验证 ReactAgent 被调用
-        verify(reactAgent, times(1)).call(anyList());
+    void execute_ragUsedFalse_whenNoSearchCalled() throws Exception {
+        when(reactAgent.call(eq(List.of(new UserMessage("hi"))), any(RunnableConfig.class)))
+                .thenReturn(new AssistantMessage("hello"));
+
+        // 仅调用其他工具（如 code_search），未调用 searchKnowledgeBase
+        long start = recorder.recordStart("code_search", java.util.Map.of("q", "k"));
+        recorder.recordEnd("code_search", start, "success", null, "matched=1");
+
+        AgentResult result = executor.execute(List.of(new UserMessage("hi")));
+
+        // 未执行 RAG 检索，ragUsed 应为 false
+        assertEquals("hello", result.getAnswer());
+        assertEquals(false, result.isRagUsed());
     }
-    
-    /**
-     * 测试场景 3：null 响应
-     * 验证 Agent 返回 null 时的处理
-     */
+
     @Test
-    @SuppressWarnings("unchecked")
-    void testExecute_NullResponse() throws GraphRunnerException {
-        // 准备测试数据
-        String userInput = "测试问题";
-        List<Message> messages = List.of(new UserMessage(userInput));
-        
-        // Mock ReactAgent 行为（返回 null）
-        when(reactAgent.call(any(List.class))).thenReturn(null);
-        
-        // 执行测试
-        AgentResult result = executor.execute(messages);
-        
-        // 验证结果
-        assertNotNull(result);
-        assertEquals("", result.getAnswer());
-        
-        // 验证 ReactAgent 被调用
-        verify(reactAgent, times(1)).call(anyList());
+    void execute_toolContextEmpty_whenNoToolsCalled() throws Exception {
+        when(reactAgent.call(eq(List.of(new UserMessage("hi"))), any(RunnableConfig.class)))
+                .thenReturn(new AssistantMessage("hello"));
+
+        AgentResult result = executor.execute(List.of(new UserMessage("hi")));
+
+        assertEquals("", result.getToolContext());
     }
-    
-    /**
-     * 测试场景 4：GraphRunnerException 异常
-     * 验证 Agent 执行失败时的异常传播
-     */
+
     @Test
-    @SuppressWarnings("unchecked")
-    void testExecute_GraphRunnerException() throws GraphRunnerException {
-        // 准备测试数据
-        String userInput = "测试问题";
-        List<Message> messages = List.of(new UserMessage(userInput));
-        
-        // Mock ReactAgent 行为（抛出异常）
-        GraphRunnerException expectedException = new GraphRunnerException("Agent 执行失败");
-        when(reactAgent.call(any(List.class))).thenThrow(expectedException);
-        
-        // 执行测试并验证异常
-        GraphRunnerException exception = assertThrows(
-            GraphRunnerException.class,
-            () -> executor.execute(messages)
-        );
-        
-        assertEquals("Agent 执行失败", exception.getMessage());
-        
-        // 验证 ReactAgent 被调用
-        verify(reactAgent, times(1)).call(anyList());
+    void execute_clearsRecords_afterCapture() throws Exception {
+        when(reactAgent.call(eq(List.of(new UserMessage("hi"))), any(RunnableConfig.class)))
+                .thenReturn(new AssistantMessage("hello"));
+
+        long start = recorder.recordStart("searchKnowledgeBase", java.util.Map.of("question", "q"));
+        recorder.recordEnd("searchKnowledgeBase", start, "success", null, "citations=c1");
+
+        executor.execute(List.of(new UserMessage("hi")));
+
+        // execute 内部在捕获上下文后用 finally 清理工作线程的记录，避免串号/泄漏
+        assertEquals("", recorder.captureToolContext());
     }
-    
-    /**
-     * 测试场景 5：普通 Exception 异常
-     * 验证其他异常被包装为 GraphRunnerException
-     */
+
     @Test
-    @SuppressWarnings("unchecked")
-    void testExecute_GenericException() throws GraphRunnerException {
-        // 准备测试数据
-        String userInput = "测试问题";
-        List<Message> messages = List.of(new UserMessage(userInput));
-        
-        // Mock ReactAgent 行为（抛出普通异常）
-        RuntimeException expectedException = new RuntimeException("未知错误");
-        when(reactAgent.call(any(List.class))).thenThrow(expectedException);
-        
-        // 执行测试并验证异常
-        GraphRunnerException exception = assertThrows(
-            GraphRunnerException.class,
-            () -> executor.execute(messages)
-        );
-        
-        assertTrue(exception.getMessage().contains("Agent 调用失败"));
-        assertTrue(exception.getMessage().contains("未知错误"));
-        
-        // 验证 ReactAgent 被调用
-        verify(reactAgent, times(1)).call(anyList());
+    void execute_carriesToolRecords_toAgentResult() throws Exception {
+        when(reactAgent.call(eq(List.of(new UserMessage("hi"))), any(RunnableConfig.class)))
+                .thenReturn(new AssistantMessage("hello"));
+
+        long start = recorder.recordStart("searchKnowledgeBase", java.util.Map.of("question", "q"));
+        recorder.recordEnd("searchKnowledgeBase", start, "success", null, "citations=c1");
+
+        AgentResult result = executor.execute(List.of(new UserMessage("hi")));
+
+        // 工具明细必须由 executor 工作线程在清理前带出（跨线程 ThreadLocal 不可见），
+        // 供 RagAgentService 输出 tools=[...] 结构化日志；漏带即回归旧 bug（恒空）
+        assertEquals(1, result.getToolRecords().size());
+        assertEquals("searchKnowledgeBase", result.getToolRecords().get(0).getToolName());
     }
-    
-    /**
-     * 测试场景 6：多轮对话历史
-     * 验证带历史消息的执行
-     */
+
     @Test
-    @SuppressWarnings("unchecked")
-    void testExecute_WithHistory() throws GraphRunnerException {
-        // 准备测试数据
-        Message history1 = new UserMessage("第一轮问题");
-        Message history2 = new AssistantMessage("第一轮回答");
-        Message currentMessage = new UserMessage("第二轮问题");
-        List<Message> messages = List.of(history1, history2, currentMessage);
-        
-        String expectedResponse = "这是第二轮的回答";
-        AssistantMessage mockResponse = new AssistantMessage(expectedResponse);
-        when(reactAgent.call(any(List.class))).thenReturn(mockResponse);
-        
-        // 执行测试
-        AgentResult result = executor.execute(messages);
-        
-        // 验证结果
-        assertNotNull(result);
-        assertEquals(expectedResponse, result.getAnswer());
-        
-        // 验证 ReactAgent 被调用（传入了完整的消息列表）
-        verify(reactAgent, times(1)).call(argThat((List<Message> msgList) -> msgList.size() == 3));
+    void execute_carriesTenantSnapshot_inRunnableConfigMetadata() throws Exception {
+        // 工具节点跑在 graph 框架线程上，ThreadLocal 租户上下文跟不过去；
+        // 快照必须放进 RunnableConfig metadata，由 ToolCallback 在执行线程写回
+        TenantContext.setTenantId(7L);
+        TenantContext.setSchema("tenant_x");
+        try {
+            when(reactAgent.call(eq(List.of(new UserMessage("hi"))), any(RunnableConfig.class)))
+                    .thenReturn(new AssistantMessage("hello"));
+
+            executor.execute(List.of(new UserMessage("hi")));
+
+            ArgumentCaptor<RunnableConfig> config = ArgumentCaptor.forClass(RunnableConfig.class);
+            org.mockito.Mockito.verify(reactAgent).call(eq(List.of(new UserMessage("hi"))), config.capture());
+            Object snapshot = config.getValue()
+                    .metadata(TenantContextSnapshot.METADATA_KEY)
+                    .orElse(null);
+            assertTrue(snapshot instanceof TenantContextSnapshot);
+            assertEquals(7L, ((TenantContextSnapshot) snapshot).getTenantId());
+            assertEquals("tenant_x", ((TenantContextSnapshot) snapshot).getSchema());
+        } finally {
+            TenantContext.clear();
+        }
     }
 }

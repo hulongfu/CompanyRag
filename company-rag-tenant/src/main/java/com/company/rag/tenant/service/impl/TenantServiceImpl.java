@@ -1,6 +1,7 @@
 package com.company.rag.tenant.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.company.rag.common.constant.EvalRegressionReportDdl;
 import com.company.rag.common.exception.BizException;
 import com.company.rag.common.security.SecurityUser;
 import com.company.rag.common.service.AuditLogService;
@@ -43,10 +44,22 @@ public class TenantServiceImpl implements TenantService {
         return tenantMapper.selectById(id);
     }
 
+    /**
+     * 归一化租户 schema 名：一律转小写。
+     * <p>
+     * PostgreSQL 对不带双引号的标识符（CREATE SCHEMA xxx）会折叠为小写，
+     * 若直接沿用含大写的 tenantCode 拼接值，则「实际 schema 名」与「存 sys_tenant.schema_name 的值」
+     * 会因大小写不一致而失配（如收敛器反查、search_path 设置均按 schema_name 精确匹配）。
+     * 统一转小写可保证两者始终一致，避免此类脏数据隐患。
+     */
+    String normalizeSchemaName(String tenantCode) {
+        return "tenant_" + tenantCode.toLowerCase();
+    }
+
     @Override
     @Transactional
     public void createTenantSchema(Tenant tenant) {
-        String schemaName = "tenant_" + tenant.getTenantCode();
+        String schemaName = normalizeSchemaName(tenant.getTenantCode());
         // 校验schema名称合法性，防止SQL注入
         if (!schemaName.matches("^[a-zA-Z_][a-zA-Z0-9_]*$")) {
             throw new BizException("非法Schema名称: " + schemaName);
@@ -56,86 +69,16 @@ public class TenantServiceImpl implements TenantService {
         jdbcTemplate.execute("CREATE SCHEMA IF NOT EXISTS " + schemaName);
 
         // 2. 在Schema中创建业务表
-        String createTableSql = """
-            CREATE TABLE IF NOT EXISTS %s.rag_document (
-                id BIGSERIAL PRIMARY KEY,
-                tenant_id BIGINT NOT NULL,
-                file_name VARCHAR(256) NOT NULL,
-                file_type VARCHAR(32),
-                file_size BIGINT,
-                file_path VARCHAR(512),
-                title VARCHAR(256),
-                chunk_count INTEGER DEFAULT 0,
-                status INTEGER DEFAULT 0,
-                error_msg TEXT,
-                create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-            CREATE TABLE IF NOT EXISTS %s.doc_chunk (
-                id BIGSERIAL PRIMARY KEY,
-                document_id BIGINT NOT NULL REFERENCES %s.rag_document(id) ON DELETE CASCADE,
-                tenant_id BIGINT NOT NULL,
-                chunk_index INTEGER NOT NULL,
-                content TEXT NOT NULL,
-                token_count INTEGER DEFAULT 0,
-                split_strategy VARCHAR(32),
-                create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-            CREATE TABLE IF NOT EXISTS %s.vector_store (
-                id UUID PRIMARY KEY,
-                content TEXT,
-                metadata JSONB,
-                embedding vector(1024)
-            );
-            -- 注意：vector_store 表仅依赖 Schema 隔离，不使用 RLS
-            -- 原因：PgVectorStore 通过 TenantAwareJdbcTemplate 直连 JDBC，
-            -- 不经过 MyBatis 拦截器设置 app.tenant_id，
-            -- 强加 RLS 会导致 current_tenant_id()=0，所有向量 tenant_id=0，
-            -- 造成跨租户数据泄露 + 旧数据不可见
-            CREATE TABLE IF NOT EXISTS %s.rag_session (
-                id BIGSERIAL PRIMARY KEY,
-                session_id VARCHAR(128) NOT NULL,
-                tenant_id BIGINT NOT NULL,
-                user_id BIGINT NOT NULL,
-                query TEXT NOT NULL,
-                answer TEXT,
-                context TEXT,
-                tokens_input INTEGER DEFAULT 0,
-                tokens_output INTEGER DEFAULT 0,
-                latency_ms INTEGER DEFAULT 0,
-                create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-            CREATE TABLE IF NOT EXISTS %s.rag_session_meta (
-                id BIGSERIAL PRIMARY KEY,
-                session_id VARCHAR(128) NOT NULL,
-                tenant_id BIGINT NOT NULL,
-                user_id BIGINT,
-                title VARCHAR(256),
-                last_query TEXT,
-                message_count INTEGER DEFAULT 0,
-                is_deleted BOOLEAN DEFAULT FALSE,
-                tags JSONB,
-                metadata JSONB,
-                create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-            """.formatted(schemaName, schemaName, schemaName, schemaName, schemaName, schemaName);
+        String createTableSql = buildCreateTableSql(schemaName);
         jdbcTemplate.execute(createTableSql);
 
+        // 2.5 回归评估快照表（spec §3.2.3）：独立 DDL 源（common 模块 EvalRegressionReportDdl.build），
+        //     以单参渲染 schema，避免与 buildCreateTableSql 的 23 个 %s 占位纠缠；
+        //     建表 + 2 索引 + RLS + policy + grant 一并落地（回归功能依赖该表，缺表会静默零回归）。
+        jdbcTemplate.execute(EvalRegressionReportDdl.build(schemaName));
+
         // 3. 创建索引
-        String createIndexSql = """
-            CREATE INDEX IF NOT EXISTS idx_%s_doc_tenant ON %s.rag_document(tenant_id);
-            CREATE INDEX IF NOT EXISTS idx_%s_chunk_document ON %s.doc_chunk(document_id);
-            CREATE INDEX IF NOT EXISTS idx_%s_chunk_content_trgm ON %s.doc_chunk USING gin (content gin_trgm_ops);
-            CREATE INDEX IF NOT EXISTS idx_%s_document_title_trgm ON %s.rag_document USING gin (title gin_trgm_ops);
-            CREATE INDEX IF NOT EXISTS idx_%s_session_tenant ON %s.rag_session(tenant_id, session_id);
-            CREATE INDEX IF NOT EXISTS idx_%s_vector_store_embedding ON %s.vector_store
-                USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64);
-            """.formatted(
-                schemaName, schemaName, schemaName, schemaName,
-                schemaName, schemaName, schemaName, schemaName,
-                schemaName, schemaName, schemaName, schemaName
-            );
+        String createIndexSql = buildCreateIndexSql(schemaName);
         jdbcTemplate.execute(createIndexSql);
 
         // 4. 初始化全文检索支持（添加 tsvector 列、索引、触发器）
@@ -222,6 +165,190 @@ public class TenantServiceImpl implements TenantService {
         tenantMapper.updateById(tenant);
 
         log.info("为租户[{}]创建独立Schema完成: {} | 已创建业务表和RLS策略", tenant.getTenantCode(), schemaName);
+    }
+
+    /**
+     * 组装新建租户 schema 的业务建表 SQL（含评估结果表）。
+     *
+     * 评价功能依赖 answer_eval_result 表；若漏建，该租户在线/手动评估的
+     * insert 会抛 "relation does not exist"，被落库侧静默吞掉，评估结果零落库。
+     * 因此新租户建表必须与启动迁移（SchemaMigrationConfig）保持一致补齐该表。
+     * 提取为 package-private 方法便于以纯单元测试校验 DDL 完整性。
+     */
+    String buildCreateTableSql(String schemaName) {
+        return """
+            CREATE TABLE IF NOT EXISTS %s.rag_document (
+                id BIGSERIAL PRIMARY KEY,
+                tenant_id BIGINT NOT NULL,
+                file_name VARCHAR(256) NOT NULL,
+                file_type VARCHAR(32),
+                file_size BIGINT,
+                file_path VARCHAR(512),
+                title VARCHAR(256),
+                chunk_count INTEGER DEFAULT 0,
+                status INTEGER DEFAULT 0,
+                error_msg TEXT,
+                create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS %s.doc_chunk (
+                id BIGSERIAL PRIMARY KEY,
+                document_id BIGINT NOT NULL REFERENCES %s.rag_document(id) ON DELETE CASCADE,
+                tenant_id BIGINT NOT NULL,
+                chunk_index INTEGER NOT NULL,
+                content TEXT NOT NULL,
+                token_count INTEGER DEFAULT 0,
+                split_strategy VARCHAR(32),
+                create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS %s.vector_store (
+                id UUID PRIMARY KEY,
+                content TEXT,
+                metadata JSONB,
+                embedding vector(1024)
+            );
+            -- 注意：vector_store 表仅依赖 Schema 隔离，不使用 RLS
+            -- 原因：PgVectorStore 通过 TenantAwareJdbcTemplate 直连 JDBC，
+            -- 不经过 MyBatis 拦截器设置 app.tenant_id，
+            -- 强加 RLS 会导致 current_tenant_id()=0，所有向量 tenant_id=0，
+            -- 造成跨租户数据泄露 + 旧数据不可见
+            CREATE TABLE IF NOT EXISTS %s.rag_session (
+                id BIGSERIAL PRIMARY KEY,
+                session_id VARCHAR(128) NOT NULL,
+                tenant_id BIGINT NOT NULL,
+                user_id BIGINT NOT NULL,
+                query TEXT NOT NULL,
+                answer TEXT,
+                context TEXT,
+                tokens_input INTEGER DEFAULT 0,
+                tokens_output INTEGER DEFAULT 0,
+                latency_ms INTEGER DEFAULT 0,
+                feedback SMALLINT NOT NULL DEFAULT 0,
+                create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS %s.rag_session_meta (
+                id BIGSERIAL PRIMARY KEY,
+                session_id VARCHAR(128) NOT NULL,
+                tenant_id BIGINT NOT NULL,
+                user_id BIGINT,
+                title VARCHAR(256),
+                last_query TEXT,
+                message_count INTEGER DEFAULT 0,
+                is_deleted BOOLEAN DEFAULT FALSE,
+                tags JSONB,
+                metadata JSONB,
+                create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS %s.answer_eval_result (
+                id BIGSERIAL PRIMARY KEY,
+                tenant_id BIGINT NOT NULL,
+                session_row_id BIGINT,
+                query TEXT,
+                context TEXT,
+                answer TEXT,
+                pass BOOLEAN NOT NULL,
+                score DOUBLE PRECISION NOT NULL,
+                relevancy_score DOUBLE PRECISION NOT NULL DEFAULT 0,
+                correctness_score DOUBLE PRECISION NOT NULL DEFAULT 0,
+                faithfulness_score DOUBLE PRECISION NOT NULL DEFAULT 0,
+                source VARCHAR(16) NOT NULL,
+                create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            ALTER TABLE %s.answer_eval_result ENABLE ROW LEVEL SECURITY;
+            ALTER TABLE %s.answer_eval_result FORCE ROW LEVEL SECURITY;
+            DROP POLICY IF EXISTS tenant_isolation_answer_eval ON %s.answer_eval_result;
+            CREATE POLICY tenant_isolation_answer_eval ON %s.answer_eval_result
+                FOR ALL
+                TO company_rag_app
+                USING (tenant_id = current_tenant_id())
+                WITH CHECK (tenant_id = current_tenant_id());
+            GRANT USAGE, SELECT ON SEQUENCE %s.answer_eval_result_id_seq TO company_rag_app;
+            CREATE TABLE IF NOT EXISTS %s.tool_approval_request (
+                id BIGSERIAL PRIMARY KEY,
+                tenant_id BIGINT NOT NULL,
+                tool_name VARCHAR(64) NOT NULL,
+                args_json TEXT,
+                session_id VARCHAR(128),
+                requester_user_id BIGINT,
+                status VARCHAR(16) NOT NULL,
+                result TEXT,
+                requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                decided_at TIMESTAMP
+            );
+            ALTER TABLE %s.tool_approval_request ENABLE ROW LEVEL SECURITY;
+            ALTER TABLE %s.tool_approval_request FORCE ROW LEVEL SECURITY;
+            DROP POLICY IF EXISTS tenant_isolation_tool_approval ON %s.tool_approval_request;
+            CREATE POLICY tenant_isolation_tool_approval ON %s.tool_approval_request
+                FOR ALL
+                TO company_rag_app
+                USING (tenant_id = current_tenant_id())
+                WITH CHECK (tenant_id = current_tenant_id());
+            GRANT USAGE, SELECT ON SEQUENCE %s.tool_approval_request_id_seq TO company_rag_app;
+            CREATE TABLE IF NOT EXISTS %s.document_pipeline_state (
+                task_id UUID PRIMARY KEY,
+                document_id BIGINT NOT NULL,
+                tenant_id BIGINT NOT NULL,
+                step VARCHAR(32) NOT NULL,
+                status VARCHAR(32) NOT NULL,
+                error_step VARCHAR(32),
+                error_msg TEXT,
+                retry_count INT NOT NULL DEFAULT 0,
+                create_time TIMESTAMP NOT NULL DEFAULT now(),
+                update_time TIMESTAMP NOT NULL DEFAULT now()
+            );
+            -- 文档入库分步状态表（异步分步 ETL 管线依赖，缺表会导致该租户上传即失败）
+            ALTER TABLE %s.document_pipeline_state ENABLE ROW LEVEL SECURITY;
+            ALTER TABLE %s.document_pipeline_state FORCE ROW LEVEL SECURITY;
+            DROP POLICY IF EXISTS tenant_isolation_pipeline ON %s.document_pipeline_state;
+            CREATE POLICY tenant_isolation_pipeline ON %s.document_pipeline_state
+                FOR ALL
+                TO company_rag_app
+                USING (tenant_id = current_tenant_id())
+                WITH CHECK (tenant_id = current_tenant_id());
+            """.formatted(
+                schemaName, schemaName, schemaName, schemaName,
+                schemaName, schemaName, schemaName, schemaName,
+                schemaName, schemaName, schemaName, schemaName,
+                schemaName, schemaName, schemaName, schemaName,
+                schemaName, schemaName, schemaName, schemaName,
+                schemaName, schemaName, schemaName
+            );
+    }
+
+    /**
+     * 组装新建租户 schema 的评估结果表索引与全文检索相关 DDL，此处仅建索引。
+     *
+     * 新增表后同步增加索引，并保证占位符数量与 .formatted 实参一致。
+     */
+    String buildCreateIndexSql(String schemaName) {
+        return """
+            CREATE INDEX IF NOT EXISTS idx_%s_doc_tenant ON %s.rag_document(tenant_id);
+            CREATE INDEX IF NOT EXISTS idx_%s_chunk_document ON %s.doc_chunk(document_id);
+            CREATE INDEX IF NOT EXISTS idx_%s_chunk_content_trgm ON %s.doc_chunk USING gin (content gin_trgm_ops);
+            CREATE INDEX IF NOT EXISTS idx_%s_document_title_trgm ON %s.rag_document USING gin (title gin_trgm_ops);
+            CREATE INDEX IF NOT EXISTS idx_%s_session_tenant ON %s.rag_session(tenant_id, session_id);
+            CREATE INDEX IF NOT EXISTS idx_%s_session_feedback ON %s.rag_session(tenant_id, feedback);
+            CREATE INDEX IF NOT EXISTS idx_%s_vector_store_embedding ON %s.vector_store
+                USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64);
+            CREATE INDEX IF NOT EXISTS idx_%s_answer_eval_tenant_time
+                ON %s.answer_eval_result (tenant_id, create_time DESC);
+            CREATE INDEX IF NOT EXISTS idx_%s_tool_approval_status
+                ON %s.tool_approval_request (tenant_id, status);
+            CREATE INDEX IF NOT EXISTS idx_%s_tool_approval_time
+                ON %s.tool_approval_request (tenant_id, requested_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_%s_pipeline_tenant
+                ON %s.document_pipeline_state (tenant_id);
+            CREATE INDEX IF NOT EXISTS idx_%s_pipeline_status
+                ON %s.document_pipeline_state (status);
+            """.formatted(
+                schemaName, schemaName, schemaName, schemaName,
+                schemaName, schemaName, schemaName, schemaName,
+                schemaName, schemaName, schemaName, schemaName,
+                schemaName, schemaName, schemaName, schemaName,
+                schemaName, schemaName, schemaName, schemaName,
+                schemaName, schemaName, schemaName, schemaName
+            );
     }
 
     @Override

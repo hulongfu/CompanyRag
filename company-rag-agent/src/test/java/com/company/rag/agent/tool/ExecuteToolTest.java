@@ -137,6 +137,30 @@ class ExecuteToolTest {
         }
     }
 
+    /**
+     * 复现生产 bug：Windows 反斜杠绝对路径的 python 命令被 parseCommand 破坏导致误拒。
+     * 正斜杠路径放行（基线），反斜杠路径修复前会被拒（parseCommand 把 \ 当转义符剥除）。
+     */
+    @Test
+    void testRejectUnsafePath_AllowSkillScript_WindowsBackslashPath() throws IOException {
+        Path root = Files.createTempDirectory("skill-root");
+        try {
+            Path script = newSkillScript(root, "browser-search", "browser_search.py");
+            ExecuteTool tool = skillTool(root);
+            String abs = script.toAbsolutePath().toString();
+            // 基线：正斜杠绝对路径应放行
+            String forward = "python " + abs.replace('\\', '/') + " '关键词'";
+            assertNull(ReflectionTestUtils.invokeMethod(tool, "rejectUnsafePath", forward),
+                    "正斜杠绝对路径脚本应放行");
+            // 修复目标：反斜杠绝对路径（Windows 风格）也应放行，不得被 parseCommand 破坏
+            String backward = "python " + abs + " '关键词'";
+            assertNull(ReflectionTestUtils.invokeMethod(tool, "rejectUnsafePath", backward),
+                    "Windows 反斜杠绝对路径脚本应放行，但被 rejectUnsafePath 误拒");
+        } finally {
+            deleteRecursively(root.toFile());
+        }
+    }
+
     @Test
     void testRejectUnsafePath_RejectCwdScript() throws IOException {
         // cwd/默认工作目录里生成的 py 不得执行（生成代码触发防护）

@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="zh" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>MCP 服务器状态</title>
+    <style>
+        body { font-family: sans-serif; margin: 24px; }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background: #f5f5f5; }
+        .off { color: #c00; } .on { color: #080; }
+    </style>
+</head>
+<body>
+<button onclick="location.href='/admin'">返回管理后台</button>
+<h2>MCP 服务器状态</h2>
+<table id="statusTable">
+    <thead>
+    <tr><th>clientId</th><th>连接状态</th><th>工具数</th><th>已注册工具</th><th>最近探活</th></tr>
+    </thead>
+    <tbody></tbody>
+</table>
+<!-- th:inline="none" 禁用 Thymeleaf 内联解析，避免将 JS 模板字符串当作表达式处理 -->
+<script th:inline="none">
+    const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+    async function load() {
+        const res = await fetch('/api/mcp/status', {
+            headers: { 'Authorization': 'Bearer ' + token }
+        });
+        const body = await res.json();
+        const tbody = document.querySelector('#statusTable tbody');
+        tbody.innerHTML = '';
+        (body.data || []).forEach(function (s) {
+            const tr = document.createElement('tr');
+            const cls = s.connected ? 'on' : 'off';
+            tr.innerHTML =
+                '<td>' + (s.clientId || '') + '</td>' +
+                '<td class="' + cls + '">' + (s.connected ? '已连接' : '未连接') + '</td>' +
+                '<td>' + (s.toolCount || 0) + '</td>' +
+                '<td>' + ((s.registeredToolNames || []).join(', ') || '—') + '</td>' +
+                '<td>' + (s.lastProbeResult || '—') + '</td>';
+            tbody.appendChild(tr);
+        });
+    }
+    load();
+</script>
+</body>
+</html>

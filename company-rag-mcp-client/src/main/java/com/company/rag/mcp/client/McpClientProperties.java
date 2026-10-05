@@ -21,6 +21,16 @@ public class McpClientProperties {
      * 客户端配置列表
      */
     private List<ClientConfig> clients = new ArrayList<>();
+
+    /**
+     * 探活间隔（毫秒），默认 10 分钟。作为周期性兜底，实时性由调用失败钩子承担。
+     */
+    private long healthCheckIntervalMs = 600000L;
+
+    /**
+     * 失败重连尝试间隔（毫秒），默认 3 分钟。
+     */
+    private long reconnectIntervalMs = 180000L;
     
     /**
      * 单个客户端配置

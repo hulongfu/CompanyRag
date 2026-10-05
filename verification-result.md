@@ -1,3 +1,33 @@
+# 验证结果 - Answer Evaluator 修复批次
+
+**验证时间：** 2026-09-XX  
+**验证类型：** Reactor 联合编译
+
+## E2E 验证结果
+
+### 测试执行
+
+```bash
+cd D:/tmp/CompanyRag
+mvn -o -DskipTests compile
+```
+
+### 测试结果
+
+```
+BUILD SUCCESS（reactor 联合编译全模块通过，exit=0）
+```
+
+### 验证结论
+
+**通过**。本批修复（为 `AnswerCorrectnessEvaluator` / `AnswerFaithfulnessEvaluator` / `AnswerRelevancyEvaluator` / `FaithfulnessChecker` 补 `@Component`、注释掉本地自定义 MCP client、plan 文档勾选调整）经 Reactor 全模块联合编译通过：
+
+1. ✅ 4 个评估器类补 `@Component`，Spring 容器可扫描到 Bean，评估链路装配不再报 `APPLICATION FAILED TO START`
+2. ✅ `application-dev.yml` 注释本地测试/文件系统 MCP client，避免本地缺 MCP Server 时的连接干扰
+3. ✅ 联合编译（非仅单模块）确认无 `recordEnd` 5 参等跨模块签名依赖问题
+
+---
+
 # 验证结果 - P0 阶段（快速止血）
 
 **验证时间：** 2026-08-31 09:07  

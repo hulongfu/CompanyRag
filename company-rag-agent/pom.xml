@@ -47,6 +47,17 @@
             <artifactId>spring-ai-alibaba-agent-framework</artifactId>
             <version>1.1.2.0</version>
         </dependency>
+        <!-- Reactor：流式链路直接使用 Flux/Sinks。此前仅靠 agent-framework 传递引入，
+             本模块要直接引用其类型必须显式声明（版本由 spring-boot-starter-parent 管理） -->
+        <dependency>
+            <groupId>io.projectreactor</groupId>
+            <artifactId>reactor-core</artifactId>
+        </dependency>
+        <!-- 熔断器注册表：供流式入口手动门控使用，不使用 @CircuitBreaker 注解 -->
+        <dependency>
+            <groupId>io.github.resilience4j</groupId>
+            <artifactId>resilience4j-spring-boot3</artifactId>
+        </dependency>
         <!-- JSqlParser - SQL 语法分析验证 -->
         <!-- 版本必须与 mybatis-plus-jsqlparser 依赖的版本一致 (5.0) -->
         <dependency>
@@ -58,6 +69,12 @@
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
             <optional>true</optional>
+        </dependency>
+        <!-- StepVerifier：流式链路的语义化断言（版本由 spring-boot-starter-parent 管理） -->
+        <dependency>
+            <groupId>io.projectreactor</groupId>
+            <artifactId>reactor-test</artifactId>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 </project>

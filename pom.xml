@@ -70,6 +70,13 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
+            <!-- 显式锁定 graph-core 版本：该依赖此前完全靠 BOM 传递，一旦 BOM 或依赖仲裁变化，
+                 流式链路的线程模型结论（同步 pull、跑在订阅线程）可能失效且无测试报警 -->
+            <dependency>
+                <groupId>com.alibaba.cloud.ai</groupId>
+                <artifactId>spring-ai-alibaba-graph-core</artifactId>
+                <version>${spring-ai-alibaba.version}</version>
+            </dependency>
             <dependency>
                 <groupId>com.baomidou</groupId>
                 <artifactId>mybatis-plus-spring-boot3-starter</artifactId>

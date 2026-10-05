@@ -4,6 +4,7 @@ import com.company.rag.tenant.model.Tenant;
 import com.company.rag.tenant.service.TenantService;
 import io.github.cdimascio.dotenv.Dotenv;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.ibatis.annotations.Mapper;
 import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.SpringApplication;
@@ -12,6 +13,7 @@ import org.springframework.cloud.function.context.config.ContextFunctionCatalogA
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.scheduling.annotation.EnableAsync;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 import java.util.List;
 
@@ -28,8 +30,10 @@ import java.util.List;
         org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration.class
 })
 @ComponentScan(basePackages = "com.company.rag")
-@MapperScan({"com.company.rag.tenant.mapper", "com.company.rag.document.mapper", "com.company.rag.rag.mapper"})
+@MapperScan({"com.company.rag.tenant.mapper", "com.company.rag.document.mapper", "com.company.rag.rag.mapper", "com.company.rag.rag.eval.answer", "com.company.rag.agent.approve"})
+@MapperScan(basePackages = "com.company.rag.document.pipeline", annotationClass = Mapper.class)
 @EnableAsync  // 启用异步方法支持（用于下载工具的异步清理）
+@EnableScheduling  // 启用定时调度（MCP 健康探活与失败重连）
 public class CompanyRagApplication {
 
     public static void main(String[] args) {

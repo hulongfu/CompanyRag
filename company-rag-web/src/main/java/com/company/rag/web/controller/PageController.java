@@ -29,6 +29,24 @@ public class PageController {
         return "admin";
     }
 
+    /** 回答评估中心页面 */
+    @GetMapping("/eval")
+    public String eval() {
+        return "eval";
+    }
+
+    /** 工具审批面板页面 */
+    @GetMapping("/tool-approval")
+    public String toolApproval() {
+        return "tool-approval";
+    }
+
+    /** MCP 服务器状态管理页面 */
+    @GetMapping("/mcp-status")
+    public String mcpStatus() {
+        return "mcp-status";
+    }
+
     @GetMapping("/audit-log.html")
     public String auditLog() {
         return "audit-log";

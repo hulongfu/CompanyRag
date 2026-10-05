@@ -118,6 +118,63 @@
 - **审计页面**：访问 `http://localhost:8080/audit-log.html`（需 admin 权限），筛选区支持租户/用户下拉选择、动作类型与时间区间过滤
 - **实现路径**：Superpowers 工作流（设计文档 + 6 项实现计划），REST API 见 `/api/admin/audit-logs`
 
+### 🤖 回答评估
+- **三维评估**：relevancy（相关性）/ correctness（正确性）/ faithfulness（忠实度）三个维度独立判定，合成综合 pass（三维全过）与平均 score（0~1）
+- **判定算法**：中文免分词的**字符二元组覆盖**度量（与 LLM 解耦的可观测规则式启发式）——relevancy 看回答命中查询的比例，faithfulness 看回答命中检索正文的比例（阈值 0.15 + `citations=` 来源门槛，防「答非所问仍判忠实」）
+- **双写存储**：Redis 即时缓冲层（租户键前缀 + 24h TTL）+ 每租户 Schema 的 `answer_eval_result` 表落库（RLS 租户隔离，含 `idx_answer_eval_tenant_time` 索引）
+- **两种触发**：手动评估（评估页/接口，source=manual）；在线自动评估（对话后异步，source=online，`rag.eval.enabled=true` 开启，默认关闭）
+- **落库铁律**：跨线程落库强制校验 `AnswerCase.tenantId` 非空，杜绝异步线程 ThreadLocal 丢失租户导致 `tenant_id=0` 永久不可见
+- **实现路径**：Superpowers 工作流，代码见 `company-rag-rag/.../eval/answer/`，评估页见 `eval.html`
+
+#### 🎯 答案质量闭环（反馈联动 + 数据集 + 回归 + 历史）
+- **概述**：在三维评估之上闭环「人工反馈 → 指标回归」链路——把带人工标签（`rag_session.feedback`：1=`+1` 好评、`-1` 差评、0=无反馈）的会话抽取成可评估样本集，对抽到的样本按当时的评估口径**重跑一遍**生成离线质量快照（`eval_regression_report`），并支持分页回看回归历史，回答质量是否随算法演进而提升由此可量化追踪。
+- **反馈联动（样本来源）**：`rag_session` 增 `feedback SMALLINT NOT NULL DEFAULT 0` 列 + `idx_<schema>_session_feedback` 索引；人工在会话尾打正/负反馈即成为回归样本的候选池
+- **数据集抽取** `POST /api/eval/dataset`：取 `feedback<>0` 的会话，`DISTINCT ON (session_row_id)` 每个会话仅取最新一条已评估记录，JOIN `answer_eval_result` + `rag_session`，时间范围 `from/to` 过滤，外层按 `create_time DESC LIMIT`；返回 `LabelledEvalSample[]`（query/context/answer/tenantId/persistedPass/persistedScore/humanLabel/sessionRowId/evalId/createTime）
+- **回归重跑** `POST /api/eval/regression`：对抽到的样本按一致性、`evaluateNoCache`（不写 Redis、不落 `answer_eval_result`，避免污染主链路）重算三维判定，落一份含 `datasetFingerprint`（样本 sessionRowId 排序拼接的 MD5）+ `ruleVersion` + TP/TN/FP/FN 四格与 accuracy/precision/recall/F1/negativeRecall/passRate/avgScore/三维一致率/persistedPassAgree 的快照
+- **一致性关键点**：重跑路径与手动/在线评估收敛到同一私有入口 `doEvaluate`（顺序 relevancy→correctness→faithfulness，score=三维布尔均值 0~1），保证「当时怎么判的、回归就当怎么判」
+- **回归并发安全**：Service 内按租户 `ConcurrentHashMap<Long,ReentrantLock>` 串行化（先判空、0 样本不建锁不落快照），`tryLock(30s)` 失败抛 409 `BizException`；多副本部署可将进程内锁升级为 Redisson RLock
+- **历史查询** `GET /api/eval/history`：手写 `LIMIT/OFFSET` + 独立 count 分页（`page<=0→1`、`pageSize<=0→50`、超 `historyPageMax` 收敛 200），返回 `{records, total, size, current}`
+- **表**：每租户 Schema 的 `eval_regression_report`（HNSW 无关，RLS 租户隔离 + `idx_..._eval_rep_tenant_time` 索引），迁移由 `SchemaMigrationConfig` 第 6 份 runner `migrateEvalRegressionReportTable` 对所有存量租户 Schema 执行
+- **配置**（`rag.eval.*`，见 `EvalProperties`）：`dataset-limit-default=50`/`dataset-limit-max=200`/`history-page-max=200`/`regression-lock-timeout-ms=30000`/`rule-version`（`enabled=true` 时必填）
+- **权限与租户**：三接口均 `@PreAuthorize(hasAnyRole('ADMIN','USER'))`（viewer 只读不可评），租户经 `TenantContext`（JWT 过滤器解析，不读 `X-Tenant-Id`），`dataset`/`regression` 0 样本返回 `R.fail(200,"无匹配样本")`（data=null 语义）
+- **实现路径**：Superpowers 工作流（spec `2026-09-27-answer-quality-loop-design.md` v5.15 + plan），代码见 `company-rag-rag/.../eval/answer/`（`AnswerEvaluationService` 的 `dataset/regression/history`、`EvalRegressionReportEntity/Mapper`），页面入口见 `eval.html`「回归闭环」卡片
+
+### 🛂 工具审批门（Agent 高危工具人工确认）
+- **能力**：Agent 强制调用某些高危工具前，落一条 PENDING 审批单并同步阻塞等待，人工 approve 才继续执行、deny 则返回拒绝文案给 LLM
+- **判定规则**：总开关关闭时全部工具直接执行（向后兼容、主链路零变化）；开启后 = **高危兜底集** 或 工具自身的 `requiresApproval()`
+  - 高危兜底集默认含 `execute`（`ExecuteTool`），即使工具未声明 `requiresApproval` 也被强制拦截
+  - 工具声明 `requiresApproval()=true` 也可被识别，见 `AgentTool` 接口
+- **并发安全**：`approve`/`deny` 采用「原子条件更新」(`UPDATE ... WHERE id=? AND status=PENDING`)，以影响行数判定成败，天然幂等、杜绝并发覆盖
+- **超时兜底**：同步等待超时自动转 DENIED（`agent.approval.timeout-seconds`），并有后台收敛器 `ToolApprovalConverger` 兜底清理会话外残留 PENDING 单
+- **租户隔离**：审批单落每租户 Schema（RLS 行级安全），接口按 `X-Tenant-Id` 头隔离当前租户
+- **配置**（`application.yml` / `.env`）：
+
+```bash
+AGENT_APPROVAL_ENABLED=false            # 总开关（默认关，开启才走审批门）
+AGENT_APPROVAL_TIMEOUT=300              # 同步等待人工审批上限（秒），超时转 DENIED
+AGENT_APPROVAL_POLL_INTERVAL=500        # 等待期间轮询 DB 状态间隔（毫秒）
+AGENT_APPROVAL_HIGH_RISK_TOOLS=execute  # 高危兜底集（逗号分隔工具名）
+```
+
+- **使用步骤**：将 `AGENT_APPROVAL_ENABLED` 设为 `true` 重启应用 → Agent 命中 `execute` 等工具时自动落单阻塞 → 管理员在审批页 `http://localhost:8080/tool-approval` 查看待审批列表并 approve / deny
+- **API**（`/api/tool-approval`）：
+  - `GET /api/tool-approval/pending`：当前租户待审批列表（含参数快照）
+  - `POST /api/tool-approval/{id}/approve`：批准，唤醒等待线程继续执行
+  - `POST /api/tool-approval/{id}/deny`（body 可选 reason）：拒绝，返回拒绝文案
+- **实现路径**：Superpowers 工作流，代码见 `company-rag-agent/.../approve/`（`ToolApprovalService` / `ToolApprovalConverger`），审批页见 `tool-approval.html`
+
+### 🛰️ Agent 流式输出与执行轨迹（Stream & Trace）
+- **能力**：为 Agent 主链路补上「边生成边推送」的流式增量输出，并提供「推理段 / 工具段 / 技能段」分层的实时执行轨迹，以 SSE 端点对外暴露；不引入新框架，不改动既有阻塞端点。
+- **底层原理**：ReactAgent 自身不暴露 `stream()`，但其基础层 `CompiledGraph` 提供 `stream(inputs, RunnableConfig)` 返回 `Flux<NodeOutput>`——**模型 token 增量 / 工具调用起止 / 技能钩子事件，框架底层本来就在发**，只是阻塞实现用 `call()` 全部吞掉了。流式实现即消费这些事件（`StreamingExecutor` 的池任务内 `getCompiledGraph().stream(...)` + `NodeOutputMapper` 映射），当前配置下 `stream()` 全程同步同线程执行，`TenantContext` / `ToolCallRecorder` 两个 ThreadLocal 在线程内全程有效。
+- **事件契约**（SSE `POST /api/chat/stream`）：`TOOL_START`(`toolName`) → `TOOL_END`(`toolName,durationMs`) 与 `ANSWER_DELTA`(`text`) 交错 → 终帧 `DONE`。`TOOL_END.durationMs` 由 `StreamingAgentExecutor` 池任务内局部 `Map<String, Deque<Long>>` 做 FIFO 配对计时补全（同名工具并行调用不可用单值 Map，会互相覆盖 key）；`NodeOutputMapper` 为全项目唯一耦合 graph 框架类型（`NodeOutput`/`StreamingOutput`/`OutputType`）的类，且**必须无状态**（跨帧配对状态一律放调用方池任务内局部变量，防并发请求串号）。
+- **工具轨迹**：框架不发独立的「工具开始」帧，`TOOL_START` 由 `AGENT_MODEL_FINISHED` 帧的 `AssistantMessage.getToolCalls()` 补发；`TOOL_END` 从 `ToolResponseMessage.getResponses().name()` 取真实工具名（不应从 node 名截取——ReactAgent 工具节点名恰等于常量 `AGENT_TOOL_NAME`、无后缀）；skill 钩子节点（`AGENT_HOOK_*`）绝不可误判为工具。工具名无法解析时整帧跳过，不下发空串。
+- **落库与评估语义**（宁缺不残）：`saveConversation` 与在线评估**只在收到 `DONE` 时触发**（controller 侧 `doOnNext`）；客户端在 `DONE` 前断开 → 不落库、不评估，避免半截答案污染会话记忆与评估统计。轨迹随最终结果落 `rag_session.context` 列，历史会话可回看执行过程，**不新增列、不改表结构**。
+- **线程模型与取消**：流式专用线程池（复用 `rag.agent.executor.*` 参数，与阻塞超时池**分离**，长期占用含审批等待也不互相饿死）；池满/熔断打开等**建流前**失败由方法体内同步抛出 → controller 转 `R.fail` 标准响应（不建半开 SSE，守统一响应惯例），不依赖 `subscribeOn`（否则池拒绝发生在订阅后才无法降级）。客户端断线：`doOnCancel` 置 `cancelled` 标志，池任务每次事件先检查、为真即终止且**不发 DONE**，`finally` 中 `recorder.clearRecords()` + `TenantContext.clear()` 防线程池串扰。
+- **熔断（建流入口手动门控）**：流式入口用 `circuitBreakerRegistry.circuitBreaker("rag-agent")` 手动 `tryAcquirePermission()`，熔断打开即抛 `CallNotPermittedException` → `R.fail`；建流成功立即 `onSuccess` 归还许可（不等流结束，防 HALF_OPEN 探测名额被长流占满）。统计口径为「建流阶段成败率」，**不衡量流内失败率**（流内失败已优雅降级为 `ERROR` 事件，且 `onErrorResume` 会令流以 `onComplete` 正常终止，挂回调记账会被静默记成成功），流内失败走独立计数器 `rag.agent.stream.error`。
+- **配置**（`rag.agent.stream.*`，基段 `application.yml` 显式写出）：`enabled`（默认 `false`，关闭时端点命中返回 `R.fail(503)` 而非 404）；`idle-timeout-seconds`（默认 `60`，相邻事件最大间隔，超时推 `ERROR` 并正常结束；真机 6 轮工具任务曾撞过 60s，生产建议调至 `180`）；整体上限复用 `rag.agent.executor.timeout-minutes`。
+- **API**：`POST /api/chat/stream`（SSE，成功 `Flux<AgentStreamEvent>` → `text/event-stream`；失败返回 `R<T>` JSON；不声明 `produces`，由返回类型走 `ReactiveTypeHandler` 自动识别）。前端 `index.html` 以 `fetch` + `getReader` 接入（原生 `EventSource` 不支持 POST 与自定义 `Authorization`/`X-Tenant-Id` 头），渲染工具轨迹卡片并支持 DONE 后服务端断连不误报网络错误。
+- **实现路径**：Superpowers 工作流，spec 见 `docs/superpowers/specs/2026-10-01-agent-stream-and-trace-design.md` v1.1，代码见 `company-rag-agent/.../stream/`（`AgentStreamEvent` / `AgentStreamEventType` / `NodeOutputMapper`）、`company-rag-agent/.../executor/StreamingAgentExecutor.java`、`ChatController#postChatStream`；测试见 `NodeOutputMapperTest` / `StreamingAgentExecutorStreamTest` / `ChatControllerStreamTest`
+
 ## 技术栈
 
 | 组件 | 技术选型 |
@@ -270,6 +327,67 @@ psql -U postgres -d company_rag -c "SELECT tenant_code, tenant_name FROM sys_ten
 - 📋 默认租户供 admin 首次登录使用，后续可通过租户管理创建其他租户
 - 🔒 admin 账号是平台级超级管理员，关联所有创建的租户
 - 🔄 Flyway 配置见 `application.yml` 中的 `flyway.*` 配置项
+
+---
+
+#### 5.0.1 手动执行 V4 迁移（RAG 文档 ETL 健壮性改造）
+
+> **注意：V4 之后的迁移 Flyway 已被禁用，需手动执行。** V1/V2/V3 由 Flyway 自动执行；**V4 不在 Flyway 管理范围内**，首次启动前或数据模型升级时需手动执行。
+
+**为何不使用 Flyway 管理 V4 之后的迁移？**
+
+Flyway 是成熟可靠的数据库迁移工具，以上禁用属于**针对本项目多租户架构的工程取舍**，主要原因如下：
+
+1. **多租户场景 Flyway 覆盖不到**：每个租户一个 schema（`tenant_*`），迁移须用 `DO $$ ... plpgsql` 循环动态 `EXECUTE format(...)` 遍历所有 schema。Flyway 的迁移模型是"对整个数据库跑一次固定脚本"，对"动态遍历 N 个 schema"这类操作是弱项——它只记录一次成功，无法细粒度感知每个 schema 的执行状态。
+2. **幂等 vs 版本绑定冲突**：本项目迁移脚本（如 V4）用 `CREATE TABLE IF NOT EXISTS / DROP IF EXISTS / ADD COLUMN IF NOT EXISTS` 实现幂等、可重复执行；而 Flyway 的版本机制是"已记录即跳过、改动须新增版本"，与"脚本可安全重跑"的思路不匹配。
+3. **运维侧可控性**：手动执行便于 DBA 在 psql/DBeaver 中先备份、再审查、再执行，尤其对 V4 这类含存量去重/回填（有破坏性操作）的脚本，可显著降低误操作风险。
+4. **兼容性排除**：启动类在 `CompanyRagApplication` 中通过 `@SpringBootApplication(exclude = FlywayAutoConfiguration.class)` 主动排除（详见 `application.yml` 注），规避了 Spring Cloud Function 与 Spring Boot 3.4.4 集成时的兼容性问题。
+
+> 若日后需要纳管迁移，恢复方式：从 `CompanyRagApplication` 的 exclude 中移除 `FlywayAutoConfiguration.class`，并确保迁移版本序号连续。
+
+**V4 脚本作用**（作用于每个租户 schema，脚本内已做幂等，可重复执行）：
+- 1️⃣ 新建 `document_pipeline_state` 任务状态表（支撑异步分步 ETL 管线）+ RLS 策略
+- 2️⃣ 为 `doc_chunk` 增加 `(document_id, chunk_index)` 唯一约束（幂等切分）
+- 3️⃣ 为 `vector_store` 增加 `chunk_id` 列 + 部分唯一索引（幂等向量化）
+
+**执行前必须先备份**（脚本含存量 `doc_chunk` 去重与 `vector_store` 回填，破坏存量不可恢复）：
+
+**Linux/macOS：**
+```bash
+# 1. 备份存量库（容器方式）
+docker exec -e PGPASSWORD='<POSTGRES_PASSWORD>' docker-pgvector-1 \
+  pg_dump -U postgres -d company_rag -Fc -f /tmp/company_rag_backup.dump
+# 备份文件留在容器内 /tmp/company_rag_backup.dump，验证后可删除
+
+# 2. 执行 V4 迁移
+docker exec -i docker-pgvector-1 psql -U postgres -d company_rag \
+  < sql/migrations/V4__rag_etl_pipeline.sql
+```
+
+**Windows PowerShell：**
+```powershell
+# 1. 备份存量库（容器方式）
+docker exec -e PGPASSWORD='<POSTGRES_PASSWORD>' docker-pgvector-1 `
+  pg_dump -U postgres -d company_rag -Fc -f /tmp/company_rag_backup.dump
+
+# 2. 执行 V4 迁移
+Get-Content -Raw sql/migrations/V4__rag_etl_pipeline.sql |
+  docker exec -i docker-pgvector-1 psql -U postgres -d company_rag
+```
+
+**验证迁移结果**（确认每个租户 schema 都已建好）：
+```bash
+docker exec docker-pgvector-1 psql -U postgres -d company_rag -c \
+  "SELECT schemaname, tablename FROM pg_tables WHERE tablename = 'document_pipeline_state' ORDER BY 1;"
+
+docker exec docker-pgvector-1 psql -U postgres -d company_rag -c \
+  "SELECT schemaname, conname FROM pg_constraint c JOIN pg_class t ON t.oid=c.conrelid JOIN pg_namespace n ON n.oid=t.relnamespace WHERE c.conname='uq_doc_chunk_doc_idx' ORDER BY 1;"
+
+docker exec docker-pgvector-1 psql -U postgres -d company_rag -c \
+  "SELECT schemaname, indexname FROM pg_indexes WHERE indexname='uq_vector_store_chunk' ORDER BY 1;"
+```
+
+> 说明：`<POSTGRES_PASSWORD>` 为 `.env` 中的 `POSTGRES_PASSWORD`。若在宿主机装有 psql，亦可用 `psql -U postgres -d company_rag -f sql/migrations/V4__rag_etl_pipeline.sql` 直接执行；确认无误后可删除容器内备份 `docker exec docker-pgvector-1 rm -f /tmp/company_rag_backup.dump`。
 
 ---
 
@@ -1146,7 +1264,8 @@ company-rag/
 │   ├── prompt/                # Prompt模板管理
 │   └── observability/         # Prometheus指标埋点
 ├── company-rag-agent/         # Agent模块(MCP工具)
-│   ├── tool/                  # 数据库查询/代码检索/API文档工具
+│   ├── tool/                  # 数据库查询/代码检索/API文档/执行工具
+│   ├── approve/               # 工具审批门(审批单/服务/超时收敛器)
 │   └── service/               # Agent编排服务
 ├── company-rag-web/           # Web层(Controller + 前端页面)
 ├── company-rag-bootstrap/     # 启动模块(配置/入口)
@@ -1246,6 +1365,7 @@ flyway:
 | vector_store | 向量存储(PGVector) | 是(metadata->>'tenant_id'过滤) |
 | rag_session_meta | 会话元信息 | 是(tenant_id隔离) |
 | rag_session | 对话历史明细 | 是(tenant_id隔离) |
+| answer_eval_result | 回答评估结果（relevancy/correctness/faithfulness 三维） | 是(tenant_id隔离, RLS) |
 
 ### PGVector 说明
 

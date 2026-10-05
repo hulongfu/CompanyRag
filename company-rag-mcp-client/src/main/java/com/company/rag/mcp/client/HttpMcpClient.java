@@ -89,10 +89,15 @@ public class HttpMcpClient implements McpClient {
             JsonRpcResponse response = sendRequest(request);
             
             if (response.getError() != null) {
-                throw new RuntimeException("获取工具列表失败：" + response.getError().getMessage());
+                // 保留远端返回的 JSON-RPC 错误码，供调用方（自愈逻辑）决策
+                throw new McpToolException(response.getError().getCode(),
+                        "获取工具列表失败：" + response.getError().getMessage());
             }
             
             return convertToToolDefinitions(response.getResult());
+        } catch (McpToolException e) {
+            // 已带错误码的异常直接上抛，避免被通用包装吞掉错误码
+            throw e;
         } catch (Exception e) {
             log.error("MCP Client [{}] 获取工具列表失败", clientId, e);
             throw new RuntimeException("获取工具列表失败：" + e.getMessage(), e);
@@ -117,14 +122,37 @@ public class HttpMcpClient implements McpClient {
             JsonRpcResponse response = sendRequest(request);
             
             if (response.getError() != null) {
-                throw new RuntimeException("调用工具 " + toolName + " 失败：" + response.getError().getMessage());
+                // 保留远端返回的 JSON-RPC 错误码，供调用方（自愈逻辑）决策
+                throw new McpToolException(response.getError().getCode(),
+                        "调用工具 " + toolName + " 失败：" + response.getError().getMessage());
             }
             
             return response.getResult();
+        } catch (McpToolException e) {
+            // 已带错误码的异常直接上抛，避免被通用包装吞掉错误码
+            throw e;
         } catch (Exception e) {
             log.error("MCP Client [{}] 调用工具 {} 失败", clientId, toolName, e);
             throw new RuntimeException("调用工具 " + toolName + " 失败：" + e.getMessage(), e);
         }
+    }
+    
+    @Override
+    public boolean ping() {
+        try {
+            // 复用现有连接探活：能成功拉取工具列表即视为可达
+            listTools();
+            return true;
+        } catch (Exception e) {
+            log.warn("MCP Client [{}] 探活失败：{}", clientId, e.getMessage());
+            return false;
+        }
+    }
+
+    @Override
+    public List<McpToolDefinition> listToolsRemote() {
+        // HttpMcpClient 无本地工具缓存，listTools() 每次均直连远端，故直接复用
+        return listTools();
     }
     
     /**

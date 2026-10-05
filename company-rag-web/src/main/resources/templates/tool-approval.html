@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>工具审批 - CompanyRag</title>
+    <link rel="stylesheet" href="https://cdn.staticfile.net/element-plus/2.6.1/index.css">
+    <style>
+        body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f7fa; }
+        .app-header { height: 56px; background: #303133; color: white; display: flex; align-items: center; padding: 0 24px; justify-content: space-between; }
+        .container { max-width: 1200px; margin: 24px auto; padding: 0 16px; }
+        .card { background: white; border-radius: 12px; padding: 20px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+        .card h3 { font-size: 16px; margin-bottom: 16px; }
+        .muted { color: #909399; font-size: 12px; }
+        .hdr-btn{display:inline-flex;align-items:center;justify-content:center;padding:5px 15px;height:32px;border-radius:16px;border:1px solid rgba(255,255,255,.5);background:rgba(255,255,255,.15);color:#fff !important;font-size:13px;cursor:pointer;transition:all .2s;white-space:nowrap;line-height:1;margin-left:8px}
+        .hdr-btn:hover{background:rgba(255,255,255,.3);border-color:rgba(255,255,255,.8);color:#fff !important}
+        .args-cell { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: bottom; }
+        .detail-block { margin-bottom: 12px; }
+        .detail-block .t { font-size: 12px; color: #909399; margin-bottom: 4px; }
+        .detail-block .c { background: #f5f7fa; border-radius: 6px; padding: 10px; white-space: pre-wrap; font-size: 13px; word-break: break-all; max-height: 200px; overflow: auto; }
+    </style>
+</head>
+<body>
+<div id="app">
+    <header class="app-header">
+        <h1>🛡️ CompanyRag 工具审批</h1>
+        <div>
+            <button class="hdr-btn" @click="goHome">← 返回首页</button>
+            <button class="hdr-btn" @click="goAdmin">⚙️ 管理后台</button>
+        </div>
+    </header>
+    <div class="container">
+        <div class="card">
+            <h3>
+                📋 待审批列表
+                <span class="muted">（每 5s 自动刷新，共 {{ list.length }} 条）</span>
+            </h3>
+            <el-table :data="list" v-loading="loading" border stripe>
+                <el-table-column prop="id" label="ID" width="70" />
+                <el-table-column label="工具" width="120">
+                    <template #default="{ row }"><el-tag type="warning" size="small">{{ row.toolName }}</el-tag></template>
+                </el-table-column>
+                <el-table-column label="参数快照" min-width="260">
+                    <template #default="{ row }">
+                        <span class="args-cell" :title="row.argsJson">{{ row.argsJson }}</span>
+                    </template>
+                </el-table-column>
+                <el-table-column label="发起用户" width="100">
+                    <template #default="{ row }">{{ row.requesterUserId || '-' }}</template>
+                </el-table-column>
+                <el-table-column label="会话" width="140">
+                    <template #default="{ row }"><span class="muted">{{ row.sessionId || '-' }}</span></template>
+                </el-table-column>
+                <el-table-column label="申请时间" width="170">
+                    <template #default="{ row }">{{ formatTime(row.requestedAt) }}</template>
+                </el-table-column>
+                <el-table-column label="操作" width="200" fixed="right">
+                    <template #default="{ row }">
+                        <el-button type="success" size="small" @click="approve(row)">批准</el-button>
+                        <el-button type="danger" size="small" @click="deny(row)">拒绝</el-button>
+                        <el-button size="small" @click="showDetail(row)">详情</el-button>
+                    </template>
+                </el-table-column>
+            </el-table>
+            <el-alert v-if="!loading && list.length === 0" type="success" :closable="false" show-icon
+                title="暂无待审批的工具调用。" style="margin-top:16px;"></el-alert>
+        </div>
+    </div>
+
+    <!-- 详情弹窗 -->
+    <el-dialog v-model="detailVisible" title="审批单详情" width="60%" top="5vh">
+        <div class="detail-block" v-if="detail">
+            <div class="t">工具名</div>
+            <div class="c">{{ detail.toolName }}</div>
+            <div class="t" style="margin-top:10px;">参数快照</div>
+            <div class="c">{{ detail.argsJson }}</div>
+            <div class="t" style="margin-top:10px;">发起用户 / 会话</div>
+            <div class="c">{{ detail.requesterUserId || '-' }} / {{ detail.sessionId || '-' }}</div>
+            <div class="t" style="margin-top:10px;">申请时间</div>
+            <div class="c">{{ formatTime(detail.requestedAt) }}</div>
+        </div>
+        <template #footer>
+            <el-button type="success" @click="detail && approve(detail)">批准</el-button>
+            <el-button type="danger" @click="detail && deny(detail)">拒绝</el-button>
+            <el-button @click="detailVisible = false">关闭</el-button>
+        </template>
+    </el-dialog>
+</div>
+<script src="https://cdn.staticfile.net/vue/3.4.21/vue.global.prod.min.js"></script>
+<script src="https://cdn.staticfile.net/element-plus/2.6.1/index.full.min.js"></script>
+<script src="https://cdn.staticfile.net/element-plus-icons-vue/2.3.1/global.min.js"></script>
+<script>
+const { createApp, ref, onMounted, onUnmounted } = Vue;
+createApp({
+    setup() {
+        const currentTenantId = ref(localStorage.getItem('currentTenantId') || '1');
+        const list = ref([]);
+        const loading = ref(false);
+        const detailVisible = ref(false);
+        const detail = ref(null);
+        let timer = null;
+
+        function getAuthHeaders() {
+            var token = localStorage.getItem('token');
+            var headers = { 'X-Tenant-Id': currentTenantId.value };
+            if (token) headers['Authorization'] = 'Bearer ' + token;
+            return headers;
+        }
+
+        async function apiRequest(url, options = {}) {
+            try {
+                if (!options.headers) options.headers = {};
+                if (!options.headers['X-Tenant-Id']) options.headers['X-Tenant-Id'] = currentTenantId.value;
+                var token = localStorage.getItem('token');
+                if (token && !options.headers['Authorization']) options.headers['Authorization'] = 'Bearer ' + token;
+                const res = await fetch(url, options);
+                if (res.status === 401) {
+                    ElementPlus.ElMessage.error('登录已过期，请重新登录');
+                    window.location.href = '/login';
+                    return null;
+                }
+                const json = await res.json();
+                if (res.status === 403) {
+                    ElementPlus.ElMessage.error(json && json.msg ? json.msg : '无权限执行该操作');
+                    return null;
+                }
+                return json;
+            } catch(e) { console.error('API 请求失败', e); return null; }
+        }
+
+        function formatTime(t) {
+            if (!t) return '-';
+            return String(t).replace('T', ' ').substring(0, 19);
+        }
+
+        async function loadPending() {
+            loading.value = true;
+            try {
+                const json = await apiRequest('/api/tool-approval/pending', { headers: { 'X-Tenant-Id': currentTenantId.value } });
+                if (json && json.code === 200) list.value = json.data || [];
+            } catch(e) { console.error('加载待审批列表失败', e); }
+            finally { loading.value = false; }
+        }
+
+        async function approve(row) {
+            const json = await apiRequest('/api/tool-approval/' + row.id + '/approve', {
+                method: 'POST',
+                headers: { 'X-Tenant-Id': currentTenantId.value }
+            });
+            if (json && json.code === 200) {
+                ElementPlus.ElMessage.success('已批准 #' + row.id + '，等待线程继续执行');
+                detailVisible.value = false;
+                loadPending();
+            } else if (json) {
+                ElementPlus.ElMessage.error('批准失败：' + (json.msg || ''));
+            }
+        }
+
+        async function deny(row) {
+            try {
+                const { value, action } = await ElementPlus.ElMessageBox.prompt(
+                    '请输入拒绝原因（可为空）', '拒绝 #' + row.id,
+                    { inputPlaceholder: '拒绝原因', confirmButtonText: '确认拒绝', cancelButtonText: '取消', type: 'warning' }
+                );
+                const reason = (value || '').trim();
+                const json = await apiRequest('/api/tool-approval/' + row.id + '/deny', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'text/plain; charset=UTF-8', 'X-Tenant-Id': currentTenantId.value },
+                    body: reason
+                });
+                if (json && json.code === 200) {
+                    ElementPlus.ElMessage.success('已拒绝 #' + row.id);
+                    detailVisible.value = false;
+                    loadPending();
+                } else if (json) {
+                    ElementPlus.ElMessage.error('拒绝失败：' + (json.msg || ''));
+                }
+            } catch(e) { /* 用户取消 */ }
+        }
+
+        function showDetail(row) {
+            detail.value = row;
+            detailVisible.value = true;
+        }
+
+        onMounted(() => {
+            loadPending();
+            timer = setInterval(loadPending, 5000);
+        });
+        onUnmounted(() => { if (timer) clearInterval(timer); });
+
+        return {
+            currentTenantId, list, loading, detailVisible, detail,
+            formatTime, loadPending, approve, deny, showDetail,
+            goHome: () => { window.location.href = '/'; },
+            goAdmin: () => { window.location.href = '/admin'; }
+        };
+    }
+}).use(ElementPlus).mount('#app');
+</script>
+</body>
+</html>

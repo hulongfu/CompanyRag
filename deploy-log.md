@@ -2,6 +2,276 @@
 
 ## Git Push
 
+### 最新推送（2026-09-23 MCP 动态工具注册后 ReactAgent 实时刷新 → gitee 成功 / github 成功）
+
+- commit_type:            BugFix
+- task_id:                0000
+- task_name:              MCP动态工具注册与ReactAgent工具实时刷新
+- commit_hash:            083ea0d660fb237d7d579a5e9b3fa6ca31c275a5
+- branch:                 feat/answer-evaluator（已有分支）
+- remote:                 gitee（成功：b78e795..083ea0d）；origin(github)（成功：b78e795..083ea0d，push 返回 0）
+- staged_files:
+  - company-rag-mcp-client/.../McpClientRegistry.java（修改 - 主构造加 @Autowired）
+  - company-rag-mcp-client/.../McpFailureHandler.java（修改）
+  - company-rag-mcp-client/.../McpHealthScheduler.java（修改）
+  - company-rag-mcp-client/src/test/.../McpClientRegistrySelfHealTest.java（修改）
+  - company-rag-mcp-client/src/test/.../McpFailureHandlerTest.java（修改）
+  - company-rag-mcp-client/src/test/resources/mockito-extensions/org.mockito.plugins.MockMaker（新增）
+  - company-rag-common/.../event/McpToolRegistryChangedEvent.java（新增）
+  - company-rag-rag/.../config/ReactAgentToolRefresher.java（新增）
+  - company-rag-rag/src/test/.../config/ReactAgentToolRefresherTest.java（新增）
+- commit_message:         BugFix:0000_MCP动态工具注册与ReactAgent工具实时刷新：add ReactAgentToolRefresher and McpToolRegistryChangedEvent; refresh llmNode chatOptions tools; add self-heal tests
+- commit_command:         git commit -m "BugFix:0000_MCP动态工具注册与ReactAgent工具实时刷新：add ReactAgentToolRefresher and McpToolRegistryChangedEvent; refresh llmNode chatOptions tools; add self-heal tests"
+- commit_exit_code:       0（083ea0d，9 files changed, 352 insertions(+), 6 deletions(-)）
+- push_command:           git push -u gitee HEAD:feat/answer-evaluator; git push origin HEAD:feat/answer-evaluator; git ls-remote gitee/origin 校验
+- push_exit_code:         gitee=0（b78e795..083ea0d）；origin=0（b78e795..083ea0d）
+- remote_head_check_command: git rev-parse HEAD && git ls-remote gitee feat/answer-evaluator && git ls-remote origin feat/answer-evaluator
+- remote_head:            本地 / gitee 两处 ls-remote = 083ea0d（一致）；origin(github) push 返回成功并更新本地 origin/feat/answer-evaluator tracking ref 为 083ea0d，但校验时 github 网络不可达（443 连接超时）未能在线 ls-remote 复核，本地 refs/remotes/origin 与 push 输出 b78e795..083ea0d 为佐证
+- result:                 本地提交 083ea0d 已推送 gitee（ls-remote 在线确认一致）与 github（push 成功、本地 tracking ref 一致，仅因网络不可达缺 github 在线 ls-remote 佐证）。变更内容：修复 MCP 动态工具注册后 ReactAgent 模型看不到新工具的缺陷——反编译 AgentLlmNode 确认 LLM 调用工具来源是 Bean 构建时固化的 private chatOptions(ToolCallingChatOptions)，filterToolCallbacks 以它与节点 toolCallbacks 求交集，旧 snapshot 恒只剩 8 个内置工具、新注册的 custom_read_* 被过滤；新增 ReactAgentToolRefresher 监听 McpToolRegistryChangedEvent，刷新时除更新节点 toolCallbacks 外，经反射调用 llmNode.chatOptions.setToolCallbacks 同步固化工具集，使模型能见到动态新增工具；工具执行侧 AgentToolNode 本就按 toolCallbacks 解析满足。另 McpClientRegistry 主构造补 @Autowired 修复 Spring 无默认构造器报错。验证（窄范围）：company-rag-rag 单测 ReactAgentToolRefresherTest（扩充断言 llmNode.chatOptions 同步刷新）BUILD SUCCESS、Tests run: 2。
+
+### 最新推送（2026-09-20 在线评估仅对真实 RAG 检索的回答触发 → gitee 成功 / github 成功）
+
+- commit_type:            Task
+- task_id:                0000
+- task_name:              untitled
+- commit_hash:            92ded7e8338b4abb83f23d430cd637ac2273e3bb
+- branch:                 feat/answer-evaluator（已有分支）
+- remote:                 gitee（成功：8620f3f..92ded7e）；origin(github)（成功：8620f3f..92ded7e，本次网络正常）
+- staged_files:
+  - company-rag-agent/.../service/AgentResult.java（修改 - 新增 ragUsed 布尔位 + @Builder）
+  - company-rag-common/.../tool/ToolCallRecorder.java（修改 - 新增 usedTool(toolName) 精确判定本次是否调用过某工具）
+  - company-rag-agent/.../executor/StreamingAgentExecutor.java（修改 - 在 captureToolContext 后、clearRecords 前置位 ragUsed=usedTool("searchKnowledgeBase")）
+  - company-rag-agent/.../service/RagAgentService.java（修改 - 正常路径透传 agentResult.isRagUsed()；异常路径显式 ragUsed=false）
+  - company-rag-web/.../controller/ChatController.java（修改 - 在线评估触发条件追加 && result.isRagUsed()，非 RAG 回复不再评估）
+  - company-rag-agent/src/test/.../executor/StreamingAgentExecutorTest.java（修改 - 新增「调用 searchKnowledgeBase→ragUsed=true」「仅调其他工具→ragUsed=false」两用例）
+  - company-rag-agent/src/test/.../service/RagAgentServiceTest.java（修改 - AgentResult 改三参构造并断言 ragUsed 透传）
+- commit_message:         Task:0000_untitled：add ragUsed gate for online eval evaluation
+- commit_command:         git commit -m "Task:0000_untitled：add ragUsed gate for online eval evaluation"
+- commit_exit_code:       0（92ded7e，7 files changed, 62 insertions(+), 7 deletions(-)）
+- push_command:           git push gitee feat/answer-evaluator; git push origin feat/answer-evaluator; git ls-remote gitee/origin 校验
+- push_exit_code:         gitee=0（8620f3f..92ded7e）；origin=0（8620f3f..92ded7e）
+- remote_head_check_command: git rev-parse HEAD && git ls-remote gitee feat/answer-evaluator && git ls-remote origin feat/answer-evaluator
+- remote_head:            本地 / gitee / origin 三处均 = 92ded7e8338b4abb83f23d430cd637ac2273e3bb（一致，两端均有 ls-remote 佐证）
+- result:                 本地提交 92ded7e 已推送 gitee 与 github 均成功，两端远端 HEAD 与本地 92ded7e 三处一致（证据完整）。变更内容：收窄在线评估范围——原 ChatController.chat() 对所有 AI 回复都触发三维评估，但 faithfulness 语义完全依赖检索上下文（FaithfulnessChecker 空 context→UNKNOWN、无 citations=→UNFAITHFUL），非 RAG 的纯对话/其他工具回复 context 为空，导致 faithfulness 恒判 0 分、答卷即使正确也被判「不忠实」，污染 answer_eval_result 落库与 /api/eval/stats 统计；本次为 AgentResult 新增 ragUsed 布尔位，StreamingAgentExecutor 在 clearRecords 之前用 recorder.usedTool("searchKnowledgeBase") 置位（按 ToolCallRecord.toolName 精确判定，优于原按 citations= 字符串启发式），RagAgentService 正常/异常两路径透传，ChatController 在线评估触发条件追加 && result.isRagUsed() 仅对真实执行过 RAG 的回答评估。验证（窄范围）：company-rag-common/agent install 后 StreamingAgentExecutorTest+RagAgentServiceTest EXIT=0（含 2 新增用例）；company-rag-web compile EXIT=0。说明：ChatControllerTest 为既有失败（测试配置未 mock RagAgentService 构造依赖 bean，stash 回退同样失败，非本次引入），按最小改动未处理；"searchKnowledgeBase" 工具名在 agent/rag 两模块字符串耦合，建议后续抽常量。
+
+### 最新推送（2026-09-20 browser-search 技能增强：打开百度后抓取并返回搜索结果 → gitee 成功 / github 成功）
+
+- commit_type:            Task
+- task_id:                0000
+- task_name:              browser-search技能增强
+- commit_hash:            a6b05e583511c74e4c669ba3bb0a83b409de8ce7
+- branch:                 feat/answer-evaluator（已有分支）
+- remote:                 gitee（成功：fcd4b62..a6b05e5）；origin(github)（成功：abeb2af..a6b05e5，本次网络正常）
+- staged_files:
+  - agent_skills/browser-search/scripts/browser_search.py（修改 - 原脚本只用 webbrowser.open 打开百度搜索页、从不抓取内容，导致 agent「搜了却拿不到结果」；新增 fetch_page（requests+浏览器 UA 请求百度搜索页）+ extract_results（bs4 解析 div.result/div.c-container 提取标题/链接/摘要），新增 --fetch-only 模式（只抓取返回结果，适无头环境）、--top N 控制条数（默认 8），默认模式打开浏览器并返回 results，--no-open 保持只出 URL 向后兼容，风控失败附 error+hint）
+  - agent_skills/browser-search/SKILL.md（修改 - description 与文档更新为「打开百度并可抓取/返回搜索结果」，补充 --fetch-only/--top 用法、输出 JSON 结构、失败处理与示例）
+- commit_message:         Task:0000_browser-search技能增强：add baidu search result fetch and return
+- commit_command:         git commit -m "Task:0000_browser-search技能增强：add baidu search result fetch and return"
+- commit_exit_code:       0（a6b05e5，2 files changed, 145 insertions(+), 30 deletions(-)）
+- push_command:           timeout 120 git push gitee feat/answer-evaluator; timeout 90 git push origin feat/answer-evaluator; ls-remote 校验
+- push_exit_code:         gitee=0（fcd4b62..a6b05e5）；origin=0（abeb2af..a6b05e5）
+- remote_head_check_command: git rev-parse HEAD && git ls-remote gitee feat/answer-evaluator && git ls-remote origin feat/answer-evaluator
+- remote_head:            本地 / gitee / origin 三处均 = a6b05e583511c74e4c669ba3bb0a83b409de8ce7（一致，两端均有 ls-remote 佐证）
+- result:                 本地提交 a6b05e5 已推送 gitee 与 github 均成功，两端远端 HEAD 与本地 a6b05e5 三处一致（证据完整）。变更内容：修复 browser-search 技能「打开百度却拿不到搜索结果」——原 browser_search.py 仅调用 webbrowser.open(url) 打开页面并返回 url，从不抓取网页内容，agent 无法获取结果；本次新增 fetch_page（requests 携带浏览器 UA 请求百度 /s?wd= 页）+ extract_results（bs4 提取 div.result/div.c-container 中标题/链接/摘要），默认模式打开浏览器并返回 results 数组，新增 --fetch-only 供无头/服务器环境只抓取不弹窗，--top 控制条数（默认 8），--no-open 保持旧版只输出 URL 行为，百度风控导致抓取失败时返回 success=false + error + hint 提示改用 --no-open。验证（窄范围）：脚本语法 ast 通过；--no-open 正确返回 url 不含 results；--fetch-only 实抓「通义千问」返回 success=True 且正确解析中文标题（Qwen3.8-Max 等 2 条）；默认模式 opened=true 同时返回「RAG 是什么」的 2 条结果；SKILL.md 内容同步更新。依赖 requests/bs4 已在 agent_skills/requirements.txt 中。
+
+### 最新推送（2026-09-20 审批面板按租户+发起用户双过滤、首页新增审批入口 → gitee 成功 / github 网络失败）
+
+- commit_type:            Task
+- task_id:                0000
+- task_name:              审批面板双过滤与首页入口
+- commit_hash:            490117b68012300fea19f1099581aa6db921049a
+- branch:                 feat/answer-evaluator（已有分支）
+- remote:                 gitee（成功：ca78ab5..490117b）；origin(github)（失败：Failed to connect to github.com:443，网络不可达，符合预期）
+- staged_files:
+  - company-rag-web/.../controller/ToolApprovalController.java（修改 - pending 按 tenantId+requesterUserId 双过滤仅看本人单；approve/deny 先 selectById 校验 tenantId+requesterUserId 归属当前用户，防越权盲操作）
+  - company-rag-web/.../templates/index.html（修改 - 首页导航新增「🛂 审批面板」入口，window.open 新窗口打开 /tool-approval）
+  - company-rag-web/.../controller/ToolApprovalControllerTest.java（修改 - 以 SecurityContext 注入当前用户 42，新增他人单/他租户单/单不存在越权用例）
+  - agent_skills/find-skills/（新增 - SKILL.md）
+  - agent_skills/skill-creator/（新增 - 技能目录源码/文档）
+  - docs/superpowers/plans/2026-09-19-approval-gate-production.md（新增 - 审批门生产化实现计划）
+- commit_message:         Task:0000_审批面板双过滤与首页入口：add tenant+user filtering and home approval entry
+- commit_command:         git commit -m "Task:0000_审批面板双过滤与首页入口：add tenant+user filtering and home approval entry"
+- commit_exit_code:       0（490117b，26 files changed, 154 insertions(+), 8 deletions(-)）
+- push_command:           git push gitee feat/answer-evaluator; git push origin feat/answer-evaluator; ls-remote 校验
+- push_exit_code:         gitee=0（ca78ab5..490117b）；origin=128（github 网络不可达，未推送）
+- remote_head_check_command: git rev-parse HEAD && git ls-remote gitee feat/answer-evaluator
+- remote_head:            本地 / gitee 均 = 490117b68012300fea19f1099581aa6db921049a（一致）；github 网络不可达，无法校验
+- result:                 本地提交 490117b 已推送 gitee 成功且远端 HEAD 与本地一致；github/origin 因 Failed to connect to github.com:443 网络不可达未能推送（按预期），需网络恢复后重推。gitee 推送证据完整。变更内容：方案①落地——待审批单按 tenantId+requesterUserId 双过滤，仅当前用户可见并审批本人发起的单；approve/deny 增加越权前置校验（与 await 原子条件更新幂等互补）；首页导航新增审批面板入口（新窗口打开）。验证（窄范围）：company-rag-web ToolApprovalControllerTest 13/13 通过（含越权用例）。
+
+### 最新推送（2026-09-20 为新建/存量租户 schema 补齐 document_pipeline_state 建表 → gitee 成功 / github 网络失败）
+
+- commit_type:            BugFix
+- task_id:                0000
+- task_name:              补齐document_pipeline_state建表
+- commit_hash:            3e11ff15bce947ce60b1a995549ae766f656ec08
+- branch:                 feat/answer-evaluator（已有分支）
+- remote:                 gitee（成功：abeb2af..3e11ff1）；origin(github)（失败：Failed to connect to github.com:443，网络不可达，符合预期）
+- staged_files:
+  - company-rag-tenant/.../service/impl/TenantServiceImpl.java（修改 - buildCreateTableSql 新增 document_pipeline_state 建表 + RLS 策略；buildCreateIndexSql 新增 idx_pipeline_tenant/idx_pipeline_status）
+  - company-rag-bootstrap/.../SchemaMigrationConfig.java（修改 - 新增 migrateDocumentPipelineStateTable 启动迁移，为存量缺表 schema 幂等补建该表 + 索引 + RLS + grant）
+  - company-rag-tenant/.../service/impl/TenantServiceImplSchemaTest.java（修改 - 新增 document_pipeline_state 建表/索引 DDL 完整性回归单测 2 例）
+- commit_message:         BugFix:0000_补齐document_pipeline_state建表：add pipeline table to tenant build-create DDL and startup migration
+- commit_command:         git commit -m "BugFix:0000_补齐document_pipeline_state建表：add pipeline table to tenant build-create DDL and startup migration"
+- commit_exit_code:       0（3e11ff1，3 files changed, 109 insertions(+), 1 deletion(-)）
+- push_command:           git push gitee feat/answer-evaluator; git push origin feat/answer-evaluator; ls-remote 校验
+- push_exit_code:         gitee=0（abeb2af..3e11ff1）；origin=128（github 网络不可达，未推送）
+- remote_head_check_command: git rev-parse HEAD && git ls-remote gitee feat/answer-evaluator && git ls-remote origin feat/answer-evaluator
+- remote_head:            本地 / gitee 均 = 3e11ff15bce947ce60b1a995549ae766f656ec08（一致）；github ls-remote 失败（网络不可达，无法校验）
+- result:                 本地提交 3e11ff1 已推送 gitee 成功且远端 HEAD 与本地一致；github/origin 因 Failed to connect to github.com:443 网络不可达未能推送（按预期）。gitee 推送证据完整；github 推送失败需网络恢复后重推。变更内容：新增/存量租户 schema 缺 document_pipeline_state 表会导致该租户上传文档在插入 PENDING 状态时抛 "relation does not exist" 且留下孤儿 rag_document 记录 + 临时文件；本提交在新建租户建表 DDL（TenantServiceImpl.buildCreateTableSql/buildCreateIndexSql）补齐该表及索引、RLS，并在 SchemaMigrationConfig 增加启动迁移 migrateDocumentPipelineStateTable 兜底存量缺表 schema（幂等 CREATE TABLE IF NOT EXISTS + RLS + grant），与 answer_eval_result/tool_approval_request 同类机制。验证（窄范围）：company-rag-tenant 编译通过；TenantServiceImplSchemaTest 12 测试全过（新增 2 例）；company-rag-bootstrap 编译通过。
+
+### 最新推送（2026-09-16/17 RAG 文档入库 ETL 健壮性改造 → gitee 成功 / github 成功）
+
+- commit_type:            Task
+- task_id:                RAGETL
+- task_name:              RAG文档入库ETL健壮性改造
+- commit_hash:            1763a0c7c5c7dfd717286eee0c205af7327fd7b6
+- branch:                 feat/answer-evaluator（已有分支）
+- remote:                 gitee（成功）；origin 即 github（成功，本次网络正常）
+- staged_files:
+  - README.md（修改 - 新增 5.0.1 手动执行 V4 迁移说明 + 为何不使用 Flyway 管理 V4 之后迁移的四点原因）
+  - docs/superpowers/specs/2026-09-14-rag-etl-hardening-design.md（修改 - 修订 ETL 健壮性设计 Spec）
+  - docs/superpowers/plans/2026-09-16-rag-etl-hardening.md（新增 - 实施计划 T1-T7）
+  - sql/migrations/V4__rag_etl_pipeline.sql（新增 - 每个租户 schema 建 document_pipeline_state + doc_chunk 唯一约束 + vector_store.chunk_id 回填 + 授权）
+  - company-rag-tenant/.../context/TenantContextSnapshot.java（新增 - 下沉共用的租户上下文快照，含 of(tenantId,schema) 工厂）
+  - company-rag-rag/.../workflow/TenantContextSnapshot.java 及 6 节点（修改 - 原类改包占位、6 节点 + 2 测试补 import）
+  - company-rag-web/.../controller/ChatController.java（修改 - import 改 tenant 下沉类）
+  - company-rag-web/.../controller/DocumentController.java（修改 - upload 改调 submitUpload 返回 R<UUID>，新增 status/{taskId} 与 {taskId}/retry-step）
+  - company-rag-document/pom.xml（修改 - 新增 resilience4j-spring-boot3 依赖）
+  - company-rag-document/.../document/handler/UuidTypeHandler.java（新增 - UUID TypeHandler 修复）
+  - company-rag-document/.../document/pipeline/*（新增 - 状态机 DocumentPipelineState/PipelineStatus/Mapper、PipelineTask、DocumentPipelineProcessor、Config、AsyncDocumentPipelineExecutor、DocumentPipelineStep、PipelineNotFoundAfterDelete、DocumentPipelineRecover、ParseStepFileRef、ChunkStep、IngestStep、VectorizeStep、PipelineStepExecutorTemplate、DocumentPipelineCompensation、PipelineStatusVO、DocumentPipelineService/Impl）
+  - company-rag-bootstrap/.../CompanyRagApplication.java（修改 - 新增 pipeline 包 MapperScan(annotationClass=Mapper.class)）
+  - company-rag-bootstrap/.../application.yml / application-dev.yml（修改 - document.pipeline.* 配置 + type-handlers-package）
+- commit_message:         Task:RAGETL_RAG文档入库ETL健壮性改造：implement async pipeline steps, tenant snapshot downlift, V4 migration and status controllers
+- commit_command:         git commit -m "Task:RAGETL_RAG文档入库ETL健壮性改造：implement async pipeline steps, tenant snapshot downlift, V4 migration and status controllers"
+- commit_exit_code:       0（1763a0c，40 files changed, 1915 insertions(+), 138 deletions(-)）
+- push_command:           git push gitee feat/answer-evaluator; git push origin feat/answer-evaluator; ls-remote 校验
+- push_exit_code:         gitee=0（c4c8985..1763a0c）；origin=0（c4c8985..1763a0c）
+- remote_head_check_command: git rev-parse HEAD && git ls-remote gitee feat/answer-evaluator && git ls-remote origin feat/answer-evaluator
+- remote_head:            本地 / gitee / origin 三处均 = 1763a0c7c5c7dfd717286eee0c205af7327fd7b6（一致，均有 ls-remote 佐证）
+- result:                 本地提交 1763a0c 已推送 gitee 与 github 均成功，两端远端 HEAD 与本地 1763a0c 三处一致（证据完整）。变更内容：RAG 文档入库 ETL 健壮性改造 T1-T7——①下沉 TenantContextSnapshot 到 tenant 共用（原 rag 同类删改为包占位）；②V4 迁移脚本为每个租户建 document_pipeline_state 表 + doc_chunk/document_id,chunk_index 唯一约束 + vector_store.chunk_id 回填（用 DISTINCT ON 避免 min(uuid) 不可用）；③异步分步状态机（PENDING→PARSING→CHUNKING→RAG_INGEST→VECTORIZING→SUCCESS/FAILED）+ 每步独立落库 + Resilience4j 重试 + 崩溃补偿（ApplicationRunner 遍历 tenant_% schema 重建未终态任务）+ fail-closed current_schema() 断言 + 删除竞态清理；④VectorizeStep 手写 JDBC INSERT ON CONFLICT(chunk_id) DO NOTHING 实现真幂等（Spring AI PgVectorStore 不写 chunk_id 列）；⑤新增 submitUpload/getStatus/retry-step 接口并保留 uploadAndParse 契约；⑥修复运行期 7 个错误（Mapper 漏扫/整包扫描撞名/补偿缺表/UUID TypeHandler/V4 min(uuid)/step null/VectorizeStep id 类型），上传全链跑通到 SUCCESS。验证（窄范围）：rag RetrieveNodeTest + NormalizeFuseNodeTest 通过；document VectorizeIdTest/FixedSizeSplitterTest/SemanticChunkSplitterTest/TokenLimitIntegrationTest 通过（DocumentParseServiceImplEventTest 为既有 mockito MockMaker 环境失败，非本次改动）；bootstrap 联合编译 EXIT=0。
+
+### 最新推送（2026-09-17 修复评估指标相关性判定与评估上下文来源 → gitee 成功 / github 网络失败）
+
+- commit_type:            BugFix
+- task_id:                0000
+- task_name:              修复评估指标相关性判定与评估上下文来源
+- commit_hash:            6283f5d5e48244cefd2566f6c71302f687f7e5db
+- branch:                 feat/answer-evaluator（已有分支）
+- remote:                 gitee（成功）；origin(github)（失败：Failed to connect to github.com:443，网络不可达）
+- staged_files:
+  - company-rag-rag/.../eval/answer/AnswerRelevancyEvaluator.java（修改 - 中文相关性改为字符二元组覆盖判定，修复 split("\\s+") 对无空格中文 query 退化为单 token 导致相关性误判为 0）
+  - company-rag-rag/.../tools/KnowledgeBaseTool.java（修改 - buildOutputSummary 在 citations= 标记基础上附加各引用段正文预览，供忠实性评估基于真实检索内容判定）
+  - company-rag-web/.../templates/eval.html（修改 - loadSession 带入 context 时经 isGarbageHex 检测，裸 32 位 hex/UUID 垃圾标识置空）
+  - company-rag-rag/.../eval/answer/AnswerRelevancyEvaluatorTest.java（新增 - 相关性评估单测：中文无空格、英文空格、不相关、兜底、空入参 7 例）
+- commit_message:         BugFix:0000_修复评估指标相关性判定与评估上下文来源：fix CJK relevance bigram coverage, embed retrieval content in tool summary, clean garbage hex context on session import
+- commit_command:         git commit -m "BugFix:0000_修复评估指标相关性判定与评估上下文来源：fix CJK relevance bigram coverage, embed retrieval content in tool summary, clean garbage hex context on session import"
+- commit_exit_code:       0
+- push_command:           timeout 60 git push gitee feat/answer-evaluator; timeout 60 git push origin feat/answer-evaluator
+- push_exit_code:         gitee=0；origin=非 0（github.com:443 无法连接）
+- remote_head_check_command: git rev-parse HEAD && git ls-remote gitee feat/answer-evaluator
+- remote_head:            gitee/feat/answer-evaluator=6283f5d 与本地一致
+- result:                 本地提交 6283f5d 已推送到 gitee 成功，gitee 远端 HEAD 与本地一致（证据完整）；github（origin）因网络不可达推送失败，需网络恢复后补推。相关测试：AnswerRelevancyEvaluatorTest 7 例 + AnswerEvaluationServiceTest 7 例 + KnowledgeBaseToolEndToEndTest 5 例，共 19 例全通过。
+
+### 最新推送（2026-09-17 修复选择租户后评估页会话显示非当前租户数据 → gitee 成功 / github 成功补推）
+
+- commit_type:            BugFix
+- task_id:                0000
+- task_name:              修复选择租户后整页跳转丢失当前租户导致评估页会话显示非当前租户数据
+- commit_hash:            a6a093815af82188ace2d90c7c5ba47765a646fc
+- branch:                 feat/answer-evaluator（已有分支）
+- remote:                 gitee（成功）& origin 即 github（成功）
+- staged_files:
+  - company-rag-web/.../templates/index.html（修改 - selectTenant 增加 localStorage.setItem 写回当前租户）
+- commit_message:         BugFix:0000_修复选择租户后整页跳转丢失当前租户导致评估页会话显示非当前租户数据：sync selectTenant to localStorage in index.html
+- commit_command:         git commit -m "BugFix:0000_修复选择租户后整页跳转丢失当前租户导致评估页会话显示非当前租户数据：sync selectTenant to localStorage in index.html"
+- commit_exit_code:       0
+- push_command:           timeout 120 git push gitee feat/answer-evaluator; timeout 40 git push origin feat/answer-evaluator; ls-remote 校验
+- push_exit_code:         gitee=0；origin=0
+- remote_head_check_command: git rev-parse HEAD && git ls-remote gitee feat/answer-evaluator && git ls-remote origin feat/answer-evaluator
+- remote_head:            gitee/feat/answer-evaluator=a6a0938 与本地一致；github/feat/answer-evaluator=a6a0938 与本地一致（两个远端均 ls-remote 佐证）
+- result:                 本地提交 a6a0938 已推送 gitee 与 github 成功，remote_head 三者（local/gitee/github）全部 a6a0938 一致（证据完整）。变更内容：修复 /eval 评估页「从会话带入」下拉显示非当前租户数据——根因是 index.html 的 selectTenant(row) 切换租户时仅更新内存 Vue ref `currentTenantId.value`，从不写回 localStorage.currentTenantId，而 eval.html 页面加载时从 localStorage.getItem('currentTenantId') 读取租户；用户经 goEval() 整页跳转后 eval 读到的是切换前的旧租户，导致会话下拉按旧租户查询、显示非当前租户的会话。修复：selectTenant 增加 `localStorage.setItem('currentTenantId', row.id.toString())` 与内存 ref 同步。验证（实机 + 窄范围）：租户1=8会话、租户6=2个完全不同的会话可区分；浏览器点击选择租户16后 localStorage 从 '1'→'16'（修复生效）；切到租户6后跳转 /eval，下拉正确显示租户6的两个会话（为什么Java动态代理必须实现接口、请解释一下TCP三次握手）；web 模块编译 EXIT=0，target 模板已同步。另：本轮 github 网络恢复，补推成功（此前因 Recv failure 未能同步的其他分支变更均已随本分支基础设施同步，剩余历史未推送提交需留意）。
+
+### 最新推送（2026-09-17 修复评估页面手动评估表单不渲染 → gitee 成功 / github 网络失败）
+
+- commit_type:            BugFix
+- task_id:                0000
+- task_name:              修复评估页面手动评估表单不渲染
+- commit_hash:            833bd91b7957b43b0da229183a016f26b92f31f2
+- branch:                 feat/answer-evaluator（已有分支）
+- remote:                 gitee（成功）& origin 即 github（失败 - 网络原因，Recv failure: Connection was reset）
+- staged_files:
+  - company-rag-web/.../templates/eval.html（修改 - el-alert 显式闭合，修复 XML 自闭合吞并后续 el-form 子树的渲染缺陷）
+- commit_message:         BugFix:0000_修复评估页面手动评估表单不渲染：fix el-alert self-closing swallowing el-form subtree in eval.html
+- commit_command:         git commit -m "BugFix:0000_修复评估页面手动评估表单不渲染：fix el-alert self-closing swallowing el-form subtree in eval.html"
+- commit_exit_code:       0
+- push_command:           timeout 120 git push gitee feat/answer-evaluator; timeout 50 git push origin feat/answer-evaluator; ls-remote 校验
+- push_exit_code:         gitee=0；origin=128（Recv failure: Connection was reset，网络原因）
+- remote_head_check_command: git rev-parse HEAD && git ls-remote gitee feat/answer-evaluator
+- remote_head:            gitee/feat/answer-evaluator=833bd91b7957b43b0da229183a016f26b92f31f2（与本地一致，有 ls-remote 佐证）；github 因网络原因无法访问，未同步，待网络恢复补推
+- result:                 本地提交 833bd91 已推送 gitee 成功，gitee/feat/answer-evaluator=833bd91 与本地一致（证据完整）；github(origin) 因网络原因推送失败（Recv failure: Connection was reset，push exit=128），未同步至 github，待网络恢复后补推。变更内容：修复 /eval 页面「手动评估」表单不渲染——根因是 el-alert 使用 XML 自闭合 `/>` 在 HTML DOM 解析中不闭合，把紧随其后的 <el-form> 吞为子节点，v-if=false 时整棵被 Vue 移除；改为显式闭合 </el-alert> 后表单正常渲染。验证（实机 + 窄范围）：隔离最小复现实验 form-missing→显式闭合后 formRendered=true；运行页面表单 5 表单项/3 textarea/按钮全部渲染；Python UTF-8 调 /api/eval/run 返回 code:200 三维评估正常并落库，/results 与 /stats 可查，结果表格正确展示。
+
+### 最新推送（2026-09-17 answer-evaluator 生产接入 + 评估页面 UI → gitee 成功 / github 网络失败）
+
+- commit_type:            Feat
+- task_id:                0000
+- task_name:              回答评估接入生产调用方与评估页面UI
+- commit_hash:            12c7dc71c23b80dfc214235f86e8f22e2db75a07
+- branch:                 feat/answer-evaluator（已有分支）
+- remote:                 gitee（成功）& origin 即 github（失败 - 网络原因，Connection was reset / connect 443 失败）
+- staged_files:
+  - company-rag-rag/.../eval/answer/AnswerCase.java（修改 - 扩展 sessionRowId/source 来源元数据）
+  - company-rag-rag/.../eval/answer/AnswerEvalResultEntity.java（新增 - 评估结果落库实体）
+  - company-rag-rag/.../eval/answer/AnswerEvalResultMapper.java（新增 - 评估结果 Mapper）
+  - company-rag-rag/.../eval/answer/AnswerEvaluationService.java（修改 - 双写 Redis + PG、findByQuery/listResults/stats 读取方法）
+  - company-rag-rag/.../eval/answer/AnswerCorrectnessEvaluator.java / AnswerFaithfulnessEvaluator.java / AnswerRelevancyEvaluator.java（修改 - @Component 修复启动 Bean）
+  - company-rag-rag/.../test/.../AnswerEvaluationServiceTest.java（修改 - 5 参构造 + 落库用例）
+  - company-rag-bootstrap/.../SchemaMigrationConfig.java（修改 - 存量租户建 answer_eval_result 表）
+  - company-rag-bootstrap/.../SecurityConfig.java（修改 - 放行 /eval、/admin、/documents 页面路由）
+  - company-rag-bootstrap/.../application-dev.yml（修改 - 本地 MCP client 注释 + rag.eval 配置段）
+  - company-rag-bootstrap/.../CompanyRagApplication.java（修改）
+  - company-rag-web/.../controller/EvalController.java（新增 - run/result/results/stats 手动评估接口）
+  - company-rag-web/.../controller/ChatController.java（修改 - 在线异步自动评估触发）
+  - company-rag-web/.../controller/PageController.java（修改 - 新增 /eval 页面路由）
+  - company-rag-web/.../templates/eval.html（新增 - 回答评估中心页面；修复日期选择器弹窗重叠 bug：toolbar 改用 el-form+el-form-item 包裹 date-picker）
+  - company-rag-web/.../templates/index.html / admin.html / documents.html（修改 - header 评估/文档/管理入口图标 + 固定 CDN）
+  - company-rag-web/.../test/.../EvalControllerTest.java（新增 - EvalController 单测）
+  - company-rag-web/.../test/resources/mockito-extensions/org.mockito.plugins.MockMaker（新增）
+  - docs/superpowers/plans/2026-09-16-answer-evaluator-production.md（新增）
+  - docs/superpowers/specs/2026-09-16-answer-evaluator-production-design.md（新增）
+- commit_message:         Feat:0000_回答评估接入生产调用方与评估页面UI：add eval persistence double-write, online async trigger, EvalController run/list/stats APIs and eval page UI
+- commit_command:         git commit -m "Feat:0000_回答评估接入生产调用方与评估页面UI：add eval persistence double-write, online async trigger, EvalController run/list/stats APIs and eval page UI"
+- commit_exit_code:       0
+- push_command:           timeout 120 git push gitee feat/answer-evaluator; timeout 60 git push origin feat/answer-evaluator; ls-remote 校验
+- push_exit_code:         gitee=0；origin=128（Recv failure: Connection was reset / connect to github.com:443 失败，网络原因）
+- remote_head_check_command: git rev-parse HEAD && git ls-remote gitee feat/answer-evaluator && git ls-remote origin feat/answer-evaluator
+- remote_head:            gitee/feat/answer-evaluator=12c7dc71c23b80dfc214235f86e8f22e2db75a07（与本地一致，有 ls-remote 佐证）；github 因网络原因无法访问（ls-remote exit=128），feat/answer-evaluator 分支未同步至 github，待网络恢复补推
+- result:                 本地提交 12c7dc7 已推送 gitee 成功，gitee/feat/answer-evaluator=12c7dc7 与本地一致（证据完整）；github(origin) 因网络原因推送失败（Connection was reset / connect 443 失败，push exit=128，ls-remote exit=128 无法访问），feat/answer-evaluator 分支未同步至 github，待网络恢复后补推。变更内容：将回答评估链路（AnswerEvaluationService 三维评估 + Redis 缓冲）接入生产调用方——新增 answer_eval_result 实体/Mapper 与 SchemaMigrationConfig 存量租户建表，Service 改为 Redis+PG 双写并新增 findByQuery/listResults/stats 读取方法；ChatController 在线异步自动评估（配置开关默认关、有界线程池、不回抛）；新增 EvalController（run/result/results/stats 手动评估与查看/统计接口，鉴权 + 租户头校验 + 越权过滤）；新增 /eval 回答评估中心页面，并修复日期选择器点击弹窗重叠 bug（toolbar 用 el-form+el-form-item 包裹 date-picker，浏览器实机验证 43 个重叠 popper 收敛为 2 个）。验证（窄范围）：company-rag-web 模块联合编译 BUILD SUCCESS（exit=0）。
+
+### 最新推送（2026-09-15 answer-evaluator 修复批次 → gitee 成功 / github 网络失败）
+
+- commit_type:            BugFix
+- task_id:                0000
+- task_name:              修复评估链路Bean启动报错
+- commit_hash:            35679f4a16089f40940fd3aba724b9f5fc07d200
+- branch:                 feat/answer-evaluator（新建分支推送 gitee）
+- remote:                 gitee（成功，新建分支）& origin 即 github（失败 - 网络原因，curl 28 / Recv failure Connection was reset）
+- staged_files:
+  - company-rag-rag/.../eval/answer/AnswerCorrectnessEvaluator.java（修改 - 补 @Component，修复启动 Bean 缺失）
+  - company-rag-rag/.../eval/answer/AnswerFaithfulnessEvaluator.java（修改 - 补 @Component）
+  - company-rag-rag/.../eval/answer/AnswerRelevancyEvaluator.java（修改 - 补 @Component）
+  - company-rag-rag/.../eval/answer/FaithfulnessChecker.java（修改 - 补 @Component）
+  - company-rag-bootstrap/.../application-dev.yml（修改 - 注释掉本地 custom/文件系统 MCP client，避免缺本地 MCP Server 干扰）
+  - docs/superpowers/plans/2026-09-15-answer-evaluator.md（修改 - 勾选 Task 完成状态）
+  - verification-result.md（修改 - 补本次修复批次 Reactor 联合编译通过记录）
+- commit_message:         BugFix:0000_修复评估链路Bean启动报错：add @Component to evaluator beans and comment local custom MCP clients
+- commit_command:         git commit -F .commit-msg-eval.txt
+- commit_exit_code:       0
+- push_command:           timeout 120 git push gitee feat/answer-evaluator; timeout 100 git push -u origin feat/answer-evaluator
+- push_exit_code:         gitee=0（新建分支 feat/answer-evaluator → 35679f4）；origin=1（RPC failed; curl 28 Recv failure: Connection was reset，网络原因）
+- remote_head_check_command: git rev-parse HEAD && git ls-remote gitee feat/answer-evaluator && git ls-remote origin feat/answer-evaluator
+- remote_head:            gitee/feat/answer-evaluator=35679f4a16089f40940fd3aba724b9f5fc07d200（与本地一致，有 ls-remote 佐证）；github 因连接被重置无法访问（ls-remote exit=128），feat/answer-evaluator 分支未同步至 github，待网络恢复补推
+- result:                 本地提交 35679f4 已推送 gitee 新建分支成功，gitee/feat/answer-evaluator=35679f4 与本地一致（证据完整）；github(origin) 因网络原因推送失败（RPC failed; curl 28 Recv failure: Connection was reset，push exit=1，随后 ls-remote exit=128 无法访问），feat/answer-evaluator 分支未同步至 github，待网络恢复后补推。变更内容：为 answer-evaluator 评估链路的 4 个评估器类（AnswerCorrectnessEvaluator/AnswerFaithfulnessEvaluator/AnswerRelevancyEvaluator/FaithfulnessChecker）补 @Component 注解，修复 Spring 启动时「缺少 Bean 无法装配评估链路」导致的 APPLICATION FAILED TO START 问题；application-dev.yml 注释掉本地 custom 与文件系统 MCP client，避免本机未起 MCP Server 时的连接干扰；plan 文档勾选推进。验证（窄范围）：mvn -o -DskipTests compile 根 reactor 联合编译 BUILD SUCCESS（exit=0），避免单模块编译误读本地仓库旧 common 快照。
+
 ### 最新推送（2026-09-13 混合检索 StateGraph 工作流 + 跨线程租户修复 → gitee 成功 / github 网络失败）
 
 - commit_type:            Feat
@@ -860,3 +1130,226 @@ $ git rev-parse HEAD
 - remote_head_check_command: git ls-remote gitee refs/heads/main; git ls-remote origin refs/heads/main
 - remote_head:            af6a1b9aa672fcfd4763287d5ecb77bcf5e426dd（gitee）/ af6a1b9aa672fcfd4763287d5ecb77bcf5e426dd（origin/github）
 - result:                推送证据完整。gitee 与 github 两端 main 均已推送到 af6a1b9，且与本地 HEAD 一致（ls-remote 校验通过）。本次 github 网络正常，未出现历史网络失败，两端均 push_exit_code=0。
+
+## Git Push
+
+- commit_type:            BugFix
+- task_id:                0000
+- task_name:              修复新建租户缺 answer_eval_result 表（P0）
+- commit_hash:            9629b7cf921b311805e9bb4bce481e8aa0ca31d1
+- branch:                 feat/answer-evaluator
+- remote:                 gitee + origin(github)
+- staged_files:           company-rag-tenant/.../TenantServiceImpl.java（修改）、company-rag-tenant/src/test/.../TenantServiceImplSchemaTest.java（新增）
+- commit_message:         BugFix:0000_修复新建租户缺answer_eval_result表致评估结果静默零落库：add eval result table+RLS+index in createTenantSchema
+- commit_command:         git add company-rag-tenant/src/main/java/com/company/rag/tenant/service/impl/TenantServiceImpl.java company-rag-tenant/src/test/java/com/company/rag/tenant/service/impl/TenantServiceImplSchemaTest.java && git commit ...
+- commit_exit_code:       0
+- push_command:           git push gitee feat/answer-evaluator && git push origin feat/answer-evaluator
+- push_exit_code:         0（gitee）/ 0（origin/github）
+- remote_head_check_command: git ls-remote gitee feat/answer-evaluator; git ls-remote origin feat/answer-evaluator
+- remote_head:            9629b7cf921b311805e9bb4bce481e8aa0ca31d1（gitee）/ 9629b7cf921b311805e9bb4bce481e8aa0ca31d1（origin/github）
+- result:                P0 修复完成并双端推送。createTenantSchema 补 answer_eval_result 建表 + RLS（ENABLE/FORCE/POLICY）+ 序列授权 + 索引 idx_answer_eval_tenant_time，与 SchemaMigrationConfig 启动迁移 DDL 对齐。新增 TenantServiceImplSchemaTest（5 例）验证占位符配平不抛 MissingFormatArgument，红→绿。gitee 与 github 两端均推送到 9629b7c 且与本地 HEAD 一致。deploy-log 本条与 P1 一起随后一并提交。
+
+## Git Push
+
+- commit_type:            BugFix
+- task_id:                0000
+- task_name:              faithfulness 语义由宽松 citations 标记升级为正文字符二元组覆盖判定（P1）
+- commit_hash:            e48af57fe9d6fe82c37d5201cdf7182532d8dec3
+- branch:                 feat/answer-evaluator
+- remote:                 gitee + origin(github)
+- staged_files:           company-rag-rag/.../eval/answer/FaithfulnessChecker.java（修改）、company-rag-rag/src/test/.../FaithfulnessCheckerTest.java（新增）、deploy-log.md（修改 - 追加本条与 P0 条目）
+- commit_message:         BugFix:0000_faithfulness语义由宽松citations标记升级为正文字符二元组覆盖判定：add citations gate + grounding bigram coverage in FaithfulnessChecker
+- commit_command:         git add company-rag-rag/src/main/java/com/company/rag/rag/eval/answer/FaithfulnessChecker.java company-rag-rag/src/test/java/com/company/rag/rag/eval/answer/FaithfulnessCheckerTest.java deploy-log.md && git commit ...
+- commit_exit_code:       0
+- push_command:           git push gitee feat/answer-evaluator && git push origin feat/answer-evaluator
+- push_exit_code:         0（gitee）/ 0（origin/github，本次随 README 一起推达）
+- remote_head_check_command: git ls-remote gitee feat/answer-evaluator; git ls-remote origin feat/answer-evaluator
+- result:                P1 完成（TDD 红→绿）。FaithfulnessChecker.check 弃用「context 含 citations= 即判忠实」的宽松启发式，改为：保留空上下文→UNKNOWN、空回答/「抱歉」→UNFAITHFUL；新增 citations= 门槛（确有检索来源）；在剔除声明行后对检索正文做回答字符二元组覆盖判定（阈值 0.15，低于 relevancy 0.2 因忠实仅要求关键表述有据）。新增 FaithfulnessCheckerTest 7 例（有据/部分有据/无据/空上下文/无citat
+
+## Git Push
+
+- commit_type:            Task
+- task_id:                0000
+- task_name:              环境变量模板补全
+- commit_hash:            a0ab798254bbdf5785cee6d586e13d1edae33f07
+- branch:                 feat/answer-evaluator
+- remote:                 gitee + origin(github)
+- staged_files:           .env.example（修改）、company-rag-bootstrap/.env.docker.example（修改）、company-rag-bootstrap/src/main/resources/application.yml（修改）
+- commit_message:         Task:0000_环境变量模板补全：补全 .env.example 与 .env.docker.example 缺失变量并调整默认值
+- commit_command:         git add .env.example company-rag-bootstrap/.env.docker.example company-rag-bootstrap/src/main/resources/application.yml && git commit -m "Task:0000_环境变量模板补全：补全 .env.example 与 .env.docker.example 缺失变量并调整默认值"
+- commit_exit_code:       0
+- push_command:           git push gitee HEAD:feat/answer-evaluator && git -c http.version=HTTP/1.1 push origin HEAD:feat/answer-evaluator
+- push_exit_code:         0（gitee）/ github 网络失败（HTTP/2 流异常 → Recv failure: Connection was reset → Failed to connect to github.com port 443）
+- remote_head_check_command: git ls-remote gitee refs/heads/feat/answer-evaluator; git ls-remote origin refs/heads/feat/answer-evaluator
+- remote_head:            a0ab798254bbdf5785cee6d586e13d1edae33f07（gitee）/ github 未连接成功
+- result:                补全 .env.example 与 .env.docker.example 缺失的环境变量（AGENT_SKILL_BASE/PYTHON_EXEC_PATH/DOWNLOAD_BASE_DIR/DOWNLOAD_MAX_FILE_SIZE/CODE_SEARCH_SRC_BASE/TRUSTED_DIRS/AGENT_WORK_DIR/UPLOAD_TEMP_DIR/LOG_PATH），并将 application.yml 的 CODE_SEARCH_SRC_BASE 默认值由 company-rag-agent 调整为项目根目录。显式清理删除 company-rag-bootstrap/.env 与 .env.local.backup。gitee 已推送且远端 HEAD 与本地一致（ls-remote 校验 a0ab798 通过）；github 当前网络无法直连（三次尝试均失败），推送待网络恢复后补推。无关未跟踪项（agent_skills/find-skills、agent_skills/skill-creator、data/）未纳入本次提交。ions门槛/空回答/抱歉），红→绿。回归：FaithfulnessCheckerTest+AnswerRelevancyEvaluatorTest+KnowledgeBaseToolEndToEndTest 共 19 例全绿。修复「有检索标记但答非所问仍判忠实」的假 pass。
+
+## Git Push
+
+- commit_type:            Task
+- task_id:                0000
+- task_name:              README 补充回答评估功能与 answer_eval_result 表（P0/P1 文档同步）
+- commit_hash:            e3edbb3dc8fc922bbb15b466534d2e8668eb5d49
+- branch:                 feat/answer-evaluator
+- remote:                 gitee + origin(github)
+- staged_files:           README.md（修改 - 表结构概览新增 answer_eval_result 行 + 核心特性新增「🤖 回答评估」小节共 9 行）、deploy-log.md（修改 - 追加本条并修订 P1 推送结果）
+- commit_message:         Task:0000_README补充回答评估功能与answer_eval_result表：add eval feature docs and table struct entry
+- commit_command:         git add README.md && git commit ...
+- commit_exit_code:       0
+- push_command:           git push gitee feat/answer-evaluator && git push origin feat/answer-evaluator
+- push_exit_code:         0（gitee）/ 0（origin/github）
+- remote_head_check_command: git ls-remote gitee feat/answer-evaluator; git ls-remote origin feat/answer-evaluator
+- remote_head:            e3edbb3dc8fc922bbb15b466534d2e8668eb5d49（gitee）/ e3edbb3dc8fc922bbb15b466534d2e8668eb5d49（origin/github）
+- result:                README 文档同步 P0/P1。表结构概览补 answer_eval_result 行（RLS 租户隔离）；核心特性新增「🤖 回答评估」小节（三维评估、字符二元组覆盖算法、faithfulness citations 门槛+阈值0.15、Redis缓冲+PG落库双写、手动/在线双触发、tenantId 非空落库铁律）。纯文档改动无需编译。gitee 与 github 两端均推送到 e3edbb3 且与本地 HEAD 一致（ls-remote 校验通过）。本次同时把历史 P1 的 e48af57、6c4c0da 推达 github（上轮 origin 网络失败遗留，现已补齐）。
+
+## Git Push
+
+- commit_type:            BugFix
+- task_id:                0000
+- task_name:              Windows反斜杠路径命令误拒修复
+- commit_hash:            88af922b208260eaf1b74c5161d2adfa2f68e47b
+- branch:                 feat/answer-evaluator
+- remote:                 gitee + origin(github)
+- staged_files:           company-rag-agent/.../RagAgentService.java、ExecuteTool.java、RagAgentServiceTest.java、ExecuteToolTest.java、company-rag-bootstrap/src/main/resources/application.yml、agent_skills/browser-search/（SKILL.md + scripts/browser_search.py）
+- commit_message:         BugFix:0000_Windows反斜杠路径命令误拒修复：可配置agent超时并修复parseCommand反斜杠
+- commit_command:         git add <5 个代码文件> agent_skills/browser-search/ && git commit -m "BugFix:0000_Windows反斜杠路径命令误拒修复：可配置agent超时并修复parseCommand反斜杠"
+- commit_exit_code:       0
+- push_command:           git push origin feat/answer-evaluator; git push gitee feat/answer-evaluator
+- push_exit_code:         gitee=0；origin(github) 失败（Recv failure: Connection was reset → Failed to connect to github.com port 443，三次重试均超时）
+- remote_head_check_command: git ls-remote gitee feat/answer-evaluator; git ls-remote origin feat/answer-evaluator
+- remote_head:            88af922b208260eaf1b74c5161d2adfa2f68e47b（gitee，ccd3a6d..88af922 推送成功）/ github 未连接成功（无代理、HTTPS 443 被墙、SSH key 无授权）
+- result:                Agent 超时改为可配置（rag.agent.executor.timeout-minutes，默认 5 分钟，Math.max 兜底≥1）+ parseCommand 移除反斜杠转义语义（方案B：无 shell、ProcessBuilder 直 exec，\ 一律作为普通字符保留），修复 Windows 反斜杠绝对路径 python 命令被 parseCommand 破坏导致的安全校验误拒。新增 ExecuteToolTest 复现测试（正斜杠基线放行+反斜杠路径放行）；RagAgentServiceTest 同步构造器新增参。ExecuteToolTest 24 例 + RagAgentServiceTest 1 例全绿。新增 browser-search 技能（SKILL.md + browser_search.py）。gitee 已推送且远端 HEAD 与本地一致（ls-remote 校验 88af922 通过）；github 当前网络无法直连（HTTPS 443 被墙、本机无可用 HTTP 代理、SSH key publickey 认证失败），推送待网络恢复后补推。无关未跟踪项 data/（运行期上传空占位目录）未纳入本次提交，已按用户确认跳过。
+
+## Git Push
+
+- commit_type:            Feat
+- task_id:                0000
+- task_name:              nl2sql 表/列名自校验实现
+- commit_hash:            37ec4b76299d83eeaf68bf616dee5bc5dbe7f087
+- branch:                 feat/answer-evaluator
+- remote:                 gitee + origin(github)
+- staged_files:           company-rag-agent/src/main/java/com/company/rag/agent/tool/DatabaseQueryTool.java、company-rag-agent/src/main/java/com/company/rag/agent/security/SqlSchemaValidator.java、company-rag-agent/src/main/java/com/company/rag/agent/config/Nl2sqlSchemaValidationProperties.java、company-rag-agent/src/test/java/com/company/rag/agent/security/SqlSchemaValidatorTest.java、company-rag-agent/src/test/java/com/company/rag/agent/tool/DatabaseQueryToolTest.java、company-rag-bootstrap/src/main/resources/application.yml
+- commit_message:         feat(nl2sql): 实现表/列名自校验（窄范围校验+降级放行+热关断+ReAct自愈）
+- commit_command:         git add <6 个交付文件> && git commit -m "feat(nl2sql): 实现表/列名自校验（窄范围校验+降级放行+热关断+ReAct自愈）"
+- commit_exit_code:       0
+- push_command:           git push gitee feat/answer-evaluator; git push origin feat/answer-evaluator
+- push_exit_code:         gitee=0；github(origin)=0（本次网络可用，推送成功）
+- remote_head_check_command: git ls-remote gitee feat/answer-evaluator; git ls-remote origin feat/answer-evaluator
+- remote_head:            37ec4b76299d83eeaf68bf616dee5bc5dbe7f087（gitee）/ 37ec4b76299d83eeaf68bf616dee5bc5dbe7f087（origin/github），两端均与本地 HEAD 一致
+- result:                实现 nl2sql 表/列名自校验：SqlSchemaValidator（窄范围校验，仅单表无 JOIN/子查询/CTE、非 SELECT * 时校验列；表校验全量；敏感列脱敏；元数据查询失败/空集降级放行），DatabaseQueryTool queryDatabase 接入第四道防线（缺失时返回错误文本触发 ReAct 自愈），配置开关 NL2SQL_SCHEMA_VALIDATION_ENABLED（默认 true 热关断）。单测 SqlSchemaValidatorTest 18 例 + DatabaseQueryToolTest 38 例全绿（BUILD SUCCESS）。浏览器实测验证通过：错误列 author/publisher 被拦截并回传「缺失列：author、publisher」，LLM 弃错列后自愈重查。gitee 与 github 两端均推送成功且远端 HEAD 与本地一致（ls-remote 校验 37ec4b7 通过）。无关改动 application-dev.yml（MCP client 反注释，非本次交付）与 data/（运行期占位目录）未纳入本次提交。
+
+## Git Push
+
+- commit_type:            Feat
+- task_id:                0000
+- task_name:              前端 eval.html 接线回归闭环卡片
+- commit_hash:            95f6285bf0a14beca458c2fcee8d2871b75b0318
+- branch:                 feat/answer-evaluator
+- remote:                 gitee + origin(github)
+- staged_files:
+  - company-rag-web/src/main/resources/templates/eval.html（修改）
+- commit_message:         feat(eval): 前端eval.html接线回归闭环卡片(数据集抽取/回归重跑/回归历史)
+- commit_command:         git add company-rag-web/src/main/resources/templates/eval.html && git commit -m "feat(eval): 前端eval.html接线回归闭环卡片(数据集抽取/回归重跑/回归历史)"
+- commit_exit_code:       0
+- push_command:           git push gitee feat/answer-evaluator; git push origin feat/answer-evaluator
+- push_exit_code:         gitee=0；github(origin)=0
+- remote_head_check_command: git ls-remote gitee feat/answer-evaluator; git ls-remote origin feat/answer-evaluator
+- remote_head:            95f6285bf0a14beca458c2fcee8d2871b75b0318（gitee）/ 95f6285bf0a14beca458c2fcee8d2871b75b0318（origin/github），两端均与本地 HEAD 一致
+- result:                前端 eval.html 接线三个新接口：新增「回归闭环」卡片（时间范围 + 样本数 + 抽取数据集/回归重跑/刷新历史三按钮 + 历史分页表格），权限 v-if=canEval（admin/user 可见，viewer 只读）。前端对未选时间范围先弹「请选择时间范围」提示避免打到后端 400。真实运行验证（应用 8081）：/eval 页面回归闭环区块渲染、三按钮均在、后端 dataset/regression/history 三接口均 200、点「刷新历史」历史区块展开显示「共 7 条」表格列渲染，均通过。gitee 与 github 两端均推送成功且远端 HEAD 与本地一致（ls-remote 校验 95f6285 通过）。无关改动 deploy-log.md（本次记录所在文件，不入版）与 data/（运行期上传占位目录）未纳入本次提交。
+
+## Git Push
+
+- record_no:              18
+- push_time:              2026-10-04T15:45:00+08:00
+- commit_type:            BugFix
+- task_id:                0000
+- task_name:              Agent 流式工具轨迹修复
+- commit_hash:            fadb581cdbfb13a9721c05f8435e18f2a61df8ab
+- branch:                 feat/answer-evaluator
+- remote:                 gitee + origin(github)
+- staged_files:
+  - company-rag-agent/src/main/java/com/company/rag/agent/executor/StreamingAgentExecutor.java（修改）
+  - company-rag-agent/src/main/java/com/company/rag/agent/stream/NodeOutputMapper.java（修改）
+  - company-rag-agent/src/test/java/com/company/rag/agent/executor/StreamingAgentExecutorStreamTest.java（修改）
+  - company-rag-agent/src/test/java/com/company/rag/agent/stream/NodeOutputMapperTest.java（修改）
+  - company-rag-bootstrap/src/main/resources/application.yml（修改）
+  - company-rag-web/src/main/resources/templates/index.html（修改）
+- commit_message:         fix(agent): 修复流式工具轨迹缺工具名与 TOOL_START，idle-timeout 调至 180s
+- commit_command:         git add <6 个交付文件> && git commit -m "fix(agent): 修复流式工具轨迹缺工具名与 TOOL_START，idle-timeout 调至 180s"
+- commit_exit_code:       0
+- push_command:           git push gitee feat/answer-evaluator; git push origin feat/answer-evaluator
+- push_exit_code:         gitee=0（a8dcde8..fadb581）；github(origin)=0（95f6285..fadb581）
+- remote_head_check_command: git ls-remote gitee feat/answer-evaluator; git ls-remote origin feat/answer-evaluator
+- remote_head:            fadb581cdbfb13a9721c05f8435e18f2a61df8ab（gitee，ls-remote 实测与本地 HEAD 一致）/ github 推送命令 exit=0 且本地 refs/remotes/origin/feat/answer-evaluator 已更新为 fadb581，但推送后 ls-remote 复核因 github.com:443 连接超时/重置未能取回远端值
+- result:                修复 SSE 流式执行轨迹三处缺陷：1) NodeOutputMapper 的 AGENT_TOOL_FINISHED 工具名恒为空串（ReactAgent 工具节点名恰等于 RunnableConfig.AGENT_TOOL_NAME 常量、无后缀，substring 得空），改为优先取 ToolResponseMessage.getResponses().name()，node 名截取退化为兜底且空串整帧跳过；2) 框架不发「工具开始」帧，改由 AGENT_MODEL_FINISHED 帧的 AssistantMessage.getToolCalls() 补发 TOOL_START（该轮 chunk() 是整轮全文，绝不放行以免重发答案）；3) durationMs 由 StreamingAgentExecutor 池任务内局部 Map<String, Deque<Long>> 做 FIFO 配对计时补全（同名工具并行调用不可用单值 Map，真机实测会丢耗时；跨帧状态不得放无状态单例 mapper 的实例字段）。另 application.yml stream.enabled=false→true、idle-timeout-seconds 60→180（真机 6 轮工具任务撞过 60s 被降级为 ERROR）。前端 index.html 接入 POST /api/chat/stream（fetch + getReader，支持 Authorization/X-Tenant-Id 头）、工具轨迹卡片渲染、DONE 后服务端断连不再误报网络错误。scoped 单测 29/29 绿（NodeOutputMapperTest 17 + StreamingAgentExecutorStreamTest 12，BUILD SUCCESS）；前端 SSE 解析自检 exit=0（含 DONE 后断连回归、真实 fetch 分包 E2E）；真机 curl 强制工具调用提问得 TOOL_START:4 / TOOL_END:4（工具名与 durationMs 齐全）/ ANSWER_DELTA:129 / DONE:1，落库 savedRowId=112；浏览器真机渲染「🔧 searchKnowledgeBase 已完成（2271ms）」等 19 条轨迹、无残留执行中、无错误、反馈按钮可用。gitee 已推送且远端 HEAD 与本地一致；github 推送成功但 ls-remote 复核受网络限制未完成。未跟踪项 BOOT-INF/（检查 jar 内容时误留垃圾，删除受策略拦截待人工清理）与 data/（运行期上传占位目录）未纳入本次提交。
+
+### Git Push #19
+
+- record_no:              19
+- push_time:              2026-10-05T08:28:25+08:00
+- commit_type:            BugFix
+- task_id:                0000
+- task_name:              租户快照跨线程传播修复
+- commit_hash:            4b4da18b8235550938a60cd153685e6585a3d8e0
+- branch:                 feat/answer-evaluator
+- remote:                 gitee + origin(github)
+- staged_files:
+  - company-rag-agent/src/main/java/com/company/rag/agent/executor/StreamingAgentExecutor.java（修改）
+  - company-rag-agent/src/test/java/com/company/rag/agent/executor/StreamingAgentExecutorStreamTest.java（修改）
+  - company-rag-agent/src/test/java/com/company/rag/agent/executor/StreamingAgentExecutorTest.java（修改）
+  - company-rag-rag/src/main/java/com/company/rag/rag/config/AggregatedToolCallbackProvider.java（修改）
+  - company-rag-rag/src/test/java/com/company/rag/rag/config/AggregatedToolCallbackProviderTenantTest.java（新建）
+  - company-rag-tenant/src/main/java/com/company/rag/tenant/context/TenantContextSnapshot.java（修改）
+- commit_message:         fix(tenant): 租户快照经 RunnableConfig metadata 传播到 graph 工具线程
+- commit_command:         已存在提交（4b4da18，本次仅复核提交/推送状态，未新建提交）
+- commit_exit_code:       0（既有提交，无需重新 commit）
+- push_command:           git push gitee feat/answer-evaluator; git push origin feat/answer-evaluator
+- push_exit_code:         gitee=0（e488b74..4b4da18）；github(origin)=0（fadb581..4b4da18，首次因 github.com:443 连接超时失败，重试成功）
+- remote_head_check_command: git ls-remote gitee feat/answer-evaluator; git ls-remote origin feat/answer-evaluator
+- remote_head:            4b4da18b8235550938a60cd153685e6585a3d8e0（gitee）/ 4b4da18b8235550938a60cd153685e6585a3d8e0（origin/github），两端均与本地 HEAD 一致
+- result:                推送证据完整：本地 HEAD=4b4da18（工作区除运行期目录 data/ 外干净），gitee 与 github 两端 ls-remote 实测远端 HEAD 均为 4b4da18，与本地一致。改动相关 scoped 单测重跑全绿：AggregatedToolCallbackProviderTenantTest 4/4（BUILD SUCCESS）+ StreamingAgentExecutorStreamTest 12/12 + StreamingAgentExecutorTest 6/6（BUILD SUCCESS），共 22 例，未跑全量。本记录仅为 Git Push 证据，不构成发布/部署证据。未跟踪项 data/（运行期上传占位目录）未纳入提交。
+
+### Git Push #20
+
+- record_no:              20
+- push_time:              2026-10-05T09:05:00+08:00
+- commit_type:            Task
+- task_id:                0000
+- task_name:              README 补充 Agent 流式与轨迹章节
+- commit_hash:            f4f67373d87f0d54afee9f22a35900cd584d3b5d
+- branch:                 feat/answer-evaluator
+- remote:                 gitee + origin(github)
+- staged_files:
+  - README.md（修改，+12 行，纯文档）
+- commit_message:         docs(readme): 补充 Agent 流式输出与执行轨迹章节（Stream & Trace）
+- commit_command:         git add README.md && git commit -m "docs(readme): 补充 Agent 流式输出与执行轨迹章节（Stream & Trace）"
+- commit_exit_code:       0
+- push_command:           git push gitee feat/answer-evaluator; git push origin feat/answer-evaluator
+- push_exit_code:         gitee=0（924ab66..f4f6737）；github(origin)=0（924ab66..f4f6737）
+- remote_head_check_command: git ls-remote gitee feat/answer-evaluator; git ls-remote origin feat/answer-evaluator
+- remote_head:            f4f67373d87f0d54afee9f22a35900cd584d3b5d（gitee）/ f4f67373d87f0d54afee9f22a35900cd584d3b5d（origin/github），两端均与本地 HEAD 一致
+- result:                推送证据完整：本次仅为 README.md 文档更新（新增「Agent 流式输出与执行轨迹（Stream & Trace）」章节，无代码/测试变更，无需构建与 E2E 验证），本地 HEAD=f4f6737，gitee 与 github 两端 ls-remote 实测一致。本记录仅为 Git Push 证据，不构成发布/部署证据。未跟踪项 data/（运行期上传占位目录）未纳入提交。
+
+### Git Push #21
+
+- record_no:              21
+- push_time:              2026-10-05T15:42:00+08:00
+- commit_type:            Task
+- task_id:                0000
+- task_name:              补全 AnswerCorrectness/Faithfulness 评估器单测
+- commit_hash:            43dbb3c1b7154c496ab4349b06b103c5905d5567
+- branch:                 feat/answer-evaluator
+- remote:                 gitee + origin(github)
+- staged_files:
+  - docs/superpowers/specs/2026-10-05-answer-evaluator-test-gap-design.md（新建）
+  - docs/superpowers/plans/2026-10-05-answer-evaluator-test-gap.md（新建）
+  - company-rag-rag/src/test/java/com/company/rag/rag/eval/answer/AnswerCorrectnessEvaluatorTest.java（新建）
+  - company-rag-rag/src/test/java/com/company/rag/rag/eval/answer/AnswerFaithfulnessEvaluatorTest.java（新建）
+- commit_message:         四个特性提交（f02f432 设计文档、112c074 实现计划、bd433e1 correctness 单测、43dbb3c faithfulness 单测）
+- commit_command:         已存在提交，本次仅推送（4 个提交 41b038a..43dbb3c 一并推送），未新建提交
+- commit_exit_code:       0（既有提交，无需重新 commit）
+- push_command:           git push gitee feat/answer-evaluator; git push origin feat/answer-evaluator
+- push_exit_code:         gitee=0（41b038a..43dbb3c）；github(origin)=0（41b038a..43dbb3c）
+- remote_head_check_command: git ls-remote gitee feat/answer-evaluator; git ls-remote origin feat/answer-evaluator
+- remote_head:            43dbb3c1b7154c496ab4349b06b103c5905d5567（gitee）/ 43dbb3c1b7154c496ab4349b06b103c5905d5567（origin/github），两端均与本地 HEAD 一致
+- result:                推送证据完整：本次交付为补全两个评估器单测（AnswerCorrectnessEvaluator 9 例 + AnswerFaithfulnessEvaluator 7 例）及对应设计/计划文档，零 src/main 改动。收口回归已重跑 mvn -pl company-rag-rag test -Dtest='Answer*EvaluatorTest,FaithfulnessCheckerTest'，4 类共 30 用例全部通过（0 失败/0 错误/0 跳过），BUILD SUCCESS，未跑全量。本地 HEAD=43dbb3c，gitee 与 github 两端 ls-remote 实测远端 HEAD 均为 43dbb3c，与本地一致。本记录仅为 Git Push 证据，不构成发布/部署证据。未跟踪项 data/（运行期上传占位目录）未纳入提交。
