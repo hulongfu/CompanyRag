@@ -1308,3 +1308,24 @@ $ git rev-parse HEAD
 - remote_head_check_command: git ls-remote gitee feat/answer-evaluator; git ls-remote origin feat/answer-evaluator
 - remote_head:            4b4da18b8235550938a60cd153685e6585a3d8e0（gitee）/ 4b4da18b8235550938a60cd153685e6585a3d8e0（origin/github），两端均与本地 HEAD 一致
 - result:                推送证据完整：本地 HEAD=4b4da18（工作区除运行期目录 data/ 外干净），gitee 与 github 两端 ls-remote 实测远端 HEAD 均为 4b4da18，与本地一致。改动相关 scoped 单测重跑全绿：AggregatedToolCallbackProviderTenantTest 4/4（BUILD SUCCESS）+ StreamingAgentExecutorStreamTest 12/12 + StreamingAgentExecutorTest 6/6（BUILD SUCCESS），共 22 例，未跑全量。本记录仅为 Git Push 证据，不构成发布/部署证据。未跟踪项 data/（运行期上传占位目录）未纳入提交。
+
+### Git Push #20
+
+- record_no:              20
+- push_time:              2026-10-05T09:05:00+08:00
+- commit_type:            Task
+- task_id:                0000
+- task_name:              README 补充 Agent 流式与轨迹章节
+- commit_hash:            f4f67373d87f0d54afee9f22a35900cd584d3b5d
+- branch:                 feat/answer-evaluator
+- remote:                 gitee + origin(github)
+- staged_files:
+  - README.md（修改，+12 行，纯文档）
+- commit_message:         docs(readme): 补充 Agent 流式输出与执行轨迹章节（Stream & Trace）
+- commit_command:         git add README.md && git commit -m "docs(readme): 补充 Agent 流式输出与执行轨迹章节（Stream & Trace）"
+- commit_exit_code:       0
+- push_command:           git push gitee feat/answer-evaluator; git push origin feat/answer-evaluator
+- push_exit_code:         gitee=0（924ab66..f4f6737）；github(origin)=0（924ab66..f4f6737）
+- remote_head_check_command: git ls-remote gitee feat/answer-evaluator; git ls-remote origin feat/answer-evaluator
+- remote_head:            f4f67373d87f0d54afee9f22a35900cd584d3b5d（gitee）/ f4f67373d87f0d54afee9f22a35900cd584d3b5d（origin/github），两端均与本地 HEAD 一致
+- result:                推送证据完整：本次仅为 README.md 文档更新（新增「Agent 流式输出与执行轨迹（Stream & Trace）」章节，无代码/测试变更，无需构建与 E2E 验证），本地 HEAD=f4f6737，gitee 与 github 两端 ls-remote 实测一致。本记录仅为 Git Push 证据，不构成发布/部署证据。未跟踪项 data/（运行期上传占位目录）未纳入提交。
