@@ -1282,3 +1282,29 @@ $ git rev-parse HEAD
 - remote_head_check_command: git ls-remote gitee feat/answer-evaluator; git ls-remote origin feat/answer-evaluator
 - remote_head:            fadb581cdbfb13a9721c05f8435e18f2a61df8ab（gitee，ls-remote 实测与本地 HEAD 一致）/ github 推送命令 exit=0 且本地 refs/remotes/origin/feat/answer-evaluator 已更新为 fadb581，但推送后 ls-remote 复核因 github.com:443 连接超时/重置未能取回远端值
 - result:                修复 SSE 流式执行轨迹三处缺陷：1) NodeOutputMapper 的 AGENT_TOOL_FINISHED 工具名恒为空串（ReactAgent 工具节点名恰等于 RunnableConfig.AGENT_TOOL_NAME 常量、无后缀，substring 得空），改为优先取 ToolResponseMessage.getResponses().name()，node 名截取退化为兜底且空串整帧跳过；2) 框架不发「工具开始」帧，改由 AGENT_MODEL_FINISHED 帧的 AssistantMessage.getToolCalls() 补发 TOOL_START（该轮 chunk() 是整轮全文，绝不放行以免重发答案）；3) durationMs 由 StreamingAgentExecutor 池任务内局部 Map<String, Deque<Long>> 做 FIFO 配对计时补全（同名工具并行调用不可用单值 Map，真机实测会丢耗时；跨帧状态不得放无状态单例 mapper 的实例字段）。另 application.yml stream.enabled=false→true、idle-timeout-seconds 60→180（真机 6 轮工具任务撞过 60s 被降级为 ERROR）。前端 index.html 接入 POST /api/chat/stream（fetch + getReader，支持 Authorization/X-Tenant-Id 头）、工具轨迹卡片渲染、DONE 后服务端断连不再误报网络错误。scoped 单测 29/29 绿（NodeOutputMapperTest 17 + StreamingAgentExecutorStreamTest 12，BUILD SUCCESS）；前端 SSE 解析自检 exit=0（含 DONE 后断连回归、真实 fetch 分包 E2E）；真机 curl 强制工具调用提问得 TOOL_START:4 / TOOL_END:4（工具名与 durationMs 齐全）/ ANSWER_DELTA:129 / DONE:1，落库 savedRowId=112；浏览器真机渲染「🔧 searchKnowledgeBase 已完成（2271ms）」等 19 条轨迹、无残留执行中、无错误、反馈按钮可用。gitee 已推送且远端 HEAD 与本地一致；github 推送成功但 ls-remote 复核受网络限制未完成。未跟踪项 BOOT-INF/（检查 jar 内容时误留垃圾，删除受策略拦截待人工清理）与 data/（运行期上传占位目录）未纳入本次提交。
+
+### Git Push #19
+
+- record_no:              19
+- push_time:              2026-10-05T08:28:25+08:00
+- commit_type:            BugFix
+- task_id:                0000
+- task_name:              租户快照跨线程传播修复
+- commit_hash:            4b4da18b8235550938a60cd153685e6585a3d8e0
+- branch:                 feat/answer-evaluator
+- remote:                 gitee + origin(github)
+- staged_files:
+  - company-rag-agent/src/main/java/com/company/rag/agent/executor/StreamingAgentExecutor.java（修改）
+  - company-rag-agent/src/test/java/com/company/rag/agent/executor/StreamingAgentExecutorStreamTest.java（修改）
+  - company-rag-agent/src/test/java/com/company/rag/agent/executor/StreamingAgentExecutorTest.java（修改）
+  - company-rag-rag/src/main/java/com/company/rag/rag/config/AggregatedToolCallbackProvider.java（修改）
+  - company-rag-rag/src/test/java/com/company/rag/rag/config/AggregatedToolCallbackProviderTenantTest.java（新建）
+  - company-rag-tenant/src/main/java/com/company/rag/tenant/context/TenantContextSnapshot.java（修改）
+- commit_message:         fix(tenant): 租户快照经 RunnableConfig metadata 传播到 graph 工具线程
+- commit_command:         已存在提交（4b4da18，本次仅复核提交/推送状态，未新建提交）
+- commit_exit_code:       0（既有提交，无需重新 commit）
+- push_command:           git push gitee feat/answer-evaluator; git push origin feat/answer-evaluator
+- push_exit_code:         gitee=0（e488b74..4b4da18）；github(origin)=0（fadb581..4b4da18，首次因 github.com:443 连接超时失败，重试成功）
+- remote_head_check_command: git ls-remote gitee feat/answer-evaluator; git ls-remote origin feat/answer-evaluator
+- remote_head:            4b4da18b8235550938a60cd153685e6585a3d8e0（gitee）/ 4b4da18b8235550938a60cd153685e6585a3d8e0（origin/github），两端均与本地 HEAD 一致
+- result:                推送证据完整：本地 HEAD=4b4da18（工作区除运行期目录 data/ 外干净），gitee 与 github 两端 ls-remote 实测远端 HEAD 均为 4b4da18，与本地一致。改动相关 scoped 单测重跑全绿：AggregatedToolCallbackProviderTenantTest 4/4（BUILD SUCCESS）+ StreamingAgentExecutorStreamTest 12/12 + StreamingAgentExecutorTest 6/6（BUILD SUCCESS），共 22 例，未跑全量。本记录仅为 Git Push 证据，不构成发布/部署证据。未跟踪项 data/（运行期上传占位目录）未纳入提交。
