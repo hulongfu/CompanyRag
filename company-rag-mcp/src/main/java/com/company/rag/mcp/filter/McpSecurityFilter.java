@@ -49,8 +49,9 @@ public class McpSecurityFilter extends OncePerRequestFilter {
         
         String path = request.getRequestURI();
         
-        // 仅拦截 MCP 端点
-        if (!path.startsWith("/mcp")) {
+        // 仅拦截 MCP 协议端点（/mcp 及 /mcp/**），
+        // 注意不能误拦截 /mcp-status 等管理页面路由
+        if (!(path.equals("/mcp") || path.startsWith("/mcp/"))) {
             filterChain.doFilter(request, response);
             return;
         }
