@@ -1374,3 +1374,25 @@ $ git rev-parse HEAD
 - remote_head_check_command: git ls-remote gitee main; git ls-remote origin main
 - remote_head:            bc6ea5444fc8a58694d666bec8e60e551110a149（gitee，与本地 main 一致）/ github(origin) 无法访问（连接超时，未能核验）
 - result:                推送证据部分完整：feat/answer-evaluator 已合并到本地 main（合并提交 bc6ea54，无冲突），合并后收口回归 mvn -pl company-rag-rag test -Dtest='Answer*EvaluatorTest,FaithfulnessCheckerTest' 4 类共 30 用例全部通过（0 失败/0 错误/0 跳过），BUILD SUCCESS，未跑全量。gitee 端 main 已推送成功且 ls-remote 实测与本地一致。github(origin) main 因网络无法连接（github.com:443 超时）推送失败，尚未同步；本地 feat/answer-evaluator 分支因 github main 未同步而保留，待网络恢复后再推送 github main 并清理分支。本记录仅为 Git Push 证据，不构成发布/部署证据。未跟踪项 data/（运行期上传占位目录）未纳入提交。
+
+### Git Push #23
+
+- record_no:              23
+- push_time:              2026-10-07T09:30:00+08:00
+- commit_type:            BugFix
+- task_id:                0000
+- task_name:              修复mcp-status页面
+- commit_hash:            5c45a32fbc7f84e3b56dc75e5bbc284c766a3dff
+- branch:                 main
+- remote:                 gitee + origin(github)
+- staged_files:
+    - company-rag-mcp/src/main/java/com/company/rag/mcp/filter/McpSecurityFilter.java
+    - company-rag-web/src/main/resources/templates/mcp-status.html
+- commit_message:         BugFix:0000_修复mcp-status页面：fix mcp-status 401 filter and back button
+- commit_command:         git commit -m "BugFix:0000_修复mcp-status页面：fix mcp-status 401 filter and back button"
+- commit_exit_code:       0（2 files changed, 4 insertions(+), 3 deletions(-)）
+- push_command:           git push gitee main; git push origin main
+- push_exit_code:         gitee=0（47d635e..5c45a32）；github(origin)=0（47d635e..5c45a32）
+- remote_head_check_command: git ls-remote gitee main; git ls-remote origin main
+- remote_head:            5c45a32fbc7f84e3b56dc75e5bbc284c766a3dff（gitee，与本地 main 一致）/ 5c45a32fbc7f84e3b56dc75e5bbc284c766a3dff（origin/github，与本地 main 一致），两端均与本地 HEAD 一致
+- result:                推送证据完整：本次修复 McpSecurityFilter 用 /mcp 前缀误拦截管理页面 /mcp-status 导致 401（收紧为仅匹配 /mcp 与 /mcp/**），并将 mcp-status 页面返回按钮由「返回管理后台」改为「返回首页」。gitee 与 github(origin) 两端 main 均推送成功，ls-remote 实测远端 HEAD 均为 5c45a32，与本地一致。本次为静态页面与过滤器逻辑修复，未涉及行为性编译验证之外的测试（此前批次 E2E 已验证通过）。本记录仅为 Git Push 证据，不构成发布/部署证据。未跟踪项 data/（运行期上传占位目录）未纳入提交。
